@@ -106,9 +106,6 @@ export default function StockMovementsPage() {
     items: products,
   } = useProducts()
 
-  const [q, setQ] =
-    useState('')
-
   const [
     typeFilter,
     setTypeFilter,
@@ -179,11 +176,6 @@ export default function StockMovementsPage() {
 
   const filtered =
     useMemo(() => {
-      const search =
-        q
-          .trim()
-          .toLowerCase()
-
       const fromTime =
         dateFrom
           ? new Date(
@@ -251,35 +243,7 @@ export default function StockMovementsPage() {
               return false
             }
 
-            if (search) {
-              const haystack =
-                [
-                  movement.productName,
-                  movement.internalRef,
-                  movement.fromLocation,
-                  movement.toLocation,
-                  movement.referenceId,
-                  movement.referenceType,
-                  movement.note,
-                  movement.user,
-                  movement.lotNumber,
-                  movement.expiry,
-                  movementLabels[
-                    movement.type
-                  ],
-                ]
-                  .filter(Boolean)
-                  .join(' ')
-                  .toLowerCase()
 
-              if (
-                !haystack.includes(
-                  search
-                )
-              ) {
-                return false
-              }
-            }
 
             return true
           }
@@ -295,7 +259,6 @@ export default function StockMovementsPage() {
         )
     }, [
       movements,
-      q,
       typeFilter,
       productFilter,
       locationFilter,
@@ -335,7 +298,6 @@ export default function StockMovementsPage() {
     )
 
   const resetFilters = () => {
-    setQ('')
     setTypeFilter('Tous')
     setProductFilter(
       'Tous'
@@ -484,27 +446,19 @@ export default function StockMovementsPage() {
     >
       <div className="mvStats">
         <Card>
-          <div className="mvStatTitle">
-            Mouvements affichés
-          </div>
-          <div className="mvStatNumber">
-            {filtered.length}
-          </div>
+          <div className="mvStatTitle">Mouvements affichés</div>
+          <div className="mvStatNumber">{filtered.length}</div>
         </Card>
 
         <Card>
-          <div className="mvStatTitle">
-            Entrées
-          </div>
+          <div className="mvStatTitle">Entrées</div>
           <div className="mvStatNumber">
             +{totalEntries.toLocaleString('fr-FR')}
           </div>
         </Card>
 
         <Card>
-          <div className="mvStatTitle">
-            Sorties
-          </div>
+          <div className="mvStatTitle">Sorties</div>
           <div className="mvStatNumber">
             -{totalOutputs.toLocaleString('fr-FR')}
           </div>
@@ -512,19 +466,7 @@ export default function StockMovementsPage() {
       </div>
 
       <div className="mvFilterCard">
-        <div className="mvFilterGrid">
-          <div className="mvField">
-            <label>Recherche</label>
-            <input
-              type="text"
-              value={q}
-              onChange={(e) =>
-                setQ(e.target.value)
-              }
-              placeholder="Rechercher..."
-            />
-          </div>
-
+        <div className="mvFilterGridTop">
           <div className="mvField">
             <label>Mouvement</label>
             <select
@@ -535,18 +477,10 @@ export default function StockMovementsPage() {
                 )
               }
             >
-              <option value="Tous">
-                Tous les mouvements
-              </option>
-
-              {Object.entries(
-                movementLabels
-              ).map(
+              <option value="Tous">Tous les mouvements</option>
+              {Object.entries(movementLabels).map(
                 ([value, label]) => (
-                  <option
-                    key={value}
-                    value={value}
-                  >
+                  <option key={value} value={value}>
                     {label}
                   </option>
                 )
@@ -559,32 +493,22 @@ export default function StockMovementsPage() {
             <select
               value={productFilter}
               onChange={(e) =>
-                setProductFilter(
-                  e.target.value
-                )
+                setProductFilter(e.target.value)
               }
             >
-              <option value="Tous">
-                Tous les produits
-              </option>
-
+              <option value="Tous">Tous les produits</option>
               {[...products]
                 .sort((a, b) =>
-                  a.name.localeCompare(
-                    b.name,
-                    'fr'
-                  )
+                  a.name.localeCompare(b.name, 'fr')
                 )
-                .map(
-                  (product) => (
-                    <option
-                      key={product.id}
-                      value={product.id}
-                    >
-                      {product.name}
-                    </option>
-                  )
-                )}
+                .map((product) => (
+                  <option
+                    key={product.id}
+                    value={product.id}
+                  >
+                    {product.name}
+                  </option>
+                ))}
             </select>
           </div>
 
@@ -593,37 +517,30 @@ export default function StockMovementsPage() {
             <select
               value={locationFilter}
               onChange={(e) =>
-                setLocationFilter(
-                  e.target.value
-                )
+                setLocationFilter(e.target.value)
               }
             >
-              <option value="Tous">
-                Tous les lieux
-              </option>
-
-              {locations.map(
-                (location) => (
-                  <option
-                    key={location}
-                    value={location}
-                  >
-                    {location}
-                  </option>
-                )
-              )}
+              <option value="Tous">Tous les lieux</option>
+              {locations.map((location) => (
+                <option
+                  key={location}
+                  value={location}
+                >
+                  {location}
+                </option>
+              ))}
             </select>
           </div>
+        </div>
 
+        <div className="mvFilterGridBottom">
           <div className="mvField">
             <label>Du</label>
             <input
               type="date"
               value={dateFrom}
               onChange={(e) =>
-                setDateFrom(
-                  e.target.value
-                )
+                setDateFrom(e.target.value)
               }
             />
           </div>
@@ -634,17 +551,12 @@ export default function StockMovementsPage() {
               type="date"
               value={dateTo}
               onChange={(e) =>
-                setDateTo(
-                  e.target.value
-                )
+                setDateTo(e.target.value)
               }
             />
           </div>
 
-          <div className="mvField mvResetField">
-            <label aria-hidden="true">
-              &nbsp;
-            </label>
+          <div className="mvReset">
             <button
               type="button"
               onClick={resetFilters}
@@ -669,130 +581,92 @@ export default function StockMovementsPage() {
               <div>Opération</div>
             </div>
 
-            {filtered.map(
-              (movement) => (
-                <div
-                  key={movement.id}
-                  className="mvRow"
-                >
-                  <div className="mvCell">
-                    <span className="mvMobileLabel">
-                      Date
-                    </span>
-                    {new Date(
-                      movement.createdAt
-                    ).toLocaleString(
-                      'fr-FR'
+            {filtered.map((movement) => (
+              <div
+                key={movement.id}
+                className="mvRow"
+              >
+                <div className="mvCell">
+                  <span className="mvMobileLabel">Date</span>
+                  {new Date(
+                    movement.createdAt
+                  ).toLocaleString('fr-FR')}
+                </div>
+
+                <div className="mvCell">
+                  <span className="mvMobileLabel">Mouvement</span>
+                  <Badge
+                    tone={getMovementTone(movement)}
+                  >
+                    {movementLabels[movement.type]}
+                  </Badge>
+                </div>
+
+                <div className="mvCell">
+                  <span className="mvMobileLabel">Référence</span>
+                  <strong>
+                    {movement.internalRef || '—'}
+                  </strong>
+                </div>
+
+                <div className="mvCell">
+                  <span className="mvMobileLabel">Produit</span>
+                  <div>
+                    <strong>{movement.productName}</strong>
+
+                    {(movement.lotNumber ||
+                      movement.expiry) && (
+                      <div className="mvSub">
+                        {movement.lotNumber
+                          ? `Lot ${movement.lotNumber}`
+                          : ''}
+
+                        {movement.lotNumber &&
+                        movement.expiry
+                          ? ' · '
+                          : ''}
+
+                        {movement.expiry
+                          ? `DLUO/DLC ${new Date(
+                              `${movement.expiry}T00:00:00`
+                            ).toLocaleDateString('fr-FR')}`
+                          : ''}
+                      </div>
                     )}
                   </div>
+                </div>
 
-                  <div className="mvCell">
-                    <span className="mvMobileLabel">
-                      Mouvement
-                    </span>
-                    <Badge
-                      tone={getMovementTone(
-                        movement
-                      )}
-                    >
-                      {
-                        movementLabels[
-                          movement.type
-                        ]
-                      }
-                    </Badge>
-                  </div>
+                <div className="mvCell">
+                  <span className="mvMobileLabel">Qté</span>
+                  <strong>
+                    {formatQuantity(movement.quantity)}
+                  </strong>
+                </div>
 
-                  <div className="mvCell">
-                    <span className="mvMobileLabel">
-                      Référence
-                    </span>
-                    <strong>
-                      {movement.internalRef ||
-                        '—'}
-                    </strong>
-                  </div>
+                <div className="mvCell">
+                  <span className="mvMobileLabel">Source</span>
+                  {movement.fromLocation || '—'}
+                </div>
 
-                  <div className="mvCell">
-                    <span className="mvMobileLabel">
-                      Produit
-                    </span>
+                <div className="mvCell">
+                  <span className="mvMobileLabel">Destination</span>
+                  {movement.toLocation || '—'}
+                </div>
 
-                    <div>
-                      <strong>
-                        {movement.productName}
-                      </strong>
+                <div className="mvCell">
+                  <span className="mvMobileLabel">Opération</span>
+                  <div>
+                    {movement.referenceId || '—'}
 
-                      {(movement.lotNumber ||
-                        movement.expiry) && (
-                        <div className="mvSub">
-                          {movement.lotNumber
-                            ? `Lot ${movement.lotNumber}`
-                            : ''}
-
-                          {movement.lotNumber &&
-                          movement.expiry
-                            ? ' · '
-                            : ''}
-
-                          {movement.expiry
-                            ? `DLUO/DLC ${new Date(
-                                `${movement.expiry}T00:00:00`
-                              ).toLocaleDateString(
-                                'fr-FR'
-                              )}`
-                            : ''}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="mvCell">
-                    <span className="mvMobileLabel">
-                      Qté
-                    </span>
-                    <strong>
-                      {formatQuantity(
-                        movement.quantity
-                      )}
-                    </strong>
-                  </div>
-
-                  <div className="mvCell">
-                    <span className="mvMobileLabel">
-                      Source
-                    </span>
-                    {movement.fromLocation ||
-                      '—'}
-                  </div>
-
-                  <div className="mvCell">
-                    <span className="mvMobileLabel">
-                      Destination
-                    </span>
-                    {movement.toLocation ||
-                      '—'}
-                  </div>
-
-                  <div className="mvCell">
-                    <span className="mvMobileLabel">
-                      Opération
-                    </span>
-
-                    <div>
-                      {movement.referenceId ||
-                        '—'}
-
-                      {movement.note && (
-                        <div className="mvSub">
-                          {movement.note}
-                        </div>
-                      )}
-                    </div>
+                    {movement.note && (
+                      <div className="mvSub">
+                        {movement.note}
+                      </div>
+                    )}
                   </div>
                 </div>
-              )
-            )}
+              </div>
+            ))}
 
             {filtered.length === 0 && (
               <div className="mvEmpty">
@@ -806,8 +680,7 @@ export default function StockMovementsPage() {
       <style jsx global>{`
         .mvStats {
           display: grid;
-          grid-template-columns:
-            repeat(3, minmax(0, 1fr));
+          grid-template-columns: repeat(3, minmax(0, 1fr));
           gap: 14px;
           margin-bottom: 16px;
         }
@@ -829,18 +702,27 @@ export default function StockMovementsPage() {
         .mvFilterCard {
           width: 100%;
           margin: 0 0 16px;
-          padding: 22px;
+          padding: 18px;
           border: 1px solid #e5e9f0;
-          border-radius: 18px;
+          border-radius: 16px;
           background: #fff;
+          overflow: hidden;
         }
 
-        .mvFilterGrid {
+        .mvFilterGridTop {
           display: grid;
           grid-template-columns:
-            repeat(4, minmax(0, 1fr));
-          gap: 16px;
+            repeat(3, minmax(0, 1fr));
+          gap: 14px;
           align-items: end;
+        }
+
+        .mvFilterGridBottom {
+          display: grid;
+          grid-template-columns: 220px 220px 160px;
+          gap: 14px;
+          align-items: end;
+          margin-top: 14px;
         }
 
         .mvField {
@@ -848,59 +730,76 @@ export default function StockMovementsPage() {
           width: 100%;
           display: flex;
           flex-direction: column;
-          gap: 7px;
+          gap: 6px;
         }
 
         .mvField label {
           display: block;
+          min-height: 16px;
           margin: 0;
           color: #667085;
-          font-size: 12px;
-          line-height: 1;
-          font-weight: 700;
+          font-size: 11px;
+          line-height: 16px;
+          font-weight: 800;
         }
 
         .mvField input,
-        .mvField select,
-        .mvField button {
+        .mvField select {
           width: 100% !important;
           max-width: 100% !important;
           min-width: 0 !important;
-          height: 50px !important;
-          min-height: 50px !important;
+          height: 44px !important;
+          min-height: 44px !important;
+          max-height: 44px !important;
           margin: 0 !important;
-          padding: 0 14px !important;
-          box-sizing: border-box !important;
-          border: 1px solid #dfe3e8 !important;
-          border-radius: 12px !important;
+          padding: 0 12px !important;
+          border: 1px solid #d8dee8 !important;
+          border-radius: 10px !important;
           background: #fff !important;
           color: #101828 !important;
           font-family: inherit !important;
-          font-size: 15px !important;
-          line-height: normal !important;
+          font-size: 13px !important;
+          line-height: 44px !important;
           box-shadow: none !important;
           outline: none !important;
         }
 
         .mvField select {
-          cursor: pointer;
+          padding-right: 32px !important;
+        }
+
+        .mvField input[type="date"] {
+          line-height: normal !important;
         }
 
         .mvField input:focus,
         .mvField select:focus {
           border-color: #98a2b3 !important;
-          box-shadow:
-            0 0 0 3px
-            rgba(152,162,179,.12) !important;
+          box-shadow: 0 0 0 3px rgba(152,162,179,.12) !important;
         }
 
-        .mvResetField button {
-          cursor: pointer;
+        .mvReset {
+          display: flex;
+          align-items: flex-end;
+        }
+
+        .mvReset button {
+          width: 160px !important;
+          min-width: 160px !important;
+          height: 44px !important;
+          min-height: 44px !important;
+          margin: 0 !important;
+          padding: 0 16px !important;
+          border: 1px solid #d8dee8 !important;
+          border-radius: 10px !important;
+          background: #fff !important;
+          color: #344054 !important;
+          font-family: inherit !important;
+          font-size: 13px !important;
           font-weight: 800 !important;
-        }
-
-        .mvResetField button:hover {
-          background: #f8fafc !important;
+          line-height: 44px !important;
+          white-space: nowrap !important;
+          cursor: pointer;
         }
 
         .mvTableScroll {
@@ -967,17 +866,21 @@ export default function StockMovementsPage() {
           font-size: 14px;
         }
 
-        @media (max-width: 1200px) {
-          .mvFilterGrid {
-            grid-template-columns:
-              repeat(3, minmax(0, 1fr));
+        @media (max-width: 1100px) {
+          .mvFilterGridTop {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
           }
-        }
 
-        @media (max-width: 900px) {
-          .mvFilterGrid {
-            grid-template-columns:
-              repeat(2, minmax(0, 1fr));
+          .mvFilterGridBottom {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .mvReset {
+            grid-column: 1 / -1;
+          }
+
+          .mvReset button {
+            width: 100% !important;
           }
         }
 
@@ -991,17 +894,29 @@ export default function StockMovementsPage() {
             padding: 14px;
           }
 
-          .mvFilterGrid {
+          .mvFilterGridTop,
+          .mvFilterGridBottom {
             grid-template-columns: 1fr;
-            gap: 12px;
+            gap: 10px;
+          }
+
+          .mvFilterGridBottom {
+            margin-top: 10px;
+          }
+
+          .mvReset {
+            grid-column: auto;
           }
 
           .mvField input,
           .mvField select,
-          .mvField button {
+          .mvReset button {
+            width: 100% !important;
+            min-width: 0 !important;
             height: 48px !important;
             min-height: 48px !important;
             font-size: 16px !important;
+            line-height: normal !important;
           }
 
           .mvTableScroll {
@@ -1019,8 +934,7 @@ export default function StockMovementsPage() {
 
           .mvRow {
             display: grid;
-            grid-template-columns:
-              repeat(2, minmax(0, 1fr));
+            grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 12px;
             margin-bottom: 12px;
             padding: 14px;
