@@ -1,0 +1,3184 @@
+'use client'
+
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { Page, Card, Badge } from '@/components/ui'
+import { useProducts, useSuppliers, useMasterData } from '@/lib/store'
+import { Product, Supplier, MasterDataItem } from '@/lib/types'
+
+const categoryOptions = {
+  Alcools: [
+    'Gin',
+    'Vodka',
+    'Rhum industriel',
+    'Rhum agricole',
+    'Tequila',
+    'Mezcal',
+    'Whisky écossais',
+    'Whisky japonais',
+    'Whisky américain',
+    'Whisky divers',
+    'Cognac',
+    'Armagnac',
+    'Liqueur',
+    'Divers',
+  ],
+  Vins: ['Vin blanc', 'Vin rouge', 'Vin rosé', 'Divers'],
+  Champagnes: ['Champagne', 'Divers'],
+  Bières: ['Bière', 'Cidre', 'Divers'],
+  'Soft Drinks': ['Sodas', 'Jus de fruits', 'Sirop', 'Divers'],
+} as const
+
+const packagingOptions = [
+  '20 cl',
+  '25 cl',
+  '33 cl',
+  '50 cl',
+  '70 cl',
+  '75 cl',
+  '1 L',
+  '1,5 L',
+  '3 L',
+  '5 L',
+  '6 bouteilles',
+  '12 bouteilles',
+  '24 unités',
+  'Carton',
+  'Caisse',
+  'Fût',
+  'Bag-in-box',
+  'Autre',
+]
+
+const unitOptions = [
+  'unité',
+  'bouteille',
+  'canette',
+  'carton',
+  'caisse',
+  'fût',
+  'litre',
+  'kg',
+  'pièce',
+]
+
+const locationOptions = [
+  'Container',
+  'Extension Bar',
+  'Salon Bar',
+  'Poker',
+  'Salle de Jeux',
+  'Fitness',
+  'Tennis',
+  'Nautique',
+  'Pêche',
+  'Mirador',
+  'Restaurant',
+  'Cave à jus',
+  'Cave à vin',
+  'Cafeteria',
+  'Cuisine',
+  'VDM',
+  'Housekeeping',
+  'Audio',
+  'Business Center',
+  'Direction',
+  'Réception',
+  'Lune Rouge',
+  'Fare Intendant',
+  'Bungalow 0',
+  'Bungalow Infini',
+  'Bungalow 1',
+  'Bungalow 2',
+  'Bungalow 3',
+  'Bungalow 4',
+  'Bungalow 5',
+  'Bungalow 6',
+  'Bungalow 7',
+  'Bungalow 8',
+  'Bungalow 9',
+  'Bungalow 10',
+  'Bungalow 11',
+  'Bungalow 12',
+  'Bungalow 14',
+  'Bungalow 15',
+  'Villa 16 - Queen',
+  'Villa 16 - King',
+  'Villa 16 - Salon',
+  'Villa 17 - Queen',
+  'Villa 17 - King',
+  'Villa 17 - Salon',
+]
+
+
+const PRODUCT_REF_COUNTER_KEY = 'nukustock_product_ref_counters_v1'
+
+function cleanRefPart(value: string) {
+  const cleaned = value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toUpperCase()
+
+  if (!cleaned) return 'XXX'
+
+  return cleaned.slice(0, 3).padEnd(3, 'X')
+}
+
+function getRefPrefix(category: string, subcategory: string) {
+  return `${cleanRefPart(category)}-${cleanRefPart(subcategory)}`
+}
+
+function getStoredCounters(): Record<string, number> {
+  if (typeof window === 'undefined') return {}
+
+  try {
+    const raw = localStorage.getItem(PRODUCT_REF_COUNTER_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
+
+function getHighestExistingRefNumber(
+  prefix: string,
+  products: Product[]
+) {
+  const matcher = new RegExp(
+    `^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-(\\d+)$`
+  )
+
+  return products.reduce((max, product) => {
+    const match = product.internalRef?.match(matcher)
+
+    if (!match) return max
+
+    const value = Number(match[1])
+
+    return Number.isFinite(value)
+      ? Math.max(max, value)
+      : max
+  }, 0)
+}
+
+function previewNextInternalRef(
+  category: string,
+  subcategory: string,
+  products: Product[]
+) {
+  if (!category.trim() || !subcategory.trim()) {
+    return ''
+  }
+
+  const prefix = getRefPrefix(category, subcategory)
+  const counters = getStoredCounters()
+  const stored = Number(counters[prefix] || 0)
+  const existing = getHighestExistingRefNumber(prefix, products)
+  const next = Math.max(stored, existing) + 1
+
+  return `${prefix}-${String(next).padStart(6, '0')}`
+}
+
+function allocateInternalRef(
+  category: string,
+  subcategory: string,
+  products: Product[]
+) {
+  const ref = previewNextInternalRef(
+    category,
+    subcategory,
+    products
+  )
+
+  if (!ref) return ''
+
+  const prefix = getRefPrefix(category, subcategory)
+  const number = Number(ref.split('-').pop() || 0)
+  const counters = getStoredCounters()
+
+  counters[prefix] = number
+
+  localStorage.setItem(
+    PRODUCT_REF_COUNTER_KEY,
+    JSON.stringify(counters)
+  )
+
+  return ref
+}
+
+
+function shouldRegenerateInternalRef(ref?: string) {
+  const value = (ref || '').trim()
+
+  if (!value) return true
+
+  // Ancien format NukuStock : PRO-0001, PRO-0002...
+  return /^PRO-\d+$/i.test(value)
+}
+
+function generateMissingInternalRefs(
+  products: Product[]
+) {
+  const counters = getStoredCounters()
+  const working = products.map((product) => ({
+    ...product,
+  }))
+
+  let changed = 0
+
+  // On garde d'abord les références déjà conformes
+  // pour connaître les plus grands numéros utilisés.
+  working.forEach((product) => {
+    if (
+      shouldRegenerateInternalRef(
+        product.internalRef
+      )
+    ) {
+      return
+    }
+
+    if (
+      !product.category?.trim() ||
+      !product.subcategory?.trim()
+    ) {
+      return
+    }
+
+    const prefix = getRefPrefix(
+      product.category,
+      product.subcategory
+    )
+
+    const match =
+      product.internalRef.match(
+        new RegExp(
+          `^${prefix.replace(
+            /[.*+?^${}()|[\]\\]/g,
+            '\\$&'
+          )}-(\\d+)$`
+        )
+      )
+
+    if (match) {
+      const number = Number(match[1])
+
+      if (Number.isFinite(number)) {
+        counters[prefix] = Math.max(
+          Number(
+            counters[prefix] || 0
+          ),
+          number
+        )
+      }
+    }
+  })
+
+  working.forEach((product) => {
+    if (
+      !shouldRegenerateInternalRef(
+        product.internalRef
+      )
+    ) {
+      return
+    }
+
+    if (
+      !product.category?.trim() ||
+      !product.subcategory?.trim()
+    ) {
+      return
+    }
+
+    const prefix = getRefPrefix(
+      product.category,
+      product.subcategory
+    )
+
+    const stored = Number(
+      counters[prefix] || 0
+    )
+
+    const existing =
+      getHighestExistingRefNumber(
+        prefix,
+        working
+      )
+
+    const next =
+      Math.max(
+        stored,
+        existing
+      ) + 1
+
+    product.internalRef =
+      `${prefix}-${String(next).padStart(
+        6,
+        '0'
+      )}`
+
+    counters[prefix] = next
+    changed += 1
+  })
+
+  if (
+    changed > 0 &&
+    typeof window !== 'undefined'
+  ) {
+    localStorage.setItem(
+      PRODUCT_REF_COUNTER_KEY,
+      JSON.stringify(counters)
+    )
+  }
+
+  return {
+    products: working,
+    changed,
+  }
+}
+const emptyProduct: Product = {
+  id: '',
+  internalRef: '',
+  supplierRef: '',
+  name: '',
+  photo: '',
+  category: '',
+  subcategory: '',
+  packaging: '',
+  unit: 'unité',
+  purchasePrice: 0,
+  priceUpdatedAt: new Date().toISOString().slice(0, 10),
+  mainSupplier: '',
+  minStock: 0,
+  productType: 'acheté',
+  lots: [],
+}
+
+const emptySupplier: Supplier = {
+  id: '',
+  name: '',
+  contact: '',
+  phone: '',
+  payment: '',
+  notes: '',
+  address: '',
+  contactPerson: '',
+  email: '',
+  deliveryLeadTime: '',
+  currency: 'XPF',
+  active: true,
+}
+
+type AllocationRow = {
+  id: string
+  location: string
+  quantity: number
+}
+
+type ExpiryEntry = {
+  id: string
+  lotNumber: string
+  hasExpiry: boolean
+  expiry: string
+  quantity: number
+  allocations: AllocationRow[]
+}
+
+const createAllocation = (): AllocationRow => ({
+  id: crypto.randomUUID(),
+  location: locationOptions[0] || 'Container',
+  quantity: 0,
+})
+
+const createExpiryEntry = (): ExpiryEntry => ({
+  id: crypto.randomUUID(),
+  lotNumber: '',
+  hasExpiry: true,
+  expiry: '',
+  quantity: 0,
+  allocations: [createAllocation()],
+})
+
+export default function Products() {
+  const { items, save } = useProducts()
+  const { items: suppliers, save: saveSuppliers } = useSuppliers()
+  const { items: masterData, save: saveMasterData } = useMasterData()
+
+  const [q, setQ] = useState('')
+  const [msg, setMsg] = useState('')
+  const [supplierModalOpen, setSupplierModalOpen] = useState(false)
+  const [supplierForm, setSupplierForm] = useState<Supplier>(emptySupplier)
+  const [open, setOpen] = useState(false)
+  const [form, setForm] = useState<Product>(emptyProduct)
+  const [designationFocused, setDesignationFocused] = useState(false)
+
+  const [globalQuantity, setGlobalQuantity] = useState(0)
+
+  // Option générale du produit :
+  // coché = ce produit peut avoir une DLUO / DLC
+  // décoché = aucune DLUO / DLC n'est demandée
+  const [productHasExpiry, setProductHasExpiry] =
+    useState(true)
+
+  const [expiryEntries, setExpiryEntries] = useState<ExpiryEntry[]>([
+    createExpiryEntry(),
+  ])
+
+  useEffect(() => {
+    const result =
+      generateMissingInternalRefs(items)
+
+    if (result.changed > 0) {
+      save(result.products)
+
+      setMsg(
+        `${result.changed} ancienne(s) référence(s) interne(s) convertie(s) automatiquement au nouveau format.`
+      )
+    }
+  }, []) // migration automatique une seule fois au chargement
+
+  const shown = useMemo(() => {
+    const search = q.toLowerCase().trim()
+
+    return items.filter((p) =>
+      `${p.name} ${p.internalRef} ${p.category} ${p.subcategory}`
+        .toLowerCase()
+        .includes(search)
+    )
+  }, [items, q])
+
+
+  const supplierSuggestions = useMemo(
+    () =>
+      suppliers
+        .filter((supplier) => supplier.active !== false)
+        .map((supplier) => supplier.name)
+        .sort((a, b) => a.localeCompare(b, 'fr')),
+    [suppliers]
+  )
+
+  const categoryChoices = useMemo(
+    () =>
+      [
+        ...new Set([
+          ...Object.keys(categoryOptions),
+          ...getMasterItems('category').map((item) => item.name),
+          ...items.map((p) => p.category).filter(Boolean),
+          form.category,
+        ].filter(Boolean)),
+      ].sort((a, b) => a.localeCompare(b, 'fr')),
+    [items, form.category]
+  )
+
+  const subcategoryChoices = useMemo(() => {
+    const predefined =
+      form.category && form.category in categoryOptions
+        ? [...categoryOptions[form.category as keyof typeof categoryOptions]]
+        : []
+
+    const categoryId =
+      form.categoryId || resolveMasterId('category', form.category)
+
+    const existing = [
+      ...items
+        .filter((p) => !form.category || p.category === form.category)
+        .map((p) => p.subcategory)
+        .filter(Boolean),
+      ...getMasterItems('subcategory')
+        .filter((item) => !categoryId || item.parentId === categoryId)
+        .map((item) => item.name),
+    ]
+
+    return [
+      ...new Set(
+        [...predefined, ...existing, form.subcategory].filter(Boolean)
+      ),
+    ].sort((a, b) => a.localeCompare(b, 'fr'))
+  }, [items, form.category, form.subcategory])
+
+  const packagingChoices = useMemo(
+    () =>
+      [
+        ...new Set([
+          ...packagingOptions,
+          ...getMasterItems('packaging').map((item) => item.name),
+          ...items.map((p) => p.packaging).filter(Boolean),
+          form.packaging,
+        ].filter(Boolean)),
+      ].sort((a, b) => a.localeCompare(b, 'fr')),
+    [items, form.packaging]
+  )
+
+  const unitChoices = useMemo(
+    () =>
+      [
+        ...new Set([
+          ...unitOptions,
+          ...getMasterItems('unit').map((item) => item.name),
+          ...items.map((p) => p.unit).filter(Boolean),
+          form.unit,
+        ].filter(Boolean)),
+      ].sort((a, b) => a.localeCompare(b, 'fr')),
+    [items, form.unit]
+  )
+
+  const askNewValue = (label: string) => {
+    const value = window.prompt(`Ajouter ${label}`)?.trim()
+    return value || ''
+  }
+
+  function getMasterItems(type: MasterDataItem['type']) {
+    return masterData.filter(
+      (item) => item.type === type && item.active !== false
+    )
+  }
+
+  const upsertMasterItem = (
+    type: MasterDataItem['type'],
+    name: string,
+    parentId?: string
+  ) => {
+    const cleanName = name.trim()
+    if (!cleanName) return null
+
+    const existing = masterData.find(
+      (item) =>
+        item.type === type &&
+        item.name.trim().toLowerCase() === cleanName.toLowerCase() &&
+        (parentId ? item.parentId === parentId : true)
+    )
+
+    if (existing) return existing
+
+    const created: MasterDataItem = {
+      id: crypto.randomUUID(),
+      type,
+      name: cleanName,
+      parentId,
+      active: true,
+    }
+
+    saveMasterData([...masterData, created])
+    return created
+  }
+
+  function resolveMasterId(
+    type: MasterDataItem['type'],
+    name: string,
+    parentId?: string
+  ) {
+    return (
+      masterData.find(
+        (item) =>
+          item.type === type &&
+          item.name.trim().toLowerCase() === name.trim().toLowerCase() &&
+          (parentId ? item.parentId === parentId : true)
+      )?.id || ''
+    )
+  }
+
+  const saveSupplierFromModal = () => {
+    if (!supplierForm.name.trim()) {
+      alert('Le nom du fournisseur est obligatoire.')
+      return
+    }
+
+    const cleanEmail = (supplierForm.email || supplierForm.contact || '').trim()
+
+    const supplier: Supplier = {
+      ...supplierForm,
+      id: supplierForm.id || crypto.randomUUID(),
+      name: supplierForm.name.trim(),
+      email: cleanEmail,
+      contact: cleanEmail,
+      currency: supplierForm.currency || 'XPF',
+      active: supplierForm.active !== false,
+    }
+
+    saveSuppliers(
+      supplierForm.id
+        ? suppliers.map((item) =>
+            item.id === supplierForm.id ? supplier : item
+          )
+        : [...suppliers, supplier]
+    )
+
+    setForm({
+      ...form,
+      mainSupplier: supplier.name,
+      mainSupplierId: supplier.id,
+    })
+    setSupplierModalOpen(false)
+    setSupplierForm(emptySupplier)
+  }
+
+  const designationSuggestions = useMemo(() => {
+    const search = form.name.trim().toLowerCase()
+
+    if (search.length < 2) return []
+
+    return [...items]
+      .filter((product) => {
+        const haystack =
+          `${product.name} ${product.packaging} ${product.internalRef}`
+            .toLowerCase()
+
+        return haystack.includes(search)
+      })
+      .sort((a, b) => {
+        const aName = a.name.toLowerCase()
+        const bName = b.name.toLowerCase()
+
+        const aStarts = aName.startsWith(search)
+        const bStarts = bName.startsWith(search)
+
+        if (aStarts && !bStarts) return -1
+        if (!aStarts && bStarts) return 1
+
+        return a.name.localeCompare(b.name, 'fr')
+      })
+      .slice(0, 8)
+  }, [items, form.name])
+
+  const subcategories = subcategoryChoices
+
+  const totalExpiryQuantity = expiryEntries.reduce(
+    (sum, entry) => sum + Math.max(0, Number(entry.quantity) || 0),
+    0
+  )
+
+  const remainingGlobalQuantity = globalQuantity - totalExpiryQuantity
+
+  const getAllocatedQuantity = (entry: ExpiryEntry) =>
+    entry.allocations.reduce(
+      (sum, allocation) =>
+        sum + Math.max(0, Number(allocation.quantity) || 0),
+      0
+    )
+
+  const getExpiryPriority = (expiry: string) => {
+    if (!expiry) return 'Aucune date'
+
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    const expiryDate = new Date(`${expiry}T00:00:00`)
+    expiryDate.setHours(0, 0, 0, 0)
+
+    const days =
+      (expiryDate.getTime() - today.getTime()) /
+      (1000 * 60 * 60 * 24)
+
+    if (days < 0) return 'Périmé'
+    if (days < 30) return "Moins d'un mois"
+    if (days < 90) return 'De 1 à 3 mois'
+    if (days < 180) return 'De 3 à 6 mois'
+    if (days < 365) return 'De 6 mois à 1 an'
+
+    return "+ d'un an"
+  }
+
+  const getPriorityTone = (
+    expiry: string
+  ): 'danger' | 'warn' | 'good' | 'neutral' | 'info' => {
+    const priority = getExpiryPriority(expiry)
+
+    if (priority === 'Périmé') return 'danger'
+    if (priority === "Moins d'un mois") return 'danger'
+    if (priority === 'De 1 à 3 mois') return 'warn'
+    if (priority === 'De 3 à 6 mois') return 'warn'
+    if (priority === 'De 6 mois à 1 an') return 'info'
+    if (priority === "+ d'un an") return 'good'
+
+    return 'neutral'
+  }
+
+  const generateAutomaticLotNumber = (
+    existingLots: number,
+    entryIndex: number
+  ) => {
+    const date = new Date()
+      .toISOString()
+      .slice(0, 10)
+      .replaceAll('-', '')
+
+    return `AUTO-${date}-${String(existingLots + entryIndex + 1).padStart(
+      3,
+      '0'
+    )}`
+  }
+
+  const resetStockEntry = () => {
+    setGlobalQuantity(0)
+    setExpiryEntries([createExpiryEntry()])
+  }
+
+  const openNewProduct = () => {
+    setMsg('')
+    setProductHasExpiry(true)
+    setForm({
+      ...emptyProduct,
+      priceUpdatedAt: new Date().toISOString().slice(0, 10),
+    })
+    resetStockEntry()
+    setDesignationFocused(false)
+    setOpen(true)
+  }
+
+  const openEditProduct = (product: Product) => {
+    setMsg('')
+
+    setProductHasExpiry(
+      product.hasExpiry ??
+        product.lots.some(
+          (lot) => Boolean(lot.expiry)
+        )
+    )
+
+    setForm(product)
+    resetStockEntry()
+    setDesignationFocused(false)
+    setOpen(true)
+  }
+
+  const selectExistingProduct = (product: Product) => {
+    setForm({
+      ...product,
+      lots: [...product.lots],
+    })
+    resetStockEntry()
+    setDesignationFocused(false)
+  }
+
+  const addExpiryEntry = () => {
+    setExpiryEntries((current) => [...current, createExpiryEntry()])
+  }
+
+  const removeExpiryEntry = (entryId: string) => {
+    setExpiryEntries((current) =>
+      current.length <= 1
+        ? current
+        : current.filter((entry) => entry.id !== entryId)
+    )
+  }
+
+  const updateExpiryEntry = (
+    entryId: string,
+    patch: Partial<Omit<ExpiryEntry, 'id' | 'allocations'>>
+  ) => {
+    setExpiryEntries((current) =>
+      current.map((entry) =>
+        entry.id === entryId ? { ...entry, ...patch } : entry
+      )
+    )
+  }
+
+  const addAllocation = (entryId: string) => {
+    setExpiryEntries((current) =>
+      current.map((entry) =>
+        entry.id === entryId
+          ? {
+              ...entry,
+              allocations: [...entry.allocations, createAllocation()],
+            }
+          : entry
+      )
+    )
+  }
+
+  const removeAllocation = (entryId: string, allocationId: string) => {
+    setExpiryEntries((current) =>
+      current.map((entry) => {
+        if (entry.id !== entryId) return entry
+
+        return {
+          ...entry,
+          allocations:
+            entry.allocations.length <= 1
+              ? entry.allocations
+              : entry.allocations.filter(
+                  (allocation) => allocation.id !== allocationId
+                ),
+        }
+      })
+    )
+  }
+
+  const updateAllocation = (
+    entryId: string,
+    allocationId: string,
+    patch: Partial<Omit<AllocationRow, 'id'>>
+  ) => {
+    setExpiryEntries((current) =>
+      current.map((entry) => {
+        if (entry.id !== entryId) return entry
+
+        return {
+          ...entry,
+          allocations: entry.allocations.map((allocation) =>
+            allocation.id === allocationId
+              ? { ...allocation, ...patch }
+              : allocation
+          ),
+        }
+      })
+    )
+  }
+
+  const validateStockEntry = () => {
+    const hasAnyStockData =
+      globalQuantity > 0 ||
+      expiryEntries.some(
+        (entry) =>
+          entry.expiry !== '' ||
+          entry.lotNumber.trim() !== '' ||
+          entry.quantity > 0 ||
+          entry.allocations.some((allocation) => allocation.quantity > 0)
+      )
+
+    if (!hasAnyStockData) {
+      return { ok: true as const, hasStock: false as const }
+    }
+
+    if (globalQuantity <= 0) {
+      alert('La quantité globale doit être supérieure à 0.')
+      return { ok: false as const, hasStock: true as const }
+    }
+
+    if (totalExpiryQuantity !== globalQuantity) {
+      alert(
+        `La somme des quantités des lots doit être égale à la quantité globale. Global : ${globalQuantity}, affecté : ${totalExpiryQuantity}.`
+      )
+      return { ok: false as const, hasStock: true as const }
+    }
+
+    for (let index = 0; index < expiryEntries.length; index += 1) {
+      const entry = expiryEntries[index]
+      const allocated = getAllocatedQuantity(entry)
+
+      if (
+        productHasExpiry &&
+        entry.hasExpiry &&
+        !entry.expiry
+      ) {
+        alert(`Lot n°${index + 1} : renseigne une DLUO / DLC ou décoche l'option.`)
+        return { ok: false as const, hasStock: true as const }
+      }
+
+      if (entry.quantity <= 0) {
+        alert(
+          `Lot n°${index + 1} : la quantité doit être supérieure à 0.`
+        )
+        return { ok: false as const, hasStock: true as const }
+      }
+
+      if (allocated !== entry.quantity) {
+        alert(
+          `Lot n°${index + 1} : la répartition par lieux doit être égale à ${entry.quantity}. Réparti : ${allocated}.`
+        )
+        return { ok: false as const, hasStock: true as const }
+      }
+
+      if (
+        entry.allocations.some(
+          (allocation) =>
+            !allocation.location ||
+            allocation.quantity <= 0 ||
+            !Number.isFinite(allocation.quantity)
+        )
+      ) {
+        alert(
+          `Lot n°${index + 1} : chaque lieu doit avoir une quantité supérieure à 0.`
+        )
+        return { ok: false as const, hasStock: true as const }
+      }
+
+      const usedLocations = new Set<string>()
+
+      for (const allocation of entry.allocations) {
+        if (usedLocations.has(allocation.location)) {
+          alert(
+            `Lot n°${index + 1} : le lieu "${allocation.location}" est présent plusieurs fois.`
+          )
+          return { ok: false as const, hasStock: true as const }
+        }
+
+        usedLocations.add(allocation.location)
+      }
+    }
+
+    return { ok: true as const, hasStock: true as const }
+  }
+
+  const handleProductPhoto = (file?: File) => {
+    if (!file) return
+
+    if (!file.type.startsWith('image/')) {
+      alert('Sélectionne un fichier image.')
+      return
+    }
+
+    const reader = new FileReader()
+
+    reader.onload = () => {
+      const image = new Image()
+
+      image.onload = () => {
+        const maxSize = 800
+        const ratio = Math.min(
+          1,
+          maxSize / Math.max(image.width, image.height)
+        )
+
+        const width = Math.max(1, Math.round(image.width * ratio))
+        const height = Math.max(1, Math.round(image.height * ratio))
+
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+
+        const context = canvas.getContext('2d')
+
+        if (!context) {
+          alert("Impossible de traiter l'image.")
+          return
+        }
+
+        context.drawImage(image, 0, 0, width, height)
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.72)
+
+        setForm((current) => ({
+          ...current,
+          photo: dataUrl,
+        }))
+      }
+
+      image.src = String(reader.result || '')
+    }
+
+    reader.readAsDataURL(file)
+  }
+
+  const duplicateProduct = (product: Product) => {
+    const copy: Product = {
+      ...structuredClone(product),
+      id: '',
+      internalRef: '',
+      supplierRef: '',
+      name: `${product.name} - Copie`,
+      lots: [],
+      priceUpdatedAt: new Date().toISOString().slice(0, 10),
+    }
+
+    setMsg('')
+    setProductHasExpiry(
+      product.hasExpiry ??
+        product.lots.some(
+          (lot) => Boolean(lot.expiry)
+        )
+    )
+    setForm(copy)
+    resetStockEntry()
+    setDesignationFocused(false)
+    setOpen(true)
+  }
+
+  const deleteProduct = (productId: string, productName: string) => {
+    const firstConfirmation = window.confirm(
+      `Supprimer le produit « ${productName} » ?\n\nCette action supprimera également son stock actuel, ses lots, ses DLUO/DLC et sa photo.`
+    )
+
+    if (!firstConfirmation) return
+
+    const secondConfirmation = window.confirm(
+      `DERNIÈRE CONFIRMATION : « ${productName} » sera supprimé définitivement de la base Produits. Confirmer ?`
+    )
+
+    if (!secondConfirmation) return
+
+    save(items.filter((product) => product.id !== productId))
+
+    if (form.id === productId) {
+      setOpen(false)
+      setForm(emptyProduct)
+    }
+
+    setMsg(`Produit supprimé : ${productName}`)
+  }
+
+  const generateRefsForExistingProducts = () => {
+    const missing = items.filter(
+      (product) =>
+        shouldRegenerateInternalRef(
+          product.internalRef
+        ) &&
+        product.category?.trim() &&
+        product.subcategory?.trim()
+    )
+
+    if (!missing.length) {
+      setMsg(
+        'Toutes les références internes sont déjà au nouveau format.'
+      )
+      return
+    }
+
+    const confirmed = window.confirm(
+      `Générer / corriger automatiquement la référence interne de ${missing.length} produit(s) ?\n\nLes anciennes références du type PRO-0001 seront remplacées par CAT-SOU-000001.`
+    )
+
+    if (!confirmed) return
+
+    const result = generateMissingInternalRefs(items)
+
+    save(result.products)
+
+    setMsg(
+      `${result.changed} référence(s) interne(s) générée(s).`
+    )
+  }
+
+  const generatedInternalRef = form.id
+    ? form.internalRef
+    : previewNextInternalRef(
+        form.category,
+        form.subcategory,
+        items
+      )
+
+  const submit = () => {
+    if (!form.name.trim()) {
+      alert('La désignation du produit est obligatoire.')
+      return
+    }
+
+    if (!form.id && !form.category.trim()) {
+      alert(
+        'La catégorie est obligatoire pour générer la référence interne.'
+      )
+      return
+    }
+
+    if (!form.id && !form.subcategory.trim()) {
+      alert(
+        'La sous-catégorie est obligatoire pour générer la référence interne.'
+      )
+      return
+    }
+
+    if (!form.id) {
+      const duplicate = items.find(
+        (item) =>
+          item.name.trim().toLowerCase() ===
+          form.name.trim().toLowerCase()
+      )
+
+      if (duplicate) {
+        alert(
+          `Le produit "${duplicate.name}" existe déjà. Sélectionne-le dans les suggestions pour ajouter du stock sans créer de doublon.`
+        )
+        return
+      }
+    }
+
+    const validation = validateStockEntry()
+    if (!validation.ok) return
+
+    const lots = [...form.lots]
+
+    if (validation.hasStock) {
+      expiryEntries.forEach((entry, entryIndex) => {
+        const effectiveLotNumber =
+          entry.lotNumber.trim() ||
+          generateAutomaticLotNumber(lots.length, entryIndex)
+
+        entry.allocations.forEach((allocation) => {
+          const existing = lots.find(
+            (lot) =>
+              lot.lotNumber === effectiveLotNumber &&
+              lot.expiry ===
+                (productHasExpiry && entry.hasExpiry
+                  ? entry.expiry
+                  : '') &&
+              lot.location === allocation.location
+          )
+
+          if (existing) {
+            existing.quantity += allocation.quantity
+          } else {
+            lots.push({
+              id: crypto.randomUUID(),
+              lotNumber: effectiveLotNumber,
+              expiry:
+                productHasExpiry &&
+                entry.hasExpiry
+                  ? entry.expiry
+                  : '',
+              location: allocation.location,
+              quantity: allocation.quantity,
+            })
+          }
+        })
+      })
+    }
+
+    const categoryId =
+      form.categoryId ||
+      resolveMasterId('category', form.category)
+
+    const subcategoryId =
+      form.subcategoryId ||
+      resolveMasterId('subcategory', form.subcategory, categoryId || undefined)
+
+
+    const packagingId =
+      form.packagingId ||
+      resolveMasterId('packaging', form.packaging)
+
+    const unitId =
+      form.unitId ||
+      resolveMasterId('unit', form.unit)
+
+    const supplierId =
+      form.mainSupplierId ||
+      suppliers.find(
+        (supplier) =>
+          supplier.name.trim().toLowerCase() ===
+          form.mainSupplier.trim().toLowerCase()
+      )?.id ||
+      ''
+
+    const product: Product = {
+      ...form,
+      categoryId,
+      subcategoryId,
+      packagingId,
+      unitId,
+      mainSupplierId: supplierId,
+      id: form.id || crypto.randomUUID(),
+      hasExpiry: productHasExpiry,
+      internalRef: form.id
+        ? form.internalRef
+        : allocateInternalRef(
+            form.category,
+            form.subcategory,
+            items
+          ),
+      priceUpdatedAt:
+        form.priceUpdatedAt || new Date().toISOString().slice(0, 10),
+      lots,
+    }
+
+    save(
+      form.id
+        ? items.map((item) => (item.id === form.id ? product : item))
+        : [...items, product]
+    )
+
+    setMsg(
+      form.id
+        ? `Produit modifié : ${product.name}`
+        : `Produit créé : ${product.name}`
+    )
+
+    setOpen(false)
+    setForm(emptyProduct)
+    resetStockEntry()
+  }
+
+  const fieldLabelStyle: CSSProperties = {
+    display: 'block',
+    fontSize: 13,
+    fontWeight: 700,
+    marginBottom: 7,
+    color: '#dbe4f0',
+  }
+
+  const fieldWrapStyle: CSSProperties = {
+    display: 'flex',
+    flexDirection: 'column',
+  }
+
+  const sectionTitleStyle: CSSProperties = {
+    fontSize: 17,
+    fontWeight: 800,
+    marginBottom: 16,
+    color: '#ffffff',
+  }
+
+  const summaryBoxStyle: CSSProperties = {
+    padding: 14,
+    borderRadius: 12,
+    background: 'rgba(255,255,255,.05)',
+    border: '1px solid rgba(255,255,255,.08)',
+  }
+
+  return (
+    <Page
+      title="Produits"
+      subtitle="Mercuriel central, lots, DLUO/DLC et types de production"
+      action={
+        <div
+          style={{
+            display: 'flex',
+            gap: 8,
+            flexWrap: 'wrap',
+          }}
+        >
+          <button
+            className="button secondary"
+            type="button"
+            onClick={generateRefsForExistingProducts}
+          >
+            Corriger / générer les références
+          </button>
+
+          <button
+            className="button"
+            type="button"
+            onClick={openNewProduct}
+          >
+            + Ajouter
+          </button>
+        </div>
+      }
+    >
+      {msg && (
+        <div className="notice goodNotice">
+          {msg}
+        </div>
+      )}
+
+      <input
+        className="input"
+        placeholder="Rechercher un produit..."
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+      />
+
+      <Card>
+        <div style={{ overflowX: 'auto' }}>
+          <div style={{ minWidth: 1280 }}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns:
+                  '120px minmax(220px,2fr) 120px 110px 185px 210px 80px 110px 100px',
+                gap: 12,
+                alignItems: 'center',
+                fontWeight: 700,
+                paddingBottom: 12,
+              }}
+            >
+              <div>Référence</div>
+              <div>Produit</div>
+              <div>Type</div>
+              <div>Stock</div>
+              <div>DLUO / DLC</div>
+              <div>Lieux de stockage</div>
+              <div>Mini</div>
+              <div>Prix</div>
+              <div></div>
+            </div>
+
+            {shown.map((p) => {
+              const qty = p.lots.reduce(
+                (total, lot) => total + lot.quantity,
+                0
+              )
+
+              const expiryMap = new Map<string, number>()
+
+              p.lots.forEach((lot) => {
+                if (!lot.expiry) return
+
+                expiryMap.set(
+                  lot.expiry,
+                  (expiryMap.get(lot.expiry) || 0) + lot.quantity
+                )
+              })
+
+              const sortedExpiries = [...expiryMap.entries()].sort(
+                ([dateA], [dateB]) =>
+                  new Date(`${dateA}T00:00:00`).getTime() -
+                  new Date(`${dateB}T00:00:00`).getTime()
+              )
+
+              const visibleExpiries = sortedExpiries.slice(0, 3)
+              const remainingExpiryCount =
+                sortedExpiries.length - visibleExpiries.length
+
+              const locationMap = new Map<string, number>()
+
+              p.lots.forEach((lot) => {
+                if (!lot.location || lot.quantity <= 0) return
+
+                locationMap.set(
+                  lot.location,
+                  (locationMap.get(lot.location) || 0) + lot.quantity
+                )
+              })
+
+              const sortedLocations = [...locationMap.entries()].sort(
+                ([locationA], [locationB]) =>
+                  locationA.localeCompare(locationB, 'fr')
+              )
+
+              const visibleLocations = sortedLocations.slice(0, 4)
+              const remainingLocationCount =
+                sortedLocations.length - visibleLocations.length
+
+              return (
+                <div
+                  key={p.id}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns:
+                      '120px minmax(220px,2fr) 120px 110px 185px 210px 80px 110px 100px',
+                    gap: 12,
+                    alignItems: 'center',
+                    padding: '14px 0',
+                    borderTop: '1px solid rgba(255,255,255,.08)',
+                  }}
+                >
+                  <div>
+                    {p.internalRef ? (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          minHeight: 28,
+                          padding: '4px 8px',
+                          borderRadius: 8,
+                          background: 'rgba(59,130,246,.12)',
+                          border: '1px solid rgba(59,130,246,.28)',
+                          fontSize: 11,
+                          fontWeight: 900,
+                          letterSpacing: '.04em',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {p.internalRef}
+                      </span>
+                    ) : (
+                      <span
+                        style={{
+                          fontSize: 10,
+                          color: '#f59e0b',
+                          fontWeight: 800,
+                        }}
+                      >
+                        À générer
+                      </span>
+                    )}
+                  </div>
+
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      minWidth: 0,
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: 10,
+                        overflow: 'hidden',
+                        background: 'rgba(255,255,255,.05)',
+                        border: '1px solid rgba(255,255,255,.08)',
+                        flexShrink: 0,
+                        display: 'grid',
+                        placeItems: 'center',
+                      }}
+                    >
+                      {p.photo ? (
+                        <img
+                          src={p.photo}
+                          alt={p.name}
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                          }}
+                        />
+                      ) : (
+                        <span
+                          style={{
+                            fontSize: 8,
+                            opacity: 0.45,
+                            textAlign: 'center',
+                          }}
+                        >
+                          PHOTO
+                        </span>
+                      )}
+                    </div>
+
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 700 }}>{p.name}</div>
+
+                      <div
+                        style={{
+                          opacity: 0.7,
+                          fontSize: 13,
+                          marginTop: 3,
+                        }}
+                      >
+                        {p.packaging || 'Sans conditionnement'}
+                      </div>
+
+                      {(p.category || p.subcategory) && (
+                        <div
+                          style={{
+                            opacity: 0.65,
+                            fontSize: 12,
+                            marginTop: 3,
+                          }}
+                        >
+                          {p.category}
+                          {p.subcategory ? ` / ${p.subcategory}` : ''}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <Badge
+                      tone={
+                        p.productType === 'fabriqué' ? 'info' : 'neutral'
+                      }
+                    >
+                      {p.productType}
+                    </Badge>
+                  </div>
+
+                  <div>
+                    <Badge tone={qty < p.minStock ? 'danger' : 'good'}>
+                      {qty} {p.unit}
+                    </Badge>
+                  </div>
+
+                  <div>
+                    {visibleExpiries.length === 0 ? (
+                      <span style={{ fontSize: 12, opacity: 0.5 }}>
+                        Aucune date
+                      </span>
+                    ) : (
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 6,
+                          alignItems: 'flex-start',
+                        }}
+                      >
+                        {visibleExpiries.map(([expiry, expiryQty]) => (
+                          <div
+                            key={expiry}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 7,
+                              flexWrap: 'wrap',
+                            }}
+                          >
+                            <Badge tone={getPriorityTone(expiry)}>
+                              {new Date(
+                                `${expiry}T00:00:00`
+                              ).toLocaleDateString('fr-FR')}
+                            </Badge>
+
+                            <span
+                              style={{
+                                fontSize: 11,
+                                opacity: 0.65,
+                              }}
+                            >
+                              {expiryQty} {p.unit}
+                            </span>
+                          </div>
+                        ))}
+
+                        {remainingExpiryCount > 0 && (
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 700,
+                              opacity: 0.65,
+                            }}
+                          >
+                            + {remainingExpiryCount} autre
+                            {remainingExpiryCount > 1 ? 's' : ''}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    {visibleLocations.length === 0 ? (
+                      <span style={{ fontSize: 12, opacity: 0.5 }}>
+                        Aucun stock
+                      </span>
+                    ) : (
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 5,
+                          alignItems: 'flex-start',
+                        }}
+                      >
+                        {visibleLocations.map(([location, locationQty]) => (
+                          <div
+                            key={location}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              flexWrap: 'wrap',
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontSize: 12,
+                                fontWeight: 700,
+                              }}
+                            >
+                              {location}
+                            </span>
+
+                            <span
+                              style={{
+                                fontSize: 11,
+                                opacity: 0.65,
+                              }}
+                            >
+                              {locationQty} {p.unit}
+                            </span>
+                          </div>
+                        ))}
+
+                        {remainingLocationCount > 0 && (
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 700,
+                              opacity: 0.65,
+                            }}
+                          >
+                            + {remainingLocationCount} autre
+                            {remainingLocationCount > 1 ? 's' : ''}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>{p.minStock}</div>
+
+                  <div>
+                    {p.purchasePrice.toLocaleString('fr-FR')} XPF
+                  </div>
+
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: 8,
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <button
+                      className="button secondary small"
+                      onClick={() => openEditProduct(p)}
+                    >
+                      Modifier
+                    </button>
+
+                    <button
+                      className="button secondary small"
+                      onClick={() => duplicateProduct(p)}
+                    >
+                      Dupliquer
+                    </button>
+
+                    <button
+                      className="button secondary small"
+                      style={{
+                        color: '#b42318',
+                        borderColor: '#fda29b',
+                      }}
+                      onClick={() =>
+                        deleteProduct(p.id, p.name)
+                      }
+                    >
+                      Supprimer
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+
+            {shown.length === 0 && (
+              <div style={{ padding: 24, opacity: 0.7 }}>
+                Aucun produit trouvé.
+              </div>
+            )}
+          </div>
+        </div>
+      </Card>
+
+      {open && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,.68)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+            zIndex: 999,
+          }}
+        >
+          <div
+            style={{
+              width: 'min(1100px, 100%)',
+              maxHeight: '94vh',
+              overflowY: 'auto',
+              background: '#111827',
+              borderRadius: 18,
+              padding: 24,
+              boxShadow: '0 25px 80px rgba(0,0,0,.45)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 12,
+                marginBottom: 26,
+              }}
+            >
+              <h2 style={{ margin: 0, fontSize: 24 }}>
+                {form.id ? 'Modifier le produit' : 'Nouveau produit'}
+              </h2>
+
+              <button
+                className="button secondary small"
+                onClick={() => setOpen(false)}
+              >
+                Fermer
+              </button>
+            </div>
+
+            <div style={sectionTitleStyle}>Informations produit</div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns:
+                  'repeat(auto-fit, minmax(250px, 1fr))',
+                gap: 18,
+              }}
+            >
+              <div
+                style={{
+                  ...fieldWrapStyle,
+                  position: 'relative',
+                }}
+              >
+                <label style={fieldLabelStyle}>Désignation *</label>
+
+                <input
+                  className="input"
+                  value={form.name}
+                  autoComplete="off"
+                  onFocus={() => setDesignationFocused(true)}
+                  onBlur={() => {
+                    window.setTimeout(
+                      () => setDesignationFocused(false),
+                      120
+                    )
+                  }}
+                  onChange={(e) => {
+                    setForm({
+                      ...form,
+                      name: e.target.value,
+                    })
+                    setDesignationFocused(true)
+                  }}
+                  placeholder="Ex. Coca-Cola 33 cl"
+                />
+
+                {designationFocused &&
+                  form.name.trim().length >= 2 && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 'calc(100% + 6px)',
+                        left: 0,
+                        right: 0,
+                        zIndex: 50,
+                        background: '#ffffff',
+                        color: '#101828',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: 12,
+                        boxShadow:
+                          '0 12px 30px rgba(16,24,40,.18)',
+                        overflow: 'hidden',
+                        maxHeight: 310,
+                        overflowY: 'auto',
+                      }}
+                    >
+                      {designationSuggestions.length > 0 ? (
+                        designationSuggestions.map(
+                          (product) => (
+                            <button
+                              key={product.id}
+                              type="button"
+                              onMouseDown={(e) =>
+                                e.preventDefault()
+                              }
+                              onClick={() =>
+                                selectExistingProduct(
+                                  product
+                                )
+                              }
+                              style={{
+                                width: '100%',
+                                border: 0,
+                                borderBottom:
+                                  '1px solid #f0f1f3',
+                                background:
+                                  '#ffffff',
+                                color: '#101828',
+                                padding:
+                                  '11px 12px',
+                                textAlign: 'left',
+                                cursor: 'pointer',
+                                display: 'block',
+                              }}
+                            >
+                              <div
+                                style={{
+                                  fontWeight: 800,
+                                  fontSize: 13,
+                                }}
+                              >
+                                {product.name}
+                              </div>
+
+                              <div
+                                style={{
+                                  marginTop: 3,
+                                  fontSize: 11,
+                                  color: '#667085',
+                                }}
+                              >
+                                {[
+                                  product.brand,
+                                  product.packaging,
+                                  product.category,
+                                  product.subcategory,
+                                ]
+                                  .filter(Boolean)
+                                  .join(' · ')}
+                              </div>
+
+                              <div
+                                style={{
+                                  marginTop: 3,
+                                  fontSize: 10,
+                                  color: '#98a2b3',
+                                }}
+                              >
+                                Produit existant — cliquer pour le sélectionner
+                              </div>
+                            </button>
+                          )
+                        )
+                      ) : (
+                        <div
+                          style={{
+                            padding: 12,
+                            fontSize: 12,
+                            color: '#667085',
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          Aucun produit existant ne correspond. Continue la saisie pour créer un nouveau produit.
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                <div
+                  style={{
+                    marginTop: 5,
+                    fontSize: 11,
+                    opacity: 0.65,
+                  }}
+                >
+                  Saisis au moins 2 lettres pour rechercher un produit déjà enregistré.
+                </div>
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={fieldLabelStyle}>Photo du produit</label>
+
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: 12,
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 92,
+                      height: 92,
+                      borderRadius: 14,
+                      overflow: 'hidden',
+                      border: '1px solid rgba(255,255,255,.14)',
+                      background: 'rgba(255,255,255,.05)',
+                      display: 'grid',
+                      placeItems: 'center',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {form.photo ? (
+                      <img
+                        src={form.photo}
+                        alt={form.name || 'Photo produit'}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover',
+                        }}
+                      />
+                    ) : (
+                      <span
+                        style={{
+                          fontSize: 11,
+                          opacity: 0.55,
+                          textAlign: 'center',
+                          padding: 8,
+                        }}
+                      >
+                        Aucune photo
+                      </span>
+                    )}
+                  </div>
+
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8,
+                      flex: 1,
+                      minWidth: 180,
+                    }}
+                  >
+                    <input
+                      className="input"
+                      type="file"
+                      accept="image/*"
+                      onChange={(event) =>
+                        handleProductPhoto(event.target.files?.[0])
+                      }
+                    />
+
+                    {form.photo && (
+                      <button
+                        className="button secondary small"
+                        type="button"
+                        style={{ alignSelf: 'flex-start' }}
+                        onClick={() =>
+                          setForm({
+                            ...form,
+                            photo: '',
+                          })
+                        }
+                      >
+                        Supprimer la photo
+                      </button>
+                    )}
+
+                    <div
+                      style={{
+                        fontSize: 10,
+                        opacity: 0.55,
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      JPG, PNG ou photo prise depuis téléphone/tablette.
+                      L&apos;image est automatiquement réduite avant enregistrement.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={fieldLabelStyle}>
+                  Référence interne
+                </label>
+
+                <input
+                  className="input"
+                  value={generatedInternalRef}
+                  readOnly
+                  placeholder="Choisis une catégorie et une sous-catégorie"
+                  style={{
+                    fontWeight: 800,
+                    letterSpacing: '.04em',
+                    background: 'rgba(255,255,255,.04)',
+                    cursor: 'not-allowed',
+                  }}
+                />
+
+                <div
+                  style={{
+                    marginTop: 6,
+                    fontSize: 10,
+                    opacity: 0.6,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  Générée automatiquement : 3 premières lettres de la
+                  catégorie + 3 premières lettres de la sous-catégorie +
+                  numéro séquentiel sur 6 chiffres.
+                </div>
+
+                {!form.id &&
+                  (!form.category.trim() ||
+                    !form.subcategory.trim()) && (
+                    <div
+                      style={{
+                        marginTop: 5,
+                        fontSize: 10,
+                        color: '#fbbf24',
+                      }}
+                    >
+                      Sélectionne la catégorie et la sous-catégorie pour
+                      générer la référence.
+                    </div>
+                  )}
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={fieldLabelStyle}>Référence fournisseur</label>
+                <input
+                  className="input"
+                  value={form.supplierRef}
+                  onChange={(e) =>
+                    setForm({ ...form, supplierRef: e.target.value })
+                  }
+                  placeholder="Ex. REF-FOURN-001"
+                />
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={fieldLabelStyle}>Catégorie</label>
+                <select
+                  className="input"
+                  value={form.category}
+                  onChange={(e) => {
+                    const category = e.target.value
+                    const categoryId = resolveMasterId('category', category)
+
+                    setForm({
+                      ...form,
+                      category,
+                      categoryId,
+                      subcategory: '',
+                      subcategoryId: '',
+                    })
+                  }}
+                >
+                  <option value="">Choisir une catégorie</option>
+                  {categoryChoices.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  className="button secondary small"
+                  type="button"
+                  style={{ marginTop: 7, alignSelf: 'flex-start' }}
+                  onClick={() => {
+                    const value = askNewValue('une nouvelle catégorie')
+                    if (value) {
+                      const created = upsertMasterItem('category', value)
+                      setForm({
+                        ...form,
+                        category: value,
+                        categoryId: created?.id || '',
+                        subcategory: '',
+                        subcategoryId: '',
+                      })
+                    }
+                  }}
+                >
+                  + Ajouter une nouvelle catégorie
+                </button>
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={fieldLabelStyle}>Sous-catégorie</label>
+                <select
+                  className="input"
+                  value={form.subcategory}
+                  disabled={!form.category}
+                  onChange={(e) => {
+                    const subcategory = e.target.value
+                    const categoryId =
+                      form.categoryId ||
+                      resolveMasterId('category', form.category)
+
+                    setForm({
+                      ...form,
+                      categoryId,
+                      subcategory,
+                      subcategoryId: resolveMasterId(
+                        'subcategory',
+                        subcategory,
+                        categoryId || undefined
+                      ),
+                    })
+                  }}
+                >
+                  <option value="">
+                    {form.category
+                      ? 'Choisir une sous-catégorie'
+                      : "Choisir d'abord une catégorie"}
+                  </option>
+                  {subcategories.map((subcategory) => (
+                    <option key={subcategory} value={subcategory}>
+                      {subcategory}
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  className="button secondary small"
+                  type="button"
+                  style={{ marginTop: 7, alignSelf: 'flex-start' }}
+                  onClick={() => {
+                    if (!form.category) {
+                      alert("Choisis d'abord une catégorie.")
+                      return
+                    }
+
+                    const value = askNewValue('une nouvelle sous-catégorie')
+                    if (value) {
+                      const categoryId =
+                        form.categoryId ||
+                        resolveMasterId('category', form.category) ||
+                        upsertMasterItem('category', form.category)?.id ||
+                        ''
+
+                      const created = upsertMasterItem(
+                        'subcategory',
+                        value,
+                        categoryId || undefined
+                      )
+
+                      setForm({
+                        ...form,
+                        categoryId,
+                        subcategory: value,
+                        subcategoryId: created?.id || '',
+                      })
+                    }
+                  }}
+                >
+                  + Ajouter une nouvelle sous-catégorie
+                </button>
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={fieldLabelStyle}>Conditionnement</label>
+                <select
+                  className="input"
+                  value={form.packaging}
+                  onChange={(e) => {
+                    const packaging = e.target.value
+                    setForm({
+                      ...form,
+                      packaging,
+                      packagingId: resolveMasterId('packaging', packaging),
+                    })
+                  }}
+                >
+                  <option value="">Choisir un conditionnement</option>
+                  {packagingChoices.map((packaging) => (
+                    <option key={packaging} value={packaging}>
+                      {packaging}
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  className="button secondary small"
+                  type="button"
+                  style={{ marginTop: 7, alignSelf: 'flex-start' }}
+                  onClick={() => {
+                    const value = askNewValue('un nouveau conditionnement')
+                    if (value) {
+                      const created = upsertMasterItem('packaging', value)
+                      setForm({
+                        ...form,
+                        packaging: value,
+                        packagingId: created?.id || '',
+                      })
+                    }
+                  }}
+                >
+                  + Ajouter un nouveau conditionnement
+                </button>
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={fieldLabelStyle}>Unité de gestion</label>
+                <select
+                  className="input"
+                  value={form.unit}
+                  onChange={(e) => {
+                    const unit = e.target.value
+                    setForm({
+                      ...form,
+                      unit,
+                      unitId: resolveMasterId('unit', unit),
+                    })
+                  }}
+                >
+                  {unitChoices.map((unit) => (
+                    <option key={unit} value={unit}>
+                      {unit}
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  className="button secondary small"
+                  type="button"
+                  style={{ marginTop: 7, alignSelf: 'flex-start' }}
+                  onClick={() => {
+                    const value = askNewValue('une nouvelle unité de gestion')
+                    if (value) {
+                      const created = upsertMasterItem('unit', value)
+                      setForm({
+                        ...form,
+                        unit: value,
+                        unitId: created?.id || '',
+                      })
+                    }
+                  }}
+                >
+                  + Ajouter une nouvelle unité
+                </button>
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={fieldLabelStyle}>Fournisseur principal</label>
+                <input
+                  className="input"
+                  list="supplierSuggestions"
+                  value={form.mainSupplier}
+                  onChange={(e) => {
+                    const name = e.target.value
+                    const linkedSupplier = suppliers.find(
+                      (supplier) =>
+                        supplier.name.trim().toLowerCase() ===
+                        name.trim().toLowerCase()
+                    )
+
+                    setForm({
+                      ...form,
+                      mainSupplier: name,
+                      mainSupplierId: linkedSupplier?.id || '',
+                    })
+                  }}
+                  placeholder="Rechercher ou saisir"
+                />
+                <datalist id="supplierSuggestions">
+                  {supplierSuggestions.map((supplier) => (
+                    <option key={supplier} value={supplier} />
+                  ))}
+                </datalist>
+
+                <button
+                  className="button secondary small"
+                  type="button"
+                  style={{ marginTop: 7, alignSelf: 'flex-start' }}
+                  onClick={() => {
+                    setSupplierForm(emptySupplier)
+                    setSupplierModalOpen(true)
+                  }}
+                >
+                  + Ajouter un nouveau fournisseur
+                </button>
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={fieldLabelStyle}>
+                  Gestion DLUO / DLC du produit
+                </label>
+
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    minHeight: 46,
+                    padding: '10px 12px',
+                    border:
+                      '1px solid rgba(255,255,255,.14)',
+                    borderRadius: 11,
+                    cursor: 'pointer',
+                    background:
+                      productHasExpiry
+                        ? 'rgba(34,197,94,.10)'
+                        : 'rgba(255,255,255,.025)',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={productHasExpiry}
+                    onChange={(event) => {
+                      const checked =
+                        event.target.checked
+
+                      setProductHasExpiry(
+                        checked
+                      )
+
+                      setExpiryEntries(
+                        (current) =>
+                          current.map(
+                            (entry) => ({
+                              ...entry,
+                              hasExpiry:
+                                checked
+                                  ? entry.hasExpiry
+                                  : false,
+                              expiry:
+                                checked
+                                  ? entry.expiry
+                                  : '',
+                            })
+                          )
+                      )
+                    }}
+                    style={{
+                      width: 19,
+                      height: 19,
+                    }}
+                  />
+
+                  <span>
+                    <strong>
+                      {productHasExpiry
+                        ? 'Produit avec DLUO / DLC'
+                        : 'Produit sans DLUO / DLC'}
+                    </strong>
+
+                    <span
+                      style={{
+                        display: 'block',
+                        marginTop: 2,
+                        fontSize: 10,
+                        opacity: 0.65,
+                      }}
+                    >
+                      {productHasExpiry
+                        ? 'Les dates pourront être saisies lot par lot.'
+                        : 'Aucune date ne sera demandée pour ce produit.'}
+                    </span>
+                  </span>
+                </label>
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={fieldLabelStyle}>Type de produit</label>
+                <select
+                  className="input"
+                  value={form.productType}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      productType:
+                        e.target.value as Product['productType'],
+                    })
+                  }
+                >
+                  <option value="acheté">Acheté</option>
+                  <option value="fabriqué">Fabriqué sur place</option>
+                  <option value="modifié">Modifié sur place</option>
+                </select>
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={fieldLabelStyle}>Prix d&apos;achat XPF</label>
+                <input
+                  className="input"
+                  type="number"
+                  min="0"
+                  value={form.purchasePrice}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      purchasePrice: Math.max(
+                        0,
+                        Number(e.target.value) || 0
+                      ),
+                      priceUpdatedAt: new Date()
+                        .toISOString()
+                        .slice(0, 10),
+                    })
+                  }
+                />
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={fieldLabelStyle}>
+                  Date de mise à jour du tarif
+                </label>
+                <input
+                  className="input"
+                  type="date"
+                  value={form.priceUpdatedAt}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      priceUpdatedAt: e.target.value,
+                    })
+                  }
+                />
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={fieldLabelStyle}>Stock minimum</label>
+                <input
+                  className="input"
+                  type="number"
+                  min="0"
+                  value={form.minStock}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      minStock: Math.max(
+                        0,
+                        Number(e.target.value) || 0
+                      ),
+                    })
+                  }
+                />
+              </div>
+            </div>
+
+            <div
+              style={{
+                height: 1,
+                background: 'rgba(255,255,255,.12)',
+                margin: '30px 0',
+              }}
+            />
+
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 12,
+                flexWrap: 'wrap',
+                marginBottom: 16,
+              }}
+            >
+              <div>
+                <div style={sectionTitleStyle}>
+                  Nouvelle entrée de stock
+                </div>
+                <div
+                  style={{
+                    fontSize: 13,
+                    opacity: 0.7,
+                    marginTop: -8,
+                  }}
+                >
+                  Une entrée peut contenir plusieurs lots. Pour chaque lot, tu peux
+                  choisir s'il possède une DLUO / DLC, puis le répartir sur un ou plusieurs lieux.
+                </div>
+              </div>
+            </div>
+
+            <div style={{ ...fieldWrapStyle, maxWidth: 320 }}>
+              <label style={fieldLabelStyle}>
+                Quantité globale reçue
+              </label>
+              <input
+                className="input"
+                type="number"
+                min="0"
+                value={globalQuantity}
+                onChange={(e) =>
+                  setGlobalQuantity(
+                    Math.max(0, Number(e.target.value) || 0)
+                  )
+                }
+              />
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns:
+                  'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: 12,
+                marginTop: 18,
+                marginBottom: 22,
+              }}
+            >
+              <div style={summaryBoxStyle}>
+                <div style={{ fontSize: 12, opacity: 0.65 }}>
+                  Quantité globale
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 800 }}>
+                  {globalQuantity}
+                </div>
+              </div>
+
+              <div style={summaryBoxStyle}>
+                <div style={{ fontSize: 12, opacity: 0.65 }}>
+                  Affecté aux DLUO/DLC
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 800 }}>
+                  {totalExpiryQuantity}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  ...summaryBoxStyle,
+                  background:
+                    remainingGlobalQuantity === 0 && globalQuantity > 0
+                      ? 'rgba(34,197,94,.12)'
+                      : remainingGlobalQuantity < 0
+                      ? 'rgba(239,68,68,.12)'
+                      : 'rgba(245,158,11,.12)',
+                }}
+              >
+                <div style={{ fontSize: 12, opacity: 0.7 }}>
+                  {remainingGlobalQuantity < 0
+                    ? 'Dépassement'
+                    : 'Reste à affecter'}
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 800 }}>
+                  {Math.abs(remainingGlobalQuantity)}
+                </div>
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 18,
+              }}
+            >
+              {expiryEntries.map((entry, entryIndex) => {
+                const allocated = getAllocatedQuantity(entry)
+                const remainingForEntry = entry.quantity - allocated
+
+                return (
+                  <div
+                    key={entry.id}
+                    style={{
+                      border: '1px solid rgba(255,255,255,.12)',
+                      borderRadius: 16,
+                      padding: 18,
+                      background: 'rgba(255,255,255,.035)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: 12,
+                        flexWrap: 'wrap',
+                        marginBottom: 18,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 16,
+                          fontWeight: 800,
+                        }}
+                      >
+                        Lot n°{entryIndex + 1}
+                      </div>
+
+                      <button
+                        className="button secondary small"
+                        type="button"
+                        disabled={expiryEntries.length <= 1}
+                        onClick={() => removeExpiryEntry(entry.id)}
+                      >
+                        Retirer ce lot
+                      </button>
+                    </div>
+
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns:
+                          'repeat(auto-fit, minmax(210px, 1fr))',
+                        gap: 16,
+                      }}
+                    >
+                      <div style={fieldWrapStyle}>
+                        <label style={fieldLabelStyle}>
+                          DLUO / DLC
+                        </label>
+
+                        <label
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            minHeight: 44,
+                            padding: '10px 12px',
+                            border: '1px solid rgba(255,255,255,.14)',
+                            borderRadius: 11,
+                            cursor: 'pointer',
+                            background: entry.hasExpiry
+                              ? 'rgba(255,255,255,.06)'
+                              : 'rgba(255,255,255,.025)',
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={
+                              productHasExpiry &&
+                              entry.hasExpiry
+                            }
+                            disabled={
+                              !productHasExpiry
+                            }
+                            onChange={(e) =>
+                              updateExpiryEntry(entry.id, {
+                                hasExpiry: e.target.checked,
+                                expiry: e.target.checked
+                                  ? entry.expiry
+                                  : '',
+                              })
+                            }
+                            style={{
+                              width: 18,
+                              height: 18,
+                              flexShrink: 0,
+                            }}
+                          />
+
+                          <span
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 700,
+                            }}
+                          >
+                            {productHasExpiry
+                              ? 'Ce lot possède une DLUO / DLC'
+                              : 'Produit défini sans DLUO / DLC'}
+                          </span>
+                        </label>
+
+                        {productHasExpiry &&
+                        entry.hasExpiry ? (
+                          <input
+                            className="input"
+                            type="date"
+                            value={entry.expiry}
+                            onChange={(e) =>
+                              updateExpiryEntry(entry.id, {
+                                expiry: e.target.value,
+                              })
+                            }
+                            style={{
+                              marginTop: 8,
+                            }}
+                          />
+                        ) : (
+                          <div
+                            className="input"
+                            style={{
+                              marginTop: 8,
+                              minHeight: 44,
+                              display: 'flex',
+                              alignItems: 'center',
+                              color: '#98a2b3',
+                              background: 'rgba(255,255,255,.035)',
+                            }}
+                          >
+                            Pas de DLUO / DLC
+                          </div>
+                        )}
+                      </div>
+
+                      <div style={fieldWrapStyle}>
+                        <label style={fieldLabelStyle}>
+                          Numéro de lot (facultatif)
+                        </label>
+                        <input
+                          className="input"
+                          value={entry.lotNumber}
+                          onChange={(e) =>
+                            updateExpiryEntry(entry.id, {
+                              lotNumber: e.target.value,
+                            })
+                          }
+                          placeholder="Laisser vide si inconnu"
+                        />
+                      </div>
+
+                      <div style={fieldWrapStyle}>
+                        <label style={fieldLabelStyle}>
+                          Quantité pour cette DLUO *
+                        </label>
+                        <input
+                          className="input"
+                          type="number"
+                          min="0"
+                          value={entry.quantity}
+                          onChange={(e) =>
+                            updateExpiryEntry(entry.id, {
+                              quantity: Math.max(
+                                0,
+                                Number(e.target.value) || 0
+                              ),
+                            })
+                          }
+                        />
+                      </div>
+
+                      <div style={fieldWrapStyle}>
+                        <label style={fieldLabelStyle}>
+                          Priorité DLUO / DLC
+                        </label>
+                        <div
+                          className="input"
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            minHeight: 44,
+                            fontWeight: 700,
+                          }}
+                        >
+                          {!productHasExpiry ||
+                          !entry.hasExpiry
+                            ? 'Sans DLUO / DLC'
+                            : entry.expiry
+                            ? getExpiryPriority(entry.expiry)
+                            : 'Date à renseigner'}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        height: 1,
+                        background: 'rgba(255,255,255,.08)',
+                        margin: '20px 0',
+                      }}
+                    />
+
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: 12,
+                        flexWrap: 'wrap',
+                        marginBottom: 14,
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 800 }}>
+                          Répartition par lieu
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            opacity: 0.65,
+                            marginTop: 3,
+                          }}
+                        >
+                          Réparti : {allocated} / {entry.quantity}
+                        </div>
+                      </div>
+
+                      <button
+                        className="button secondary small"
+                        type="button"
+                        onClick={() => addAllocation(entry.id)}
+                      >
+                        + Ajouter un lieu
+                      </button>
+                    </div>
+
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 10,
+                      }}
+                    >
+                      {entry.allocations.map(
+                        (allocation, allocationIndex) => (
+                          <div
+                            key={allocation.id}
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns:
+                                'minmax(220px,2fr) minmax(130px,1fr) 100px',
+                              gap: 10,
+                              alignItems: 'end',
+                            }}
+                          >
+                            <div style={fieldWrapStyle}>
+                              <label style={fieldLabelStyle}>
+                                Lieu {allocationIndex + 1}
+                              </label>
+                              <select
+                                className="input"
+                                value={allocation.location}
+                                onChange={(e) =>
+                                  updateAllocation(
+                                    entry.id,
+                                    allocation.id,
+                                    {
+                                      location: e.target.value,
+                                    }
+                                  )
+                                }
+                              >
+                                {locationOptions.map((location) => (
+                                  <option
+                                    key={location}
+                                    value={location}
+                                  >
+                                    {location}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div style={fieldWrapStyle}>
+                              <label style={fieldLabelStyle}>
+                                Quantité
+                              </label>
+                              <input
+                                className="input"
+                                type="number"
+                                min="0"
+                                value={allocation.quantity}
+                                onChange={(e) =>
+                                  updateAllocation(
+                                    entry.id,
+                                    allocation.id,
+                                    {
+                                      quantity: Math.max(
+                                        0,
+                                        Number(e.target.value) || 0
+                                      ),
+                                    }
+                                  )
+                                }
+                              />
+                            </div>
+
+                            <button
+                              className="button secondary small"
+                              type="button"
+                              disabled={entry.allocations.length <= 1}
+                              onClick={() =>
+                                removeAllocation(
+                                  entry.id,
+                                  allocation.id
+                                )
+                              }
+                            >
+                              Retirer
+                            </button>
+                          </div>
+                        )
+                      )}
+                    </div>
+
+                    <div
+                      style={{
+                        marginTop: 14,
+                        padding: 12,
+                        borderRadius: 10,
+                        background:
+                          remainingForEntry === 0 && entry.quantity > 0
+                            ? 'rgba(34,197,94,.12)'
+                            : remainingForEntry < 0
+                            ? 'rgba(239,68,68,.12)'
+                            : 'rgba(245,158,11,.12)',
+                        fontWeight: 700,
+                        fontSize: 13,
+                      }}
+                    >
+                      {entry.quantity <= 0
+                        ? 'Saisis la quantité de cette DLUO/DLC.'
+                        : remainingForEntry === 0
+                        ? `Répartition complète : ${allocated} / ${entry.quantity}`
+                        : remainingForEntry > 0
+                        ? `Il reste ${remainingForEntry} à répartir pour cette DLUO/DLC.`
+                        : `Dépassement de ${Math.abs(
+                            remainingForEntry
+                          )} pour cette DLUO/DLC.`}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            <button
+              className="button secondary"
+              type="button"
+              onClick={addExpiryEntry}
+              style={{ marginTop: 18 }}
+            >
+              + Ajouter un lot
+            </button>
+
+            <div
+              style={{
+                background: 'rgba(255,255,255,.05)',
+                border: '1px solid rgba(255,255,255,.1)',
+                borderRadius: 12,
+                padding: 14,
+                marginTop: 18,
+                fontSize: 13,
+                lineHeight: 1.5,
+              }}
+            >
+              La quantité globale doit être entièrement répartie entre les
+              différentes DLUO/DLC. Ensuite, chaque quantité DLUO/DLC doit
+              être entièrement répartie entre ses lieux de stockage. Les
+              quantités négatives sont bloquées.
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: 10,
+                marginTop: 30,
+                flexWrap: 'wrap',
+              }}
+            >
+              {form.id && (
+                <>
+                  <button
+                    className="button secondary"
+                    type="button"
+                    onClick={() => {
+                      const current = items.find(
+                        (item) => item.id === form.id
+                      )
+
+                      if (current) {
+                        duplicateProduct(current)
+                      }
+                    }}
+                  >
+                    Dupliquer le produit
+                  </button>
+
+                  <button
+                    className="button dangerButton"
+                    type="button"
+                    onClick={() =>
+                      deleteProduct(form.id, form.name)
+                    }
+                  >
+                    Supprimer le produit
+                  </button>
+                </>
+              )}
+
+              <button
+                className="button secondary"
+                onClick={() => setOpen(false)}
+              >
+                Annuler
+              </button>
+
+              <button className="button" onClick={submit}>
+                Enregistrer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {supplierModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,.72)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+            zIndex: 1200,
+          }}
+        >
+          <div
+            style={{
+              width: 'min(820px, 100%)',
+              maxHeight: '92vh',
+              overflowY: 'auto',
+              background: '#111827',
+              borderRadius: 18,
+              padding: 24,
+              boxShadow: '0 25px 80px rgba(0,0,0,.45)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 12,
+                marginBottom: 22,
+              }}
+            >
+              <div>
+                <h2 style={{ margin: 0 }}>Nouveau fournisseur</h2>
+                <div style={{ marginTop: 4, fontSize: 12, opacity: 0.65 }}>
+                  Même fiche que dans l&apos;onglet Fournisseurs.
+                </div>
+              </div>
+
+              <button
+                className="button secondary small"
+                type="button"
+                onClick={() => {
+                  setSupplierModalOpen(false)
+                  setSupplierForm(emptySupplier)
+                }}
+              >
+                Fermer
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns:
+                  'repeat(auto-fit, minmax(230px, 1fr))',
+                gap: 16,
+              }}
+            >
+              <div style={fieldWrapStyle}>
+                <label style={fieldLabelStyle}>Nom du fournisseur *</label>
+                <input
+                  className="input"
+                  value={supplierForm.name}
+                  onChange={(e) =>
+                    setSupplierForm({
+                      ...supplierForm,
+                      name: e.target.value,
+                    })
+                  }
+                />
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={fieldLabelStyle}>Contact principal</label>
+                <input
+                  className="input"
+                  value={supplierForm.contactPerson || ''}
+                  onChange={(e) =>
+                    setSupplierForm({
+                      ...supplierForm,
+                      contactPerson: e.target.value,
+                    })
+                  }
+                />
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={fieldLabelStyle}>Email</label>
+                <input
+                  className="input"
+                  type="email"
+                  value={supplierForm.email || supplierForm.contact}
+                  onChange={(e) =>
+                    setSupplierForm({
+                      ...supplierForm,
+                      email: e.target.value,
+                      contact: e.target.value,
+                    })
+                  }
+                />
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={fieldLabelStyle}>Téléphone</label>
+                <input
+                  className="input"
+                  value={supplierForm.phone}
+                  onChange={(e) =>
+                    setSupplierForm({
+                      ...supplierForm,
+                      phone: e.target.value,
+                    })
+                  }
+                />
+              </div>
+
+              <div style={{ ...fieldWrapStyle, gridColumn: '1 / -1' }}>
+                <label style={fieldLabelStyle}>Adresse</label>
+                <input
+                  className="input"
+                  value={supplierForm.address || ''}
+                  onChange={(e) =>
+                    setSupplierForm({
+                      ...supplierForm,
+                      address: e.target.value,
+                    })
+                  }
+                />
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={fieldLabelStyle}>Conditions de paiement</label>
+                <input
+                  className="input"
+                  value={supplierForm.payment}
+                  onChange={(e) =>
+                    setSupplierForm({
+                      ...supplierForm,
+                      payment: e.target.value,
+                    })
+                  }
+                  placeholder="Ex. 30 jours fin de mois"
+                />
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={fieldLabelStyle}>Délai de livraison</label>
+                <input
+                  className="input"
+                  value={supplierForm.deliveryLeadTime || ''}
+                  onChange={(e) =>
+                    setSupplierForm({
+                      ...supplierForm,
+                      deliveryLeadTime: e.target.value,
+                    })
+                  }
+                  placeholder="Ex. 7 jours"
+                />
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={fieldLabelStyle}>Devise</label>
+                <select
+                  className="input"
+                  value={supplierForm.currency || 'XPF'}
+                  onChange={(e) =>
+                    setSupplierForm({
+                      ...supplierForm,
+                      currency: e.target.value,
+                    })
+                  }
+                >
+                  <option value="XPF">XPF</option>
+                  <option value="EUR">EUR</option>
+                  <option value="USD">USD</option>
+                  <option value="NZD">NZD</option>
+                  <option value="AUD">AUD</option>
+                </select>
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={fieldLabelStyle}>Statut</label>
+                <select
+                  className="input"
+                  value={supplierForm.active === false ? 'inactive' : 'active'}
+                  onChange={(e) =>
+                    setSupplierForm({
+                      ...supplierForm,
+                      active: e.target.value === 'active',
+                    })
+                  }
+                >
+                  <option value="active">Actif</option>
+                  <option value="inactive">Inactif</option>
+                </select>
+              </div>
+
+              <div style={{ ...fieldWrapStyle, gridColumn: '1 / -1' }}>
+                <label style={fieldLabelStyle}>Notes</label>
+                <textarea
+                  className="input"
+                  style={{ minHeight: 90, resize: 'vertical' }}
+                  value={supplierForm.notes}
+                  onChange={(e) =>
+                    setSupplierForm({
+                      ...supplierForm,
+                      notes: e.target.value,
+                    })
+                  }
+                />
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: 10,
+                marginTop: 24,
+                flexWrap: 'wrap',
+              }}
+            >
+              <button
+                className="button secondary"
+                type="button"
+                onClick={() => {
+                  setSupplierModalOpen(false)
+                  setSupplierForm(emptySupplier)
+                }}
+              >
+                Annuler
+              </button>
+
+              <button
+                className="button"
+                type="button"
+                onClick={saveSupplierFromModal}
+              >
+                Enregistrer le fournisseur
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </Page>
+  )
+}

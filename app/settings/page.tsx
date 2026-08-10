@@ -1,0 +1,4 @@
+'use client'
+import { Page, Card } from '@/components/ui'
+import { resetDemoData } from '@/lib/store'
+export default function Settings(){return <Page title="Réglages" subtitle="Configuration de la version de test"><div className="grid two"><Card><h2>Mode actuel</h2><p className="muted">V1.1 Test local. Toutes les données créées pendant les essais sont enregistrées dans le navigateur de cet appareil.</p><div className="notice goodNotice">Aucun compte Supabase n’est nécessaire pour ces premiers tests.</div></Card><Card><h2>Remise à zéro</h2><p className="muted">Supprime les données de test locales et recharge les données de démonstration initiales.</p><button className="button dangerButton" onClick={()=>{if(confirm('Remettre NukuStock à zéro ?'))resetDemoData()}}>Réinitialiser les données de test</button></Card></div></Page>}
