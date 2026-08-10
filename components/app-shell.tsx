@@ -849,6 +849,43 @@ export function AppShell({
           }
         }
 
+
+        @media (max-width: 767px) {
+          .mobileNav {
+            grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+          }
+
+          .mobileNav a,
+          .mobileNav button {
+            min-height: 66px !important;
+            padding: 5px 2px !important;
+          }
+
+          .mobileMenuSheet {
+            display: block !important;
+            width: 100% !important;
+            box-sizing: border-box !important;
+          }
+
+          .mobileMenuGrid {
+            width: 100% !important;
+            box-sizing: border-box !important;
+          }
+
+          .pageContent,
+          .pageContent > div,
+          .pageContent .list {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            box-sizing: border-box !important;
+          }
+
+          .pageContent .list {
+            overflow: visible !important;
+          }
+        }
+
         @media (max-width: 390px) {
           .topbarTitle strong {
             max-width: 130px;

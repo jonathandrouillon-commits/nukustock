@@ -1209,11 +1209,11 @@ export default function Requests() {
       <div className="list">
         {filtered.map(
           (request) => (
-            <Card
-              key={
-                request.id
-              }
+            <div
+              key={request.id}
+              className="requestCardWrap"
             >
+              <Card>
               <div
                 style={{
                   display:
@@ -1314,6 +1314,7 @@ export default function Requests() {
                       key={
                         item.productId
                       }
+                      className="requestProductRow"
                       style={{
                         display:
                           'grid',
@@ -1371,6 +1372,7 @@ export default function Requests() {
               </div>
 
               <div
+                className="requestActions"
                 style={{
                   display:
                     'flex',
@@ -1463,7 +1465,8 @@ export default function Requests() {
                   </button>
                 )}
               </div>
-            </Card>
+              </Card>
+            </div>
           )
         )}
 
@@ -2208,6 +2211,80 @@ export default function Requests() {
             </div>
           </div>
         )}
+
+      <style jsx global>{`
+        @media (max-width: 767px) {
+          .requestCardWrap {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            box-sizing: border-box !important;
+          }
+
+          .requestCardWrap > * {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            box-sizing: border-box !important;
+          }
+
+          .requestProductRow {
+            grid-template-columns: 1fr !important;
+            gap: 4px !important;
+            padding: 12px 0 !important;
+            align-items: start !important;
+          }
+
+          .requestProductRow > strong {
+            font-size: 16px !important;
+            margin-bottom: 3px !important;
+          }
+
+          .requestProductRow > span {
+            display: block !important;
+            font-size: 13px !important;
+            line-height: 1.35 !important;
+          }
+
+          .requestActions {
+            display: grid !important;
+            grid-template-columns: repeat(2, minmax(0,1fr)) !important;
+            gap: 8px !important;
+            width: 100% !important;
+          }
+
+          .requestActions button {
+            width: 100% !important;
+            min-width: 0 !important;
+            min-height: 44px !important;
+            white-space: normal !important;
+            line-height: 1.2 !important;
+          }
+
+          .requestActions .button:not(.secondary) {
+            grid-column: 1 / -1 !important;
+          }
+
+          .requestActions button[style*="b42318"] {
+            grid-column: 1 / -1 !important;
+          }
+
+          .list {
+            gap: 12px !important;
+          }
+        }
+
+        @media (max-width: 390px) {
+          .requestActions {
+            grid-template-columns: 1fr !important;
+          }
+
+          .requestActions .button,
+          .requestActions button {
+            grid-column: 1 !important;
+          }
+        }
+      `}</style>
     </Page>
   )
 }
