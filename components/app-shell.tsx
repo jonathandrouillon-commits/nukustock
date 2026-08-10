@@ -4,10 +4,18 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   useEffect,
+  useMemo,
   useState,
   type ReactNode,
 } from 'react'
+
 import { UserMenu } from '@/components/user-menu'
+
+type DisplayMode =
+  | 'auto'
+  | 'mobile'
+  | 'tablet'
+  | 'desktop'
 
 type NavItem = {
   href: string
@@ -20,32 +28,100 @@ type NavItem = {
     | 'Administration'
 }
 
+const DISPLAY_MODE_KEY =
+  'nukustock_display_mode'
+
 const navItems: NavItem[] = [
-  { href: '/', label: 'Dashboard', icon: '⌂', group: 'Stock' },
-  { href: '/products', label: 'Produits', icon: '▣', group: 'Stock' },
-  { href: '/stocks', label: 'Stocks', icon: '▤', group: 'Stock' },
-  { href: '/locations', label: 'Lieux de stockage', icon: '⌖', group: 'Stock' },
-  { href: '/movements', label: 'Mouvements', icon: '↕', group: 'Stock' },
-
-  { href: '/requests', label: 'Réquisitions', icon: '☷', group: 'Opérations' },
-  { href: '/orders', label: 'Commandes', icon: '▧', group: 'Opérations' },
-  { href: '/transfers', label: 'Transferts', icon: '⇄', group: 'Opérations' },
-
-  { href: '/inventory', label: 'Inventaires', icon: '☑', group: 'Inventaires' },
-  { href: '/reports', label: 'Rapports', icon: '▥', group: 'Inventaires' },
-
-  { href: '/suppliers', label: 'Fournisseurs', icon: '◇', group: 'Administration' },
-  { href: '/import', label: 'Import / Export', icon: '⇅', group: 'Administration' },
-  { href: '/labels', label: 'Étiquettes', icon: '▦', group: 'Administration' },
-  { href: '/setup', label: 'SET UP', icon: '◫', group: 'Administration' },
-  { href: '/settings', label: 'Réglages', icon: '⚙', group: 'Administration' },
-]
-
-const groups: NavItem['group'][] = [
-  'Stock',
-  'Opérations',
-  'Inventaires',
-  'Administration',
+  {
+    href: '/',
+    label: 'Dashboard',
+    icon: '⌂',
+    group: 'Stock',
+  },
+  {
+    href: '/products',
+    label: 'Produits',
+    icon: '▣',
+    group: 'Stock',
+  },
+  {
+    href: '/stocks',
+    label: 'Stocks',
+    icon: '▤',
+    group: 'Stock',
+  },
+  {
+    href: '/locations',
+    label: 'Lieux de stockage',
+    icon: '⌖',
+    group: 'Stock',
+  },
+  {
+    href: '/movements',
+    label: 'Mouvements',
+    icon: '↕',
+    group: 'Stock',
+  },
+  {
+    href: '/requests',
+    label: 'Réquisitions',
+    icon: '☷',
+    group: 'Opérations',
+  },
+  {
+    href: '/orders',
+    label: 'Commandes',
+    icon: '▧',
+    group: 'Opérations',
+  },
+  {
+    href: '/transfers',
+    label: 'Transferts',
+    icon: '⇄',
+    group: 'Opérations',
+  },
+  {
+    href: '/inventory',
+    label: 'Inventaires',
+    icon: '☑',
+    group: 'Inventaires',
+  },
+  {
+    href: '/reports',
+    label: 'Rapports',
+    icon: '▥',
+    group: 'Inventaires',
+  },
+  {
+    href: '/suppliers',
+    label: 'Fournisseurs',
+    icon: '◇',
+    group: 'Administration',
+  },
+  {
+    href: '/import',
+    label: 'Import / Export',
+    icon: '⇅',
+    group: 'Administration',
+  },
+  {
+    href: '/labels',
+    label: 'Étiquettes',
+    icon: '▦',
+    group: 'Administration',
+  },
+  {
+    href: '/setup',
+    label: 'SET UP',
+    icon: '◫',
+    group: 'Administration',
+  },
+  {
+    href: '/settings',
+    label: 'Réglages',
+    icon: '⚙',
+    group: 'Administration',
+  },
 ]
 
 const mobileQuickLinks = [
@@ -53,6 +129,14 @@ const mobileQuickLinks = [
   '/stocks',
   '/requests',
   '/inventory',
+]
+
+const groups:
+  NavItem['group'][] = [
+  'Stock',
+  'Opérations',
+  'Inventaires',
+  'Administration',
 ]
 
 function isActive(
@@ -65,8 +149,39 @@ function isActive(
 
   return (
     pathname === href ||
-    pathname.startsWith(`${href}/`)
+    pathname.startsWith(
+      `${href}/`
+    )
   )
+}
+
+function getAutoMode():
+  Exclude<
+    DisplayMode,
+    'auto'
+  > {
+  if (
+    typeof window ===
+    'undefined'
+  ) {
+    return 'desktop'
+  }
+
+  if (
+    window.innerWidth <=
+    767
+  ) {
+    return 'mobile'
+  }
+
+  if (
+    window.innerWidth <=
+    1199
+  ) {
+    return 'tablet'
+  }
+
+  return 'desktop'
 }
 
 export function AppShell({
@@ -74,28 +189,144 @@ export function AppShell({
 }: {
   children: ReactNode
 }) {
-  const pathname = usePathname()
+  const pathname =
+    usePathname()
 
-  const [mobileMenuOpen, setMobileMenuOpen] =
+  const [
+    selectedMode,
+    setSelectedMode,
+  ] =
+    useState<DisplayMode>(
+      'auto'
+    )
+
+  const [
+    autoMode,
+    setAutoMode,
+  ] =
+    useState<
+      Exclude<
+        DisplayMode,
+        'auto'
+      >
+    >('desktop')
+
+  const [
+    displayMenuOpen,
+    setDisplayMenuOpen,
+  ] =
     useState(false)
 
-  const [tabletSidebarOpen, setTabletSidebarOpen] =
+  const [
+    mobileMenuOpen,
+    setMobileMenuOpen,
+  ] =
     useState(false)
+
+  const [
+    tabletSidebarOpen,
+    setTabletSidebarOpen,
+  ] =
+    useState(false)
+
+  const effectiveMode =
+    selectedMode ===
+    'auto'
+      ? autoMode
+      : selectedMode
+
+  const shellClass =
+    useMemo(
+      () =>
+        `appShellRoot mode-${effectiveMode}`,
+      [effectiveMode]
+    )
 
   useEffect(() => {
-    setMobileMenuOpen(false)
-    setTabletSidebarOpen(false)
+    const saved =
+      window.localStorage.getItem(
+        DISPLAY_MODE_KEY
+      ) as DisplayMode | null
+
+    if (
+      saved === 'auto' ||
+      saved === 'mobile' ||
+      saved === 'tablet' ||
+      saved === 'desktop'
+    ) {
+      setSelectedMode(
+        saved
+      )
+    }
+
+    const updateAutoMode =
+      () => {
+        setAutoMode(
+          getAutoMode()
+        )
+      }
+
+    updateAutoMode()
+
+    window.addEventListener(
+      'resize',
+      updateAutoMode
+    )
+
+    return () => {
+      window.removeEventListener(
+        'resize',
+        updateAutoMode
+      )
+    }
+  }, [])
+
+  useEffect(() => {
+    setMobileMenuOpen(
+      false
+    )
+    setTabletSidebarOpen(
+      false
+    )
+    setDisplayMenuOpen(
+      false
+    )
   }, [pathname])
 
+  const changeDisplayMode = (
+    mode: DisplayMode
+  ) => {
+    setSelectedMode(mode)
+
+    window.localStorage.setItem(
+      DISPLAY_MODE_KEY,
+      mode
+    )
+
+    setDisplayMenuOpen(
+      false
+    )
+
+    setMobileMenuOpen(
+      false
+    )
+
+    setTabletSidebarOpen(
+      false
+    )
+  }
+
   return (
-    <div className="appShellRoot">
+    <div className={shellClass}>
       {tabletSidebarOpen && (
         <button
           type="button"
           className="sidebarOverlay"
           aria-label="Fermer le menu"
           onClick={() =>
-            setTabletSidebarOpen(false)
+            setTabletSidebarOpen(
+              false
+            )
           }
         />
       )}
@@ -113,8 +344,13 @@ export function AppShell({
           </div>
 
           <div className="brandText">
-            <strong>NukuStock</strong>
-            <span>Nukutepipi</span>
+            <strong>
+              NukuStock
+            </strong>
+
+            <span>
+              Nukutepipi
+            </span>
           </div>
 
           <button
@@ -122,7 +358,9 @@ export function AppShell({
             className="sidebarClose"
             aria-label="Fermer"
             onClick={() =>
-              setTabletSidebarOpen(false)
+              setTabletSidebarOpen(
+                false
+              )
             }
           >
             ×
@@ -133,8 +371,12 @@ export function AppShell({
           {navItems.map(
             (item) => (
               <Link
-                key={item.href}
-                href={item.href}
+                key={
+                  item.href
+                }
+                href={
+                  item.href
+                }
                 className={
                   isActive(
                     pathname,
@@ -148,11 +390,15 @@ export function AppShell({
                   className="sidebarIcon"
                   aria-hidden="true"
                 >
-                  {item.icon}
+                  {
+                    item.icon
+                  }
                 </span>
 
                 <span>
-                  {item.label}
+                  {
+                    item.label
+                  }
                 </span>
               </Link>
             )
@@ -178,7 +424,9 @@ export function AppShell({
               className="tabletMenuButton"
               aria-label="Ouvrir le menu"
               onClick={() =>
-                setTabletSidebarOpen(true)
+                setTabletSidebarOpen(
+                  true
+                )
               }
             >
               ☰
@@ -196,6 +444,137 @@ export function AppShell({
           </div>
 
           <div className="topbarRight">
+            <div className="displayModeWrap">
+              <button
+                type="button"
+                className="displayModeButton"
+                onClick={() =>
+                  setDisplayMenuOpen(
+                    (current) =>
+                      !current
+                  )
+                }
+              >
+                <span>
+                  Affichage
+                </span>
+
+                <strong>
+                  {selectedMode ===
+                    'auto' &&
+                    'Auto'}
+
+                  {selectedMode ===
+                    'mobile' &&
+                    'Téléphone'}
+
+                  {selectedMode ===
+                    'tablet' &&
+                    'Tablette'}
+
+                  {selectedMode ===
+                    'desktop' &&
+                    'PC'}
+                </strong>
+              </button>
+
+              {displayMenuOpen && (
+                <div className="displayModeMenu">
+                  <button
+                    type="button"
+                    className={
+                      selectedMode ===
+                      'auto'
+                        ? 'active'
+                        : ''
+                    }
+                    onClick={() =>
+                      changeDisplayMode(
+                        'auto'
+                      )
+                    }
+                  >
+                    <span>
+                      Automatique
+                    </span>
+
+                    <small>
+                      Détection écran
+                    </small>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={
+                      selectedMode ===
+                      'mobile'
+                        ? 'active'
+                        : ''
+                    }
+                    onClick={() =>
+                      changeDisplayMode(
+                        'mobile'
+                      )
+                    }
+                  >
+                    <span>
+                      Téléphone
+                    </span>
+
+                    <small>
+                      Interface mobile
+                    </small>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={
+                      selectedMode ===
+                      'tablet'
+                        ? 'active'
+                        : ''
+                    }
+                    onClick={() =>
+                      changeDisplayMode(
+                        'tablet'
+                      )
+                    }
+                  >
+                    <span>
+                      Tablette
+                    </span>
+
+                    <small>
+                      Interface tablette
+                    </small>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={
+                      selectedMode ===
+                      'desktop'
+                        ? 'active'
+                        : ''
+                    }
+                    onClick={() =>
+                      changeDisplayMode(
+                        'desktop'
+                      )
+                    }
+                  >
+                    <span>
+                      PC
+                    </span>
+
+                    <small>
+                      Interface complète
+                    </small>
+                  </button>
+                </div>
+              )}
+            </div>
+
             <div className="nukutepipiLogoWrap">
               <img
                 src="/images/nukutepipi.jpg"
@@ -214,36 +593,47 @@ export function AppShell({
 
       <nav className="mobileNav">
         {navItems
-          .filter((item) =>
-            mobileQuickLinks.includes(
-              item.href
-            )
+          .filter(
+            (item) =>
+              mobileQuickLinks.includes(
+                item.href
+              )
           )
-          .map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={
-                isActive(
-                  pathname,
+          .map(
+            (item) => (
+              <Link
+                key={
                   item.href
-                )
-                  ? 'active'
-                  : ''
-              }
-            >
-              <span
-                className="mobileNavIcon"
-                aria-hidden="true"
+                }
+                href={
+                  item.href
+                }
+                className={
+                  isActive(
+                    pathname,
+                    item.href
+                  )
+                    ? 'active'
+                    : ''
+                }
               >
-                {item.icon}
-              </span>
+                <span
+                  className="mobileNavIcon"
+                  aria-hidden="true"
+                >
+                  {
+                    item.icon
+                  }
+                </span>
 
-              <span className="mobileNavLabel">
-                {item.label}
-              </span>
-            </Link>
-          ))}
+                <span className="mobileNavLabel">
+                  {
+                    item.label
+                  }
+                </span>
+              </Link>
+            )
+          )}
 
         <button
           type="button"
@@ -253,7 +643,9 @@ export function AppShell({
               : ''
           }
           onClick={() =>
-            setMobileMenuOpen(true)
+            setMobileMenuOpen(
+              true
+            )
           }
         >
           <span
@@ -286,7 +678,9 @@ export function AppShell({
               type="button"
               aria-label="Fermer"
               onClick={() =>
-                setMobileMenuOpen(false)
+                setMobileMenuOpen(
+                  false
+                )
               }
             >
               ×
@@ -362,9 +756,7 @@ export function AppShell({
         html,
         body {
           margin: 0;
-          width: 100%;
           max-width: 100%;
-          overflow-x: hidden;
         }
 
         .appShellRoot {
@@ -461,7 +853,6 @@ export function AppShell({
           width: 18px;
           display: inline-flex;
           justify-content: center;
-          flex: 0 0 auto;
         }
 
         .sidebarFoot {
@@ -510,7 +901,7 @@ export function AppShell({
 
         .topbarRight {
           flex: 0 0 auto;
-          gap: 14px;
+          gap: 12px;
         }
 
         .topbarTitle {
@@ -542,6 +933,76 @@ export function AppShell({
           font-size: 20px;
         }
 
+        .displayModeWrap {
+          position: relative;
+        }
+
+        .displayModeButton {
+          min-height: 40px;
+          padding: 6px 10px;
+          border: 1px solid #e4e7ec;
+          border-radius: 10px;
+          background: #fff;
+          color: #344054;
+          display: flex;
+          flex-direction: column;
+          align-items: flex-start;
+          justify-content: center;
+          cursor: pointer;
+        }
+
+        .displayModeButton span {
+          font-size: 9px;
+          color: #98a2b3;
+        }
+
+        .displayModeButton strong {
+          margin-top: 1px;
+          font-size: 11px;
+        }
+
+        .displayModeMenu {
+          position: absolute;
+          top: calc(100% + 8px);
+          right: 0;
+          z-index: 120;
+          width: 220px;
+          padding: 8px;
+          border: 1px solid #e4e7ec;
+          border-radius: 14px;
+          background: #fff;
+          box-shadow: 0 18px 50px rgba(15,23,42,.14);
+        }
+
+        .displayModeMenu button {
+          width: 100%;
+          padding: 10px 11px;
+          border: 0;
+          border-radius: 10px;
+          background: transparent;
+          display: flex;
+          flex-direction: column;
+          align-items: flex-start;
+          color: #344054;
+          cursor: pointer;
+        }
+
+        .displayModeMenu button.active {
+          background: #eef3f8;
+          color: #0c1525;
+        }
+
+        .displayModeMenu span {
+          font-size: 12px;
+          font-weight: 800;
+        }
+
+        .displayModeMenu small {
+          margin-top: 2px;
+          color: #98a2b3;
+          font-size: 10px;
+        }
+
         .nukutepipiLogoWrap {
           width: 110px;
           height: 52px;
@@ -569,321 +1030,338 @@ export function AppShell({
           display: none;
         }
 
-        @media (max-width: 1199px) {
-          .sidebar {
-            width: 260px;
-            transform: translateX(-100%);
-            box-shadow: 18px 0 50px rgba(0,0,0,.18);
-          }
-
-          .sidebar.sidebarOpen {
-            transform: translateX(0);
-          }
-
-          .sidebarClose {
-            display: grid;
-            place-items: center;
-          }
-
-          .sidebarOverlay {
-            display: block;
-            position: fixed;
-            inset: 0;
-            z-index: 55;
-            border: 0;
-            background: rgba(10,18,30,.34);
-          }
-
-          .main {
-            margin-left: 0;
-          }
-
-          .tabletMenuButton {
-            display: grid;
-            place-items: center;
-          }
-
-          .topbar {
-            padding-inline: 20px;
-          }
+        /*
+         * MODE TABLETTE FORCÉ
+         */
+        .mode-tablet .sidebar {
+          width: 260px;
+          transform: translateX(-100%);
+          box-shadow: 18px 0 50px rgba(0,0,0,.18);
         }
 
-        @media (max-width: 767px) {
-          html,
-          body,
-          .appShellRoot,
-          .main,
-          .pageContent {
-            width: 100% !important;
-            max-width: 100vw !important;
-            min-width: 0 !important;
-            overflow-x: hidden !important;
-          }
+        .mode-tablet .sidebar.sidebarOpen {
+          transform: translateX(0);
+        }
 
-          .appShellRoot {
-            padding-bottom:
-              calc(72px + env(safe-area-inset-bottom));
-          }
+        .mode-tablet .sidebarClose {
+          display: grid;
+          place-items: center;
+        }
 
-          .sidebar,
-          .sidebarOverlay {
-            display: none !important;
-          }
+        .mode-tablet .main {
+          margin-left: 0;
+        }
 
-          .main {
-            margin-left: 0 !important;
-          }
+        .mode-tablet .tabletMenuButton {
+          display: grid;
+          place-items: center;
+        }
 
-          .topbar {
-            height: 62px;
-            padding: 0 12px;
-          }
+        .mode-tablet .sidebarOverlay {
+          display: block;
+          position: fixed;
+          inset: 0;
+          z-index: 55;
+          border: 0;
+          background: rgba(10,18,30,.34);
+        }
 
-          .tabletMenuButton {
-            display: none;
-          }
+        /*
+         * MODE MOBILE FORCÉ
+         */
+        .mode-mobile {
+          width: 100%;
+          max-width: 100vw;
+          overflow-x: hidden;
+          padding-bottom:
+            calc(72px + env(safe-area-inset-bottom));
+        }
 
-          .topbarTitle .eyebrow {
-            display: none;
-          }
+        .mode-mobile .sidebar,
+        .mode-mobile .sidebarOverlay {
+          display: none !important;
+        }
 
-          .topbarTitle strong {
-            font-size: 13px;
-          }
+        .mode-mobile .main {
+          width: 100%;
+          max-width: 100vw;
+          min-width: 0;
+          margin-left: 0;
+          overflow-x: hidden;
+        }
 
-          .nukutepipiLogoWrap {
-            width: 62px;
-            height: 34px;
-            border-radius: 7px;
-          }
+        .mode-mobile .topbar {
+          height: 62px;
+          padding: 0 10px;
+        }
 
-          .topbarRight {
-            gap: 7px;
-          }
+        .mode-mobile .tabletMenuButton,
+        .mode-mobile .topbarTitle .eyebrow {
+          display: none;
+        }
 
-          .pageContent,
-          .pageContent > * {
-            width: 100% !important;
-            max-width: 100% !important;
-            min-width: 0 !important;
-          }
+        .mode-mobile .topbarTitle strong {
+          font-size: 12px;
+        }
 
-          .pageContent .toolbar {
-            display: grid !important;
-            grid-template-columns: 1fr !important;
-            gap: 8px !important;
-          }
+        .mode-mobile .topbarRight {
+          gap: 5px;
+        }
 
-          .pageContent .toolbar > * {
-            width: 100% !important;
-            min-width: 0 !important;
-          }
+        .mode-mobile .displayModeButton {
+          min-height: 34px;
+          padding: 4px 7px;
+        }
 
-          .pageContent .formGrid {
-            grid-template-columns: 1fr !important;
-          }
+        .mode-mobile .displayModeButton span {
+          display: none;
+        }
 
-          .pageContent .tableWrap {
-            max-width: calc(100vw - 24px);
-            overflow-x: auto !important;
-            -webkit-overflow-scrolling: touch;
-          }
+        .mode-mobile .displayModeButton strong {
+          font-size: 10px;
+        }
 
-          .pageContent input,
-          .pageContent select,
-          .pageContent textarea,
-          .pageContent button {
-            font-size: 16px;
-          }
+        .mode-mobile .nukutepipiLogoWrap {
+          width: 52px;
+          height: 32px;
+        }
 
-          .mobileNav {
-            position: fixed;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            z-index: 80;
-            width: 100vw;
-            max-width: 100vw;
-            height:
-              calc(66px + env(safe-area-inset-bottom));
-            padding-bottom:
-              env(safe-area-inset-bottom);
-            display: grid;
-            grid-template-columns:
-              repeat(5, minmax(0,1fr));
-            background: rgba(255,255,255,.98);
-            border-top: 1px solid #e6e9ef;
-            box-shadow: 0 -8px 30px rgba(15,23,42,.08);
-            backdrop-filter: blur(16px);
-          }
+        .mode-mobile .pageContent,
+        .mode-mobile .pageContent > * {
+          width: 100% !important;
+          max-width: 100% !important;
+          min-width: 0 !important;
+        }
 
-          .mobileNav a,
-          .mobileNav button {
-            width: 100%;
-            min-width: 0;
-            border: 0;
-            background: transparent;
-            color: #7c8797;
-            text-decoration: none;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 4px;
-            font-family: inherit;
-          }
+        .mode-mobile .pageContent .toolbar {
+          display: grid !important;
+          grid-template-columns: 1fr !important;
+        }
 
-          .mobileNav a.active,
-          .mobileNav button.active {
-            color: #0c1525;
-          }
+        .mode-mobile .pageContent .formGrid {
+          grid-template-columns: 1fr !important;
+        }
 
-          .mobileNavIcon {
-            font-size: 18px;
-            line-height: 1;
-          }
+        .mode-mobile .pageContent .tableWrap {
+          max-width: calc(100vw - 24px);
+          overflow-x: auto !important;
+        }
 
-          .mobileNavLabel {
-            width: 100%;
-            padding: 0 2px;
-            text-align: center;
+        .mode-mobile .pageContent input,
+        .mode-mobile .pageContent select,
+        .mode-mobile .pageContent textarea,
+        .mode-mobile .pageContent button {
+          font-size: 16px;
+        }
+
+        .mode-mobile .mobileNav {
+          position: fixed;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          z-index: 80;
+          width: 100vw;
+          height:
+            calc(66px + env(safe-area-inset-bottom));
+          padding-bottom:
+            env(safe-area-inset-bottom);
+          display: grid;
+          grid-template-columns:
+            repeat(5, minmax(0,1fr));
+          background: rgba(255,255,255,.98);
+          border-top: 1px solid #e6e9ef;
+          box-shadow: 0 -8px 30px rgba(15,23,42,.08);
+        }
+
+        .mode-mobile .mobileNav a,
+        .mode-mobile .mobileNav button {
+          width: 100%;
+          min-width: 0;
+          border: 0;
+          background: transparent;
+          color: #7c8797;
+          text-decoration: none;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 4px;
+        }
+
+        .mode-mobile .mobileNav a.active,
+        .mode-mobile .mobileNav button.active {
+          color: #0c1525;
+        }
+
+        .mobileNavIcon {
+          font-size: 18px;
+        }
+
+        .mobileNavLabel {
+          width: 100%;
+          padding: 0 2px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          text-align: center;
+          font-size: 9px;
+          font-weight: 700;
+        }
+
+        .mode-mobile .mobileMenuScreen {
+          position: fixed;
+          inset: 0;
+          z-index: 150;
+          width: 100vw;
+          height: 100dvh;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          background: #f4f6f9;
+        }
+
+        .mobileMenuTopbar {
+          flex: 0 0 auto;
+          min-height: 72px;
+          padding:
+            calc(10px + env(safe-area-inset-top))
+            16px
+            10px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          background: #fff;
+          border-bottom: 1px solid #e7eaf0;
+        }
+
+        .mobileMenuTopbar > div {
+          display: flex;
+          flex-direction: column;
+        }
+
+        .mobileMenuTopbar span {
+          color: #98a2b3;
+          font-size: 9px;
+          font-weight: 800;
+        }
+
+        .mobileMenuTopbar strong {
+          margin-top: 2px;
+          font-size: 19px;
+        }
+
+        .mobileMenuTopbar button {
+          width: 44px;
+          height: 44px;
+          border: 1px solid #e4e7ec;
+          border-radius: 12px;
+          background: #fff;
+          font-size: 25px;
+        }
+
+        .mobileMenuBody {
+          flex: 1;
+          overflow-y: auto;
+          padding:
+            16px
+            14px
+            calc(24px + env(safe-area-inset-bottom));
+        }
+
+        .mobileMenuGroup {
+          margin-bottom: 22px;
+        }
+
+        .mobileMenuGroup h3 {
+          margin: 0 0 10px;
+          color: #667085;
+          font-size: 12px;
+          text-transform: uppercase;
+        }
+
+        .mobileMenuGrid {
+          display: grid;
+          grid-template-columns:
+            repeat(2, minmax(0,1fr));
+          gap: 10px;
+        }
+
+        .mobileMenuGrid a {
+          min-width: 0;
+          min-height: 76px;
+          padding: 12px;
+          border: 1px solid #e5e9f0;
+          border-radius: 16px;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          background: #fff;
+          color: #344054;
+          text-decoration: none;
+          font-size: 12px;
+          font-weight: 700;
+        }
+
+        .mobileMenuGrid a.active {
+          background: #eef3f8;
+          color: #0c1525;
+        }
+
+        .mobileMenuIcon {
+          width: 36px;
+          height: 36px;
+          flex: 0 0 auto;
+          display: grid;
+          place-items: center;
+          border-radius: 11px;
+          background: #f2f4f7;
+        }
+
+        /*
+         * MODE DESKTOP FORCÉ
+         */
+        .mode-desktop .sidebar {
+          transform: none !important;
+        }
+
+        .mode-desktop .main {
+          margin-left: 208px !important;
+        }
+
+        .mode-desktop .tabletMenuButton,
+        .mode-desktop .mobileNav,
+        .mode-desktop .mobileMenuScreen,
+        .mode-desktop .sidebarOverlay,
+        .mode-desktop .sidebarClose {
+          display: none !important;
+        }
+
+        /*
+         * AUTOMATIQUE :
+         * effectiveMode devient déjà
+         * mobile / tablet / desktop.
+         * Les classes ci-dessus sont
+         * donc utilisées directement.
+         */
+
+        @media (max-width: 420px) {
+          .mode-mobile .topbarTitle strong {
+            max-width: 115px;
             overflow: hidden;
             text-overflow: ellipsis;
-            white-space: nowrap;
-            font-size: 9px;
-            font-weight: 700;
           }
 
-          .mobileMenuScreen {
-            position: fixed;
-            inset: 0;
-            z-index: 100;
-            width: 100vw;
-            height: 100dvh;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-            background: #f4f6f9;
+          .mode-mobile .nukutepipiLogoWrap {
+            display: none;
           }
 
-          .mobileMenuTopbar {
-            flex: 0 0 auto;
-            min-height: 72px;
-            padding:
-              calc(10px + env(safe-area-inset-top))
-              16px
-              10px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            background: #fff;
-            border-bottom: 1px solid #e7eaf0;
-          }
-
-          .mobileMenuTopbar > div {
-            display: flex;
-            flex-direction: column;
-          }
-
-          .mobileMenuTopbar span {
-            color: #98a2b3;
-            font-size: 9px;
-            font-weight: 800;
-            letter-spacing: .08em;
-          }
-
-          .mobileMenuTopbar strong {
-            margin-top: 2px;
-            font-size: 19px;
-          }
-
-          .mobileMenuTopbar button {
-            width: 44px;
-            height: 44px;
-            border: 1px solid #e4e7ec;
-            border-radius: 12px;
-            background: #fff;
-            font-size: 25px;
-          }
-
-          .mobileMenuBody {
-            flex: 1;
-            overflow-y: auto;
-            padding:
-              16px
-              14px
-              calc(24px + env(safe-area-inset-bottom));
-          }
-
-          .mobileMenuGroup {
-            margin-bottom: 22px;
-          }
-
-          .mobileMenuGroup h3 {
-            margin: 0 0 10px;
-            color: #667085;
-            font-size: 12px;
-            text-transform: uppercase;
-            letter-spacing: .05em;
-          }
-
-          .mobileMenuGrid {
-            display: grid;
-            grid-template-columns:
-              repeat(2, minmax(0,1fr));
-            gap: 10px;
-          }
-
-          .mobileMenuGrid a {
-            min-width: 0;
-            min-height: 76px;
-            padding: 12px;
-            border: 1px solid #e5e9f0;
-            border-radius: 16px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            background: #fff;
-            color: #344054;
-            text-decoration: none;
-            font-size: 12px;
-            font-weight: 700;
-            box-shadow: 0 1px 2px rgba(16,24,40,.03);
-          }
-
-          .mobileMenuGrid a.active {
-            border-color: #b8c3d4;
-            background: #eef3f8;
-            color: #0c1525;
-          }
-
-          .mobileMenuIcon {
-            width: 36px;
-            height: 36px;
-            flex: 0 0 auto;
-            display: grid;
-            place-items: center;
-            border-radius: 11px;
-            background: #f2f4f7;
-            font-size: 17px;
-          }
-        }
-
-        @media (max-width: 390px) {
           .mobileMenuGrid {
             gap: 8px;
           }
 
           .mobileMenuGrid a {
-            min-height: 72px;
             padding: 10px;
             font-size: 11px;
-          }
-
-          .mobileMenuIcon {
-            width: 33px;
-            height: 33px;
           }
         }
       `}</style>
