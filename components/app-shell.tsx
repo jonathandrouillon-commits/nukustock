@@ -13,27 +13,42 @@ type NavItem = {
   href: string
   label: string
   icon: string
+  group:
+    | 'Stock'
+    | 'Opérations'
+    | 'Inventaires'
+    | 'Administration'
 }
 
 const navItems: NavItem[] = [
-  { href: '/', label: 'Dashboard', icon: '⌂' },
-  { href: '/products', label: 'Produits', icon: '▣' },
-  { href: '/stocks', label: 'Stocks', icon: '▤' },
-  { href: '/locations', label: 'Lieux de stockage', icon: '⌖' },
-  { href: '/movements', label: 'Mouvements', icon: '↕' },
-  { href: '/requests', label: 'Réquisitions', icon: '☷' },
-  { href: '/orders', label: 'Commandes', icon: '▧' },
-  { href: '/transfers', label: 'Transferts', icon: '⇄' },
-  { href: '/inventory', label: 'Inventaires', icon: '☑' },
-  { href: '/suppliers', label: 'Fournisseurs', icon: '◇' },
-  { href: '/import', label: 'Import / Export', icon: '⇅' },
-  { href: '/labels', label: 'Étiquettes', icon: '▦' },
-  { href: '/reports', label: 'Rapports', icon: '▥' },
-  { href: '/setup', label: 'SET UP', icon: '◫' },
-  { href: '/settings', label: 'Réglages', icon: '⚙' },
+  { href: '/', label: 'Dashboard', icon: '⌂', group: 'Stock' },
+  { href: '/products', label: 'Produits', icon: '▣', group: 'Stock' },
+  { href: '/stocks', label: 'Stocks', icon: '▤', group: 'Stock' },
+  { href: '/locations', label: 'Lieux de stockage', icon: '⌖', group: 'Stock' },
+  { href: '/movements', label: 'Mouvements', icon: '↕', group: 'Stock' },
+
+  { href: '/requests', label: 'Réquisitions', icon: '☷', group: 'Opérations' },
+  { href: '/orders', label: 'Commandes', icon: '▧', group: 'Opérations' },
+  { href: '/transfers', label: 'Transferts', icon: '⇄', group: 'Opérations' },
+
+  { href: '/inventory', label: 'Inventaires', icon: '☑', group: 'Inventaires' },
+  { href: '/reports', label: 'Rapports', icon: '▥', group: 'Inventaires' },
+
+  { href: '/suppliers', label: 'Fournisseurs', icon: '◇', group: 'Administration' },
+  { href: '/import', label: 'Import / Export', icon: '⇅', group: 'Administration' },
+  { href: '/labels', label: 'Étiquettes', icon: '▦', group: 'Administration' },
+  { href: '/setup', label: 'SET UP', icon: '◫', group: 'Administration' },
+  { href: '/settings', label: 'Réglages', icon: '⚙', group: 'Administration' },
 ]
 
-const mobileMainItems = [
+const groups: NavItem['group'][] = [
+  'Stock',
+  'Opérations',
+  'Inventaires',
+  'Administration',
+]
+
+const mobileQuickLinks = [
   '/',
   '/stocks',
   '/requests',
@@ -77,8 +92,8 @@ export function AppShell({
       {tabletSidebarOpen && (
         <button
           type="button"
-          aria-label="Fermer le menu"
           className="sidebarOverlay"
+          aria-label="Fermer le menu"
           onClick={() =>
             setTabletSidebarOpen(false)
           }
@@ -103,9 +118,9 @@ export function AppShell({
           </div>
 
           <button
-            className="sidebarClose"
             type="button"
-            aria-label="Fermer le menu"
+            className="sidebarClose"
+            aria-label="Fermer"
             onClick={() =>
               setTabletSidebarOpen(false)
             }
@@ -115,35 +130,40 @@ export function AppShell({
         </div>
 
         <nav className="sidebarNav">
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={
-                isActive(
-                  pathname,
-                  item.href
-                )
-                  ? 'active'
-                  : undefined
-              }
-            >
-              <span
-                className="sidebarIcon"
-                aria-hidden="true"
+          {navItems.map(
+            (item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={
+                  isActive(
+                    pathname,
+                    item.href
+                  )
+                    ? 'active'
+                    : ''
+                }
               >
-                {item.icon}
-              </span>
+                <span
+                  className="sidebarIcon"
+                  aria-hidden="true"
+                >
+                  {item.icon}
+                </span>
 
-              <span>
-                {item.label}
-              </span>
-            </Link>
-          ))}
+                <span>
+                  {item.label}
+                </span>
+              </Link>
+            )
+          )}
         </nav>
 
         <div className="sidebarFoot">
-          <strong>NukuStock</strong>
+          <strong>
+            NukuStock
+          </strong>
+
           <span>
             Gestion des stocks Nukutepipi
           </span>
@@ -154,8 +174,8 @@ export function AppShell({
         <header className="topbar">
           <div className="topbarLeft">
             <button
-              className="tabletMenuButton"
               type="button"
+              className="tabletMenuButton"
               aria-label="Ouvrir le menu"
               onClick={() =>
                 setTabletSidebarOpen(true)
@@ -195,7 +215,7 @@ export function AppShell({
       <nav className="mobileNav">
         {navItems
           .filter((item) =>
-            mobileMainItems.includes(
+            mobileQuickLinks.includes(
               item.href
             )
           )
@@ -209,7 +229,7 @@ export function AppShell({
                   item.href
                 )
                   ? 'active'
-                  : undefined
+                  : ''
               }
             >
               <span
@@ -233,10 +253,7 @@ export function AppShell({
               : ''
           }
           onClick={() =>
-            setMobileMenuOpen(
-              (current) =>
-                !current
-            )
+            setMobileMenuOpen(true)
           }
         >
           <span
@@ -253,84 +270,101 @@ export function AppShell({
       </nav>
 
       {mobileMenuOpen && (
-        <>
-          <button
-            type="button"
-            aria-label="Fermer le menu"
-            className="mobileMenuOverlay"
-            onClick={() =>
-              setMobileMenuOpen(false)
-            }
-          />
+        <div className="mobileMenuScreen">
+          <div className="mobileMenuTopbar">
+            <div>
+              <span>
+                NUKUTEPIPI
+              </span>
 
-          <div className="mobileMenuSheet">
-            <div className="mobileMenuHandle" />
-
-            <div className="mobileMenuHead">
-              <div>
-                <strong>
-                  Menu NukuStock
-                </strong>
-
-                <span>
-                  Tous les modules
-                </span>
-              </div>
-
-              <button
-                type="button"
-                aria-label="Fermer"
-                className="mobileMenuClose"
-                onClick={() =>
-                  setMobileMenuOpen(false)
-                }
-              >
-                ×
-              </button>
+              <strong>
+                Menu NukuStock
+              </strong>
             </div>
 
-            <div className="mobileMenuGrid">
-              {navItems.map(
-                (item) => (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={
-                      isActive(
-                        pathname,
-                        item.href
-                      )
-                        ? 'active'
-                        : undefined
-                    }
-                  >
-                    <span
-                      className="mobileMenuIcon"
-                      aria-hidden="true"
-                    >
-                      {item.icon}
-                    </span>
-
-                    <span>
-                      {item.label}
-                    </span>
-                  </Link>
-                )
-              )}
-            </div>
+            <button
+              type="button"
+              aria-label="Fermer"
+              onClick={() =>
+                setMobileMenuOpen(false)
+              }
+            >
+              ×
+            </button>
           </div>
-        </>
+
+          <div className="mobileMenuBody">
+            {groups.map(
+              (group) => (
+                <section
+                  key={group}
+                  className="mobileMenuGroup"
+                >
+                  <h3>
+                    {group}
+                  </h3>
+
+                  <div className="mobileMenuGrid">
+                    {navItems
+                      .filter(
+                        (item) =>
+                          item.group ===
+                          group
+                      )
+                      .map(
+                        (item) => (
+                          <Link
+                            key={
+                              item.href
+                            }
+                            href={
+                              item.href
+                            }
+                            className={
+                              isActive(
+                                pathname,
+                                item.href
+                              )
+                                ? 'active'
+                                : ''
+                            }
+                          >
+                            <span
+                              className="mobileMenuIcon"
+                              aria-hidden="true"
+                            >
+                              {
+                                item.icon
+                              }
+                            </span>
+
+                            <span>
+                              {
+                                item.label
+                              }
+                            </span>
+                          </Link>
+                        )
+                      )}
+                  </div>
+                </section>
+              )
+            )}
+          </div>
+        </div>
       )}
 
       <style jsx global>{`
-        html,
-        body {
-          max-width: 100%;
-          overflow-x: hidden;
+        * {
+          box-sizing: border-box;
         }
 
+        html,
         body {
           margin: 0;
+          width: 100%;
+          max-width: 100%;
+          overflow-x: hidden;
         }
 
         .appShellRoot {
@@ -342,12 +376,12 @@ export function AppShell({
           position: fixed;
           inset: 0 auto 0 0;
           width: 208px;
-          background: #0c1525;
-          color: #fff;
           z-index: 60;
           display: flex;
           flex-direction: column;
-          transition: transform 0.22s ease;
+          background: #0c1525;
+          color: #fff;
+          transition: transform .2s ease;
         }
 
         .sidebarBrand {
@@ -362,25 +396,22 @@ export function AppShell({
         .brandMark {
           width: 38px;
           height: 38px;
+          flex: 0 0 auto;
           border-radius: 12px;
           display: grid;
           place-items: center;
-          flex: 0 0 auto;
-          font-size: 17px;
-          font-weight: 900;
           background: #e8edf5;
           color: #0c1525;
+          font-weight: 900;
         }
 
         .brandText {
-          min-width: 0;
           display: flex;
           flex-direction: column;
         }
 
         .brandText strong {
           font-size: 14px;
-          line-height: 1.2;
         }
 
         .brandText span {
@@ -399,7 +430,6 @@ export function AppShell({
           background: rgba(255,255,255,.08);
           color: #fff;
           font-size: 23px;
-          cursor: pointer;
         }
 
         .sidebarNav {
@@ -410,22 +440,16 @@ export function AppShell({
 
         .sidebarNav a {
           min-height: 42px;
-          margin-bottom: 3px;
           padding: 0 12px;
+          margin-bottom: 3px;
           border-radius: 10px;
           display: flex;
           align-items: center;
           gap: 10px;
-          text-decoration: none;
           color: #91a0b6;
+          text-decoration: none;
           font-size: 13px;
           font-weight: 600;
-          transition: .15s ease;
-        }
-
-        .sidebarNav a:hover {
-          background: rgba(255,255,255,.06);
-          color: #fff;
         }
 
         .sidebarNav a.active {
@@ -437,25 +461,20 @@ export function AppShell({
           width: 18px;
           display: inline-flex;
           justify-content: center;
-          flex-shrink: 0;
+          flex: 0 0 auto;
         }
 
         .sidebarFoot {
           padding: 16px;
-          border-top: 1px solid rgba(255,255,255,.08);
           display: flex;
           flex-direction: column;
           gap: 3px;
-        }
-
-        .sidebarFoot strong {
-          font-size: 12px;
+          border-top: 1px solid rgba(255,255,255,.08);
         }
 
         .sidebarFoot span {
           color: #728097;
           font-size: 10px;
-          line-height: 1.35;
         }
 
         .main {
@@ -469,13 +488,13 @@ export function AppShell({
           z-index: 40;
           height: 78px;
           padding: 0 28px;
-          background: rgba(255,255,255,.96);
-          backdrop-filter: blur(12px);
-          border-bottom: 1px solid #e7eaf0;
           display: flex;
           align-items: center;
           justify-content: space-between;
           gap: 16px;
+          background: rgba(255,255,255,.96);
+          border-bottom: 1px solid #e7eaf0;
+          backdrop-filter: blur(12px);
         }
 
         .topbarLeft,
@@ -490,21 +509,21 @@ export function AppShell({
         }
 
         .topbarRight {
+          flex: 0 0 auto;
           gap: 14px;
-          flex-shrink: 0;
         }
 
         .topbarTitle {
+          min-width: 0;
           display: flex;
           flex-direction: column;
-          min-width: 0;
         }
 
         .topbarTitle .eyebrow {
           color: #9aa4b2;
           font-size: 10px;
-          letter-spacing: .08em;
           font-weight: 800;
+          letter-spacing: .08em;
         }
 
         .topbarTitle strong {
@@ -520,9 +539,7 @@ export function AppShell({
           border: 1px solid #e4e7ec;
           border-radius: 12px;
           background: #fff;
-          color: #111827;
           font-size: 20px;
-          cursor: pointer;
         }
 
         .nukutepipiLogoWrap {
@@ -542,12 +559,12 @@ export function AppShell({
         }
 
         .pageContent {
+          width: 100%;
           min-width: 0;
         }
 
         .mobileNav,
-        .mobileMenuSheet,
-        .mobileMenuOverlay,
+        .mobileMenuScreen,
         .sidebarOverlay {
           display: none;
         }
@@ -572,9 +589,9 @@ export function AppShell({
             display: block;
             position: fixed;
             inset: 0;
+            z-index: 55;
             border: 0;
             background: rgba(10,18,30,.34);
-            z-index: 55;
           }
 
           .main {
@@ -589,15 +606,23 @@ export function AppShell({
           .topbar {
             padding-inline: 20px;
           }
-
-          .pageContent {
-            width: 100%;
-          }
         }
 
         @media (max-width: 767px) {
+          html,
+          body,
+          .appShellRoot,
+          .main,
+          .pageContent {
+            width: 100% !important;
+            max-width: 100vw !important;
+            min-width: 0 !important;
+            overflow-x: hidden !important;
+          }
+
           .appShellRoot {
-            padding-bottom: calc(76px + env(safe-area-inset-bottom));
+            padding-bottom:
+              calc(72px + env(safe-area-inset-bottom));
           }
 
           .sidebar,
@@ -606,7 +631,7 @@ export function AppShell({
           }
 
           .main {
-            margin-left: 0;
+            margin-left: 0 !important;
           }
 
           .topbar {
@@ -627,7 +652,7 @@ export function AppShell({
           }
 
           .nukutepipiLogoWrap {
-            width: 64px;
+            width: 62px;
             height: 34px;
             border-radius: 7px;
           }
@@ -636,13 +661,11 @@ export function AppShell({
             gap: 7px;
           }
 
-          .pageContent {
-            width: 100%;
-            min-width: 0;
-          }
-
+          .pageContent,
           .pageContent > * {
-            max-width: 100%;
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
           }
 
           .pageContent .toolbar {
@@ -660,37 +683,16 @@ export function AppShell({
             grid-template-columns: 1fr !important;
           }
 
-          .pageContent .modalBackdrop {
-            align-items: flex-end !important;
-            padding: 0 !important;
-          }
-
-          .pageContent .modal {
-            width: 100% !important;
-            max-width: none !important;
-            max-height: 92dvh !important;
-            margin: 0 !important;
-            border-radius: 20px 20px 0 0 !important;
-            overflow-y: auto !important;
-            padding-bottom:
-              calc(20px + env(safe-area-inset-bottom)) !important;
-          }
-
           .pageContent .tableWrap {
+            max-width: calc(100vw - 24px);
             overflow-x: auto !important;
             -webkit-overflow-scrolling: touch;
-            max-width: calc(100vw - 24px);
           }
 
-          .pageContent table {
-            font-size: 12px;
-          }
-
-          .pageContent .button,
-          .pageContent button,
           .pageContent input,
           .pageContent select,
-          .pageContent textarea {
+          .pageContent textarea,
+          .pageContent button {
             font-size: 16px;
           }
 
@@ -700,18 +702,25 @@ export function AppShell({
             right: 0;
             bottom: 0;
             z-index: 80;
-            height: calc(66px + env(safe-area-inset-bottom));
-            padding-bottom: env(safe-area-inset-bottom);
-            background: rgba(255,255,255,.98);
-            backdrop-filter: blur(16px);
-            border-top: 1px solid #e6e9ef;
+            width: 100vw;
+            max-width: 100vw;
+            height:
+              calc(66px + env(safe-area-inset-bottom));
+            padding-bottom:
+              env(safe-area-inset-bottom);
             display: grid;
-            grid-template-columns: repeat(5, 1fr);
+            grid-template-columns:
+              repeat(5, minmax(0,1fr));
+            background: rgba(255,255,255,.98);
+            border-top: 1px solid #e6e9ef;
             box-shadow: 0 -8px 30px rgba(15,23,42,.08);
+            backdrop-filter: blur(16px);
           }
 
           .mobileNav a,
           .mobileNav button {
+            width: 100%;
+            min-width: 0;
             border: 0;
             background: transparent;
             color: #7c8797;
@@ -721,9 +730,7 @@ export function AppShell({
             align-items: center;
             justify-content: center;
             gap: 4px;
-            min-width: 0;
             font-family: inherit;
-            cursor: pointer;
           }
 
           .mobileNav a.active,
@@ -737,7 +744,9 @@ export function AppShell({
           }
 
           .mobileNavLabel {
-            max-width: 100%;
+            width: 100%;
+            padding: 0 2px;
+            text-align: center;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -745,165 +754,136 @@ export function AppShell({
             font-weight: 700;
           }
 
-          .mobileMenuOverlay {
-            display: block;
+          .mobileMenuScreen {
             position: fixed;
             inset: 0;
-            z-index: 85;
-            border: 0;
-            background: rgba(8,15,27,.48);
+            z-index: 100;
+            width: 100vw;
+            height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background: #f4f6f9;
           }
 
-          .mobileMenuSheet {
-            display: block;
-            position: fixed;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            z-index: 90;
-            max-height: 82dvh;
-            overflow-y: auto;
+          .mobileMenuTopbar {
+            flex: 0 0 auto;
+            min-height: 72px;
             padding:
-              10px 16px
-              calc(22px + env(safe-area-inset-bottom));
-            background: #fff;
-            border-radius: 24px 24px 0 0;
-            box-shadow: 0 -24px 60px rgba(0,0,0,.2);
-          }
-
-          .mobileMenuHandle {
-            width: 44px;
-            height: 5px;
-            margin: 0 auto 14px;
-            border-radius: 999px;
-            background: #d5dae1;
-          }
-
-          .mobileMenuHead {
+              calc(10px + env(safe-area-inset-top))
+              16px
+              10px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             gap: 12px;
-            margin-bottom: 15px;
+            background: #fff;
+            border-bottom: 1px solid #e7eaf0;
           }
 
-          .mobileMenuHead > div {
+          .mobileMenuTopbar > div {
             display: flex;
             flex-direction: column;
           }
 
-          .mobileMenuHead strong {
-            font-size: 18px;
+          .mobileMenuTopbar span {
+            color: #98a2b3;
+            font-size: 9px;
+            font-weight: 800;
+            letter-spacing: .08em;
           }
 
-          .mobileMenuHead span {
+          .mobileMenuTopbar strong {
             margin-top: 2px;
-            color: #7b8493;
-            font-size: 11px;
+            font-size: 19px;
           }
 
-          .mobileMenuClose {
-            width: 42px;
-            height: 42px;
+          .mobileMenuTopbar button {
+            width: 44px;
+            height: 44px;
             border: 1px solid #e4e7ec;
             border-radius: 12px;
             background: #fff;
-            font-size: 24px;
-            cursor: pointer;
+            font-size: 25px;
+          }
+
+          .mobileMenuBody {
+            flex: 1;
+            overflow-y: auto;
+            padding:
+              16px
+              14px
+              calc(24px + env(safe-area-inset-bottom));
+          }
+
+          .mobileMenuGroup {
+            margin-bottom: 22px;
+          }
+
+          .mobileMenuGroup h3 {
+            margin: 0 0 10px;
+            color: #667085;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: .05em;
           }
 
           .mobileMenuGrid {
             display: grid;
-            grid-template-columns: repeat(2, minmax(0,1fr));
-            gap: 9px;
+            grid-template-columns:
+              repeat(2, minmax(0,1fr));
+            gap: 10px;
           }
 
           .mobileMenuGrid a {
-            min-height: 64px;
-            padding: 10px 12px;
-            border: 1px solid #e8ebf0;
-            border-radius: 14px;
-            color: #344054;
-            text-decoration: none;
+            min-width: 0;
+            min-height: 76px;
+            padding: 12px;
+            border: 1px solid #e5e9f0;
+            border-radius: 16px;
             display: flex;
             align-items: center;
             gap: 10px;
+            background: #fff;
+            color: #344054;
+            text-decoration: none;
             font-size: 12px;
             font-weight: 700;
+            box-shadow: 0 1px 2px rgba(16,24,40,.03);
           }
 
           .mobileMenuGrid a.active {
+            border-color: #b8c3d4;
+            background: #eef3f8;
             color: #0c1525;
-            border-color: #cbd5e1;
-            background: #f2f5f9;
           }
 
           .mobileMenuIcon {
-            width: 31px;
-            height: 31px;
+            width: 36px;
+            height: 36px;
             flex: 0 0 auto;
             display: grid;
             place-items: center;
-            border-radius: 9px;
+            border-radius: 11px;
             background: #f2f4f7;
-          }
-        }
-
-
-        @media (max-width: 767px) {
-          .mobileNav {
-            grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
-          }
-
-          .mobileNav a,
-          .mobileNav button {
-            min-height: 66px !important;
-            padding: 5px 2px !important;
-          }
-
-          .mobileMenuSheet {
-            display: block !important;
-            width: 100% !important;
-            box-sizing: border-box !important;
-          }
-
-          .mobileMenuGrid {
-            width: 100% !important;
-            box-sizing: border-box !important;
-          }
-
-          .pageContent,
-          .pageContent > div,
-          .pageContent .list {
-            width: 100% !important;
-            max-width: 100% !important;
-            min-width: 0 !important;
-            box-sizing: border-box !important;
-          }
-
-          .pageContent .list {
-            overflow: visible !important;
+            font-size: 17px;
           }
         }
 
         @media (max-width: 390px) {
-          .topbarTitle strong {
-            max-width: 130px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-          }
-
-          .nukutepipiLogoWrap {
-            width: 54px;
-          }
-
           .mobileMenuGrid {
-            gap: 7px;
+            gap: 8px;
           }
 
           .mobileMenuGrid a {
-            padding-inline: 9px;
+            min-height: 72px;
+            padding: 10px;
             font-size: 11px;
+          }
+
+          .mobileMenuIcon {
+            width: 33px;
+            height: 33px;
           }
         }
       `}</style>
