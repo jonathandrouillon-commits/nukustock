@@ -2285,6 +2285,102 @@ export default function Requests() {
           }
         }
       `}</style>
+
+      <style jsx global>{`
+        @media (max-width: 767px) {
+          .pageContent .list {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            padding: 0 12px 24px !important;
+            margin: 0 !important;
+            overflow: hidden !important;
+          }
+
+          .requestCardWrap {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            margin: 0 !important;
+            overflow: hidden !important;
+          }
+
+          .requestCardWrap > * {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            overflow: hidden !important;
+          }
+
+          .requestProductRow {
+            display: flex !important;
+            flex-direction: column !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            gap: 5px !important;
+            padding: 12px 0 !important;
+            overflow: hidden !important;
+          }
+
+          .requestProductRow > * {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            white-space: normal !important;
+            overflow-wrap: anywhere !important;
+            word-break: normal !important;
+          }
+
+          .requestProductRow > strong {
+            display: block !important;
+            font-size: 16px !important;
+            line-height: 1.25 !important;
+          }
+
+          .requestProductRow > span {
+            display: block !important;
+            font-size: 13px !important;
+            line-height: 1.35 !important;
+          }
+
+          .requestActions {
+            display: grid !important;
+            grid-template-columns: 1fr !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            gap: 8px !important;
+            margin-top: 12px !important;
+          }
+
+          .requestActions button {
+            grid-column: 1 !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            min-height: 46px !important;
+            padding: 10px 12px !important;
+            white-space: normal !important;
+            overflow-wrap: anywhere !important;
+            line-height: 1.2 !important;
+          }
+
+          .requestActions .button {
+            width: 100% !important;
+          }
+
+          .requestCardWrap [style*="gridTemplateColumns"],
+          .requestCardWrap [style*="grid-template-columns"] {
+            grid-template-columns: 1fr !important;
+          }
+
+          .requestCardWrap [style*="minmax(180px"],
+          .requestCardWrap [style*="110px"] {
+            display: flex !important;
+            flex-direction: column !important;
+          }
+        }
+      `}</style>
     </Page>
   )
 }
