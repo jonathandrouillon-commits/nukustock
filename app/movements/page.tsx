@@ -482,93 +482,52 @@ export default function StockMovementsPage() {
         </button>
       }
     >
-      <div className="movementStats">
+      <div className="mvStats">
         <Card>
-          <div className="movementStatLabel">
-            Mouvements affichés
-          </div>
+          <div className="mvStatTitle">Mouvements affichés</div>
+          <div className="mvStatNumber">{filtered.length}</div>
+        </Card>
 
-          <div className="movementStatValue">
-            {filtered.length}
+        <Card>
+          <div className="mvStatTitle">Entrées</div>
+          <div className="mvStatNumber">
+            +{totalEntries.toLocaleString('fr-FR')}
           </div>
         </Card>
 
         <Card>
-          <div className="movementStatLabel">
-            Entrées
-          </div>
-
-          <div className="movementStatValue">
-            +
-            {totalEntries.toLocaleString(
-              'fr-FR'
-            )}
-          </div>
-        </Card>
-
-        <Card>
-          <div className="movementStatLabel">
-            Sorties
-          </div>
-
-          <div className="movementStatValue">
-            -
-            {totalOutputs.toLocaleString(
-              'fr-FR'
-            )}
+          <div className="mvStatTitle">Sorties</div>
+          <div className="mvStatNumber">
+            -{totalOutputs.toLocaleString('fr-FR')}
           </div>
         </Card>
       </div>
 
-      <Card>
-        <div className="movementFilters">
-          <div className="movementField movementSearch">
-            <label>
-              Recherche
-            </label>
-
+      <div className="mvFilterCard">
+        <div className="mvFilterGridTop">
+          <div className="mvField">
+            <label>Recherche</label>
             <input
-              className="input"
               value={q}
-              onChange={(e) =>
-                setQ(
-                  e.target.value
-                )
-              }
+              onChange={(e) => setQ(e.target.value)}
               placeholder="Rechercher..."
             />
           </div>
 
-          <div className="movementField">
-            <label>
-              Mouvement
-            </label>
-
+          <div className="mvField">
+            <label>Mouvement</label>
             <select
-              className="select"
               value={typeFilter}
               onChange={(e) =>
                 setTypeFilter(
-                  e.target
-                    .value as MovementFilter
+                  e.target.value as MovementFilter
                 )
               }
             >
-              <option value="Tous">
-                Tous les mouvements
-              </option>
-
-              {Object.entries(
-                movementLabels
-              ).map(
-                ([
-                  value,
-                  label,
-                ]) => (
-                  <option
-                    key={value}
-                    value={value}
-                  >
+              <option value="Tous">Tous les mouvements</option>
+              {Object.entries(movementLabels).map(
+                ([value, label]) => (
+                  <option key={value} value={value}>
                     {label}
                   </option>
                 )
@@ -576,318 +535,188 @@ export default function StockMovementsPage() {
             </select>
           </div>
 
-          <div className="movementField">
-            <label>
-              Produit
-            </label>
-
+          <div className="mvField">
+            <label>Produit</label>
             <select
-              className="select"
               value={productFilter}
               onChange={(e) =>
-                setProductFilter(
-                  e.target.value
-                )
+                setProductFilter(e.target.value)
               }
             >
-              <option value="Tous">
-                Tous les produits
-              </option>
-
+              <option value="Tous">Tous les produits</option>
               {[...products]
-                .sort(
-                  (a, b) =>
-                    a.name.localeCompare(
-                      b.name,
-                      'fr'
-                    )
+                .sort((a, b) =>
+                  a.name.localeCompare(b.name, 'fr')
                 )
-                .map(
-                  (product) => (
-                    <option
-                      key={
-                        product.id
-                      }
-                      value={
-                        product.id
-                      }
-                    >
-                      {
-                        product.name
-                      }
-                    </option>
-                  )
-                )}
+                .map((product) => (
+                  <option
+                    key={product.id}
+                    value={product.id}
+                  >
+                    {product.name}
+                  </option>
+                ))}
             </select>
           </div>
 
-          <div className="movementField">
-            <label>
-              Lieu
-            </label>
-
+          <div className="mvField">
+            <label>Lieu</label>
             <select
-              className="select"
               value={locationFilter}
               onChange={(e) =>
-                setLocationFilter(
-                  e.target.value
-                )
+                setLocationFilter(e.target.value)
               }
             >
-              <option value="Tous">
-                Tous les lieux
-              </option>
-
-              {locations.map(
-                (location) => (
-                  <option
-                    key={
-                      location
-                    }
-                    value={
-                      location
-                    }
-                  >
-                    {location}
-                  </option>
-                )
-              )}
+              <option value="Tous">Tous les lieux</option>
+              {locations.map((location) => (
+                <option
+                  key={location}
+                  value={location}
+                >
+                  {location}
+                </option>
+              ))}
             </select>
           </div>
+        </div>
 
-          <div className="movementField">
-            <label>
-              Du
-            </label>
-
+        <div className="mvFilterGridBottom">
+          <div className="mvField">
+            <label>Du</label>
             <input
-              className="input"
               type="date"
               value={dateFrom}
               onChange={(e) =>
-                setDateFrom(
-                  e.target.value
-                )
+                setDateFrom(e.target.value)
               }
             />
           </div>
 
-          <div className="movementField">
-            <label>
-              Au
-            </label>
-
+          <div className="mvField">
+            <label>Au</label>
             <input
-              className="input"
               type="date"
               value={dateTo}
               onChange={(e) =>
-                setDateTo(
-                  e.target.value
-                )
+                setDateTo(e.target.value)
               }
             />
           </div>
 
-          <div className="movementReset">
+          <div className="mvReset">
             <button
-              className="button secondary"
               type="button"
-              onClick={
-                resetFilters
-              }
+              onClick={resetFilters}
             >
               Réinitialiser
             </button>
           </div>
         </div>
-      </Card>
+      </div>
 
       <Card>
-        <div className="movementTableWrap">
-          <div className="movementTable">
-            <div className="movementTableHeader">
-              <div>
-                Date
-              </div>
-
-              <div>
-                Mouvement
-              </div>
-
-              <div>
-                Référence
-              </div>
-
-              <div>
-                Produit
-              </div>
-
-              <div>
-                Qté
-              </div>
-
-              <div>
-                Source
-              </div>
-
-              <div>
-                Destination
-              </div>
-
-              <div>
-                Opération
-              </div>
+        <div className="mvTableScroll">
+          <div className="mvTable">
+            <div className="mvTableHead">
+              <div>Date</div>
+              <div>Mouvement</div>
+              <div>Référence</div>
+              <div>Produit</div>
+              <div>Qté</div>
+              <div>Source</div>
+              <div>Destination</div>
+              <div>Opération</div>
             </div>
 
-            {filtered.map(
-              (movement) => (
-                <div
-                  key={
-                    movement.id
-                  }
-                  className="movementRow"
-                >
-                  <div className="movementCell movementDate">
-                    <span className="mobileCellLabel">
-                      Date
-                    </span>
+            {filtered.map((movement) => (
+              <div
+                key={movement.id}
+                className="mvRow"
+              >
+                <div className="mvCell">
+                  <span className="mvMobileLabel">Date</span>
+                  {new Date(
+                    movement.createdAt
+                  ).toLocaleString('fr-FR')}
+                </div>
 
-                    <span>
-                      {new Date(
-                        movement.createdAt
-                      ).toLocaleString(
-                        'fr-FR'
-                      )}
-                    </span>
-                  </div>
+                <div className="mvCell">
+                  <span className="mvMobileLabel">Mouvement</span>
+                  <Badge
+                    tone={getMovementTone(movement)}
+                  >
+                    {movementLabels[movement.type]}
+                  </Badge>
+                </div>
 
-                  <div className="movementCell">
-                    <span className="mobileCellLabel">
-                      Mouvement
-                    </span>
+                <div className="mvCell">
+                  <span className="mvMobileLabel">Référence</span>
+                  <strong>
+                    {movement.internalRef || '—'}
+                  </strong>
+                </div>
 
-                    <Badge
-                      tone={getMovementTone(
-                        movement
-                      )}
-                    >
-                      {
-                        movementLabels[
-                          movement.type
-                        ]
-                      }
-                    </Badge>
-                  </div>
+                <div className="mvCell">
+                  <span className="mvMobileLabel">Produit</span>
+                  <div>
+                    <strong>{movement.productName}</strong>
 
-                  <div className="movementCell">
-                    <span className="mobileCellLabel">
-                      Référence
-                    </span>
+                    {(movement.lotNumber ||
+                      movement.expiry) && (
+                      <div className="mvSub">
+                        {movement.lotNumber
+                          ? `Lot ${movement.lotNumber}`
+                          : ''}
 
-                    <strong>
-                      {movement.internalRef ||
-                        '—'}
-                    </strong>
-                  </div>
+                        {movement.lotNumber &&
+                        movement.expiry
+                          ? ' · '
+                          : ''}
 
-                  <div className="movementCell">
-                    <span className="mobileCellLabel">
-                      Produit
-                    </span>
-
-                    <div>
-                      <strong>
-                        {
-                          movement.productName
-                        }
-                      </strong>
-
-                      {(movement.lotNumber ||
-                        movement.expiry) && (
-                        <div className="movementSubtext">
-                          {movement.lotNumber
-                            ? `Lot ${movement.lotNumber}`
-                            : ''}
-
-                          {movement.lotNumber &&
-                          movement.expiry
-                            ? ' · '
-                            : ''}
-
-                          {movement.expiry
-                            ? `DLUO/DLC ${new Date(
-                                `${movement.expiry}T00:00:00`
-                              ).toLocaleDateString(
-                                'fr-FR'
-                              )}`
-                            : ''}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="movementCell">
-                    <span className="mobileCellLabel">
-                      Qté
-                    </span>
-
-                    <strong className="movementQuantity">
-                      {formatQuantity(
-                        movement.quantity
-                      )}
-                    </strong>
-                  </div>
-
-                  <div className="movementCell">
-                    <span className="mobileCellLabel">
-                      Source
-                    </span>
-
-                    <span>
-                      {movement.fromLocation ||
-                        '—'}
-                    </span>
-                  </div>
-
-                  <div className="movementCell">
-                    <span className="mobileCellLabel">
-                      Destination
-                    </span>
-
-                    <span>
-                      {movement.toLocation ||
-                        '—'}
-                    </span>
-                  </div>
-
-                  <div className="movementCell">
-                    <span className="mobileCellLabel">
-                      Opération
-                    </span>
-
-                    <div>
-                      <span>
-                        {movement.referenceId ||
-                          '—'}
-                      </span>
-
-                      {movement.note && (
-                        <div className="movementSubtext">
-                          {
-                            movement.note
-                          }
-                        </div>
-                      )}
-                    </div>
+                        {movement.expiry
+                          ? `DLUO/DLC ${new Date(
+                              `${movement.expiry}T00:00:00`
+                            ).toLocaleDateString('fr-FR')}`
+                          : ''}
+                      </div>
+                    )}
                   </div>
                 </div>
-              )
-            )}
+
+                <div className="mvCell">
+                  <span className="mvMobileLabel">Qté</span>
+                  <strong>
+                    {formatQuantity(movement.quantity)}
+                  </strong>
+                </div>
+
+                <div className="mvCell">
+                  <span className="mvMobileLabel">Source</span>
+                  {movement.fromLocation || '—'}
+                </div>
+
+                <div className="mvCell">
+                  <span className="mvMobileLabel">Destination</span>
+                  {movement.toLocation || '—'}
+                </div>
+
+                <div className="mvCell">
+                  <span className="mvMobileLabel">Opération</span>
+                  <div>
+                    {movement.referenceId || '—'}
+
+                    {movement.note && (
+                      <div className="mvSub">
+                        {movement.note}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
 
             {filtered.length === 0 && (
-              <div className="movementEmpty">
+              <div className="mvEmpty">
                 Aucun mouvement de stock trouvé.
               </div>
             )}
@@ -896,91 +725,145 @@ export default function StockMovementsPage() {
       </Card>
 
       <style jsx global>{`
-        .movementStats {
+        .mvStats {
           display: grid;
-          grid-template-columns:
-            repeat(
-              3,
-              minmax(0, 1fr)
-            );
+          grid-template-columns: repeat(3, minmax(0, 1fr));
           gap: 14px;
           margin-bottom: 16px;
         }
 
-        .movementStats > * {
-          min-height: 104px;
-        }
-
-        .movementStatLabel {
+        .mvStatTitle {
           color: #667085;
-          font-size: 11px;
+          font-size: 12px;
           font-weight: 700;
         }
 
-        .movementStatValue {
+        .mvStatNumber {
           margin-top: 8px;
           color: #101828;
-          font-size: 28px;
+          font-size: 30px;
           line-height: 1;
           font-weight: 900;
         }
 
-        .movementFilters {
+        .mvFilterCard {
+          width: 100%;
+          margin: 0 0 16px;
+          padding: 18px;
+          border: 1px solid #e5e9f0;
+          border-radius: 16px;
+          background: #fff;
+          overflow: hidden;
+        }
+
+        .mvFilterGridTop {
           display: grid;
           grid-template-columns:
-            minmax(220px, 1.35fr)
-            minmax(190px, 1fr)
-            minmax(190px, 1fr)
-            minmax(190px, 1fr);
+            minmax(0, 1.2fr)
+            minmax(0, 1fr)
+            minmax(0, 1fr)
+            minmax(0, 1fr);
           gap: 14px;
           align-items: end;
         }
 
-        .movementField {
+        .mvFilterGridBottom {
+          display: grid;
+          grid-template-columns: 220px 220px 160px;
+          gap: 14px;
+          align-items: end;
+          margin-top: 14px;
+        }
+
+        .mvField {
           min-width: 0;
+          width: 100%;
           display: flex;
           flex-direction: column;
-          gap: 7px;
+          gap: 6px;
         }
 
-        .movementField label {
+        .mvField label {
+          display: block;
+          min-height: 16px;
+          margin: 0;
           color: #667085;
           font-size: 11px;
-          font-weight: 700;
+          line-height: 16px;
+          font-weight: 800;
         }
 
-        .movementField .input,
-        .movementField .select {
-          width: 100%;
-          height: 48px;
-          min-width: 0;
-          margin: 0;
-          border-radius: 12px;
+        .mvField input,
+        .mvField select {
+          width: 100% !important;
+          max-width: 100% !important;
+          min-width: 0 !important;
+          height: 44px !important;
+          min-height: 44px !important;
+          max-height: 44px !important;
+          margin: 0 !important;
+          padding: 0 12px !important;
+          border: 1px solid #d8dee8 !important;
+          border-radius: 10px !important;
+          background: #fff !important;
+          color: #101828 !important;
+          font-family: inherit !important;
+          font-size: 13px !important;
+          line-height: 44px !important;
+          box-shadow: none !important;
+          outline: none !important;
         }
 
-        .movementReset {
+        .mvField select {
+          padding-right: 32px !important;
+        }
+
+        .mvField input[type="date"] {
+          line-height: normal !important;
+        }
+
+        .mvField input:focus,
+        .mvField select:focus {
+          border-color: #98a2b3 !important;
+          box-shadow: 0 0 0 3px rgba(152,162,179,.12) !important;
+        }
+
+        .mvReset {
           display: flex;
-          align-items: end;
+          align-items: flex-end;
         }
 
-        .movementReset .button {
-          min-width: 150px;
-          height: 48px;
-          white-space: nowrap;
+        .mvReset button {
+          width: 160px !important;
+          min-width: 160px !important;
+          height: 44px !important;
+          min-height: 44px !important;
+          margin: 0 !important;
+          padding: 0 16px !important;
+          border: 1px solid #d8dee8 !important;
+          border-radius: 10px !important;
+          background: #fff !important;
+          color: #344054 !important;
+          font-family: inherit !important;
+          font-size: 13px !important;
+          font-weight: 800 !important;
+          line-height: 44px !important;
+          white-space: nowrap !important;
+          cursor: pointer;
         }
 
-        .movementTableWrap {
+        .mvTableScroll {
           width: 100%;
           overflow-x: auto;
           -webkit-overflow-scrolling: touch;
         }
 
-        .movementTable {
+        .mvTable {
           min-width: 1180px;
         }
 
-        .movementTableHeader,
-        .movementRow {
+        .mvTableHead,
+        .mvRow {
           display: grid;
           grid-template-columns:
             145px
@@ -995,19 +878,19 @@ export default function StockMovementsPage() {
           align-items: center;
         }
 
-        .movementTableHeader {
+        .mvTableHead {
           padding: 2px 4px 12px;
           color: #344054;
           font-size: 11px;
           font-weight: 800;
         }
 
-        .movementRow {
+        .mvRow {
           padding: 13px 4px;
           border-top: 1px solid #eef1f5;
         }
 
-        .movementCell {
+        .mvCell {
           min-width: 0;
           color: #344054;
           font-size: 12px;
@@ -1015,100 +898,93 @@ export default function StockMovementsPage() {
           overflow-wrap: anywhere;
         }
 
-        .movementDate {
-          font-size: 11px;
-        }
-
-        .movementQuantity {
-          color: #101828;
-          font-size: 14px;
-        }
-
-        .movementSubtext {
+        .mvSub {
           margin-top: 4px;
           color: #98a2b3;
           font-size: 10px;
           line-height: 1.35;
         }
 
-        .mobileCellLabel {
+        .mvMobileLabel {
           display: none;
         }
 
-        .movementEmpty {
+        .mvEmpty {
           padding: 34px 20px;
           text-align: center;
           color: #667085;
           font-size: 14px;
         }
 
-        @media (max-width: 1150px) {
-          .movementStats {
-            grid-template-columns:
-              repeat(
-                3,
-                minmax(0, 1fr)
-              );
+        @media (max-width: 1100px) {
+          .mvFilterGridTop {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
           }
 
-          .movementFilters {
-            grid-template-columns:
-              repeat(
-                2,
-                minmax(0, 1fr)
-              );
+          .mvFilterGridBottom {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
           }
 
-          .movementReset .button {
-            width: 100%;
+          .mvReset {
+            grid-column: 1 / -1;
+          }
+
+          .mvReset button {
+            width: 100% !important;
           }
         }
 
         @media (max-width: 767px) {
-          .movementStats {
+          .mvStats {
             grid-template-columns: 1fr;
             gap: 10px;
           }
 
-          .movementStats > * {
-            min-height: 88px;
+          .mvFilterCard {
+            padding: 14px;
           }
 
-          .movementStatValue {
-            font-size: 24px;
-          }
-
-          .movementFilters {
+          .mvFilterGridTop,
+          .mvFilterGridBottom {
             grid-template-columns: 1fr;
-            gap: 11px;
+            gap: 10px;
           }
 
-          .movementField .input,
-          .movementField .select,
-          .movementReset .button {
-            width: 100%;
-            min-width: 0;
-            height: 48px;
-            font-size: 16px;
+          .mvFilterGridBottom {
+            margin-top: 10px;
           }
 
-          .movementTableWrap {
+          .mvReset {
+            grid-column: auto;
+          }
+
+          .mvField input,
+          .mvField select,
+          .mvReset button {
+            width: 100% !important;
+            min-width: 0 !important;
+            height: 48px !important;
+            min-height: 48px !important;
+            font-size: 16px !important;
+            line-height: normal !important;
+          }
+
+          .mvTableScroll {
             overflow: visible;
           }
 
-          .movementTable {
+          .mvTable {
             min-width: 0;
             width: 100%;
           }
 
-          .movementTableHeader {
+          .mvTableHead {
             display: none;
           }
 
-          .movementRow {
+          .mvRow {
             display: grid;
-            grid-template-columns:
-              1fr 1fr;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 12px;
             margin-bottom: 12px;
             padding: 14px;
@@ -1117,14 +993,14 @@ export default function StockMovementsPage() {
             background: #fff;
           }
 
-          .movementCell {
+          .mvCell {
             display: flex;
             flex-direction: column;
             gap: 4px;
             font-size: 13px;
           }
 
-          .mobileCellLabel {
+          .mvMobileLabel {
             display: block;
             color: #98a2b3;
             font-size: 9px;
@@ -1133,31 +1009,19 @@ export default function StockMovementsPage() {
             letter-spacing: .04em;
           }
 
-          .movementCell:nth-child(4),
-          .movementCell:nth-child(8) {
+          .mvCell:nth-child(4),
+          .mvCell:nth-child(8) {
             grid-column: 1 / -1;
-          }
-
-          .movementDate {
-            font-size: 12px;
-          }
-
-          .movementQuantity {
-            font-size: 16px;
-          }
-
-          .movementEmpty {
-            padding: 28px 14px;
           }
         }
 
         @media (max-width: 420px) {
-          .movementRow {
+          .mvRow {
             grid-template-columns: 1fr;
           }
 
-          .movementCell:nth-child(4),
-          .movementCell:nth-child(8) {
+          .mvCell:nth-child(4),
+          .mvCell:nth-child(8) {
             grid-column: auto;
           }
         }
