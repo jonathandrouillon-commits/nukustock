@@ -2569,120 +2569,14 @@ export default function Requests() {
             line-height: 1.15 !important;
             font-size: 14px !important;
           }
-
           .view-phone .destinationNativeSelect {
-            display: none !important;
-          }
-
-          .view-phone .destinationMobileButton {
+            display: block !important;
             width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
             min-height: 48px !important;
-            padding: 0 14px !important;
-            border: 1px solid #d0d5dd !important;
-            border-radius: 12px !important;
-            background: #fff !important;
-            color: #101828 !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: space-between !important;
-            gap: 10px !important;
-            text-align: left !important;
+            box-sizing: border-box !important;
             font-size: 16px !important;
-            font-weight: 500 !important;
-          }
-
-          .view-phone .destinationMobileButton span:first-child {
-            min-width: 0 !important;
-            overflow: hidden !important;
-            text-overflow: ellipsis !important;
-            white-space: nowrap !important;
-          }
-
-          .view-phone .destinationPickerBackdrop {
-            position: fixed !important;
-            inset: 0 !important;
-            z-index: 1100 !important;
-            display: flex !important;
-            align-items: flex-end !important;
-            background: rgba(15,23,42,.45) !important;
-          }
-
-          .view-phone .destinationPickerSheet {
-            width: 100% !important;
-            max-height: 82svh !important;
-            display: flex !important;
-            flex-direction: column !important;
-            border-radius: 22px 22px 0 0 !important;
-            background: #fff !important;
-            overflow: hidden !important;
-            box-shadow: 0 -18px 50px rgba(15,23,42,.22) !important;
-          }
-
-          .view-phone .destinationPickerHeader {
-            flex: 0 0 auto !important;
-            min-height: 72px !important;
-            padding: 14px 16px !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: space-between !important;
-            gap: 12px !important;
-            border-bottom: 1px solid #eaecf0 !important;
-          }
-
-          .view-phone .destinationPickerHeader > div {
-            min-width: 0 !important;
-            display: flex !important;
-            flex-direction: column !important;
-          }
-
-          .view-phone .destinationPickerHeader strong {
-            font-size: 18px !important;
-          }
-
-          .view-phone .destinationPickerHeader span {
-            margin-top: 3px !important;
-            color: #667085 !important;
-            font-size: 12px !important;
-          }
-
-          .view-phone .destinationPickerHeader button {
-            min-height: 42px !important;
-            padding: 0 14px !important;
-            border: 1px solid #d0d5dd !important;
-            border-radius: 10px !important;
-            background: #fff !important;
-            color: #344054 !important;
-            font-size: 14px !important;
-            font-weight: 700 !important;
-          }
-
-          .view-phone .destinationPickerList {
-            flex: 1 1 auto !important;
-            min-height: 0 !important;
-            overflow-y: auto !important;
-            -webkit-overflow-scrolling: touch !important;
-            padding-bottom: env(safe-area-inset-bottom) !important;
-          }
-
-          .view-phone .destinationPickerList button {
-            width: 100% !important;
-            min-height: 58px !important;
-            padding: 12px 18px !important;
-            border: 0 !important;
-            border-bottom: 1px solid #f0f2f5 !important;
-            background: #fff !important;
-            color: #101828 !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: space-between !important;
-            gap: 12px !important;
-            text-align: left !important;
-            font-size: 16px !important;
-          }
-
-          .view-phone .destinationPickerList button.active {
-            background: #fff9e8 !important;
-            font-weight: 800 !important;
           }
         }
 
@@ -2821,191 +2715,25 @@ export default function Requests() {
       `}</style>
 
       <style jsx global>{`
-        /* RESPONSIVE FINAL REQUISITIONS */
-        @media (max-width: 900px) {
-          .requestModalBackdrop,
-          .requestModal,
-          .requestProductTable,
-          .requestProductVisualRow,
-          .requestProductVisualRow > * {
-            max-width: 100% !important;
-            min-width: 0 !important;
-            box-sizing: border-box !important;
-          }
-
-          .requestModal {
-            width: 100% !important;
-            overflow-x: hidden !important;
-          }
-
-          .requestModal .formGrid {
-            grid-template-columns: 1fr !important;
-          }
-
-          .requestModal select,
-          .requestModal input,
-          .requestModal textarea {
-            width: 100% !important;
-            max-width: 100% !important;
-            min-width: 0 !important;
-            box-sizing: border-box !important;
-          }
-        }
-
         @media (max-width: 767px) {
-          .requestModalBackdrop {
-            position: fixed !important;
-            inset: 0 !important;
-            width: 100vw !important;
-            height: 100svh !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            overflow: hidden !important;
-          }
-
-          .requestModal {
-            width: 100vw !important;
-            max-width: 100vw !important;
-            height: 100svh !important;
-            max-height: 100svh !important;
-            margin: 0 !important;
-            padding:
-              max(12px, env(safe-area-inset-top))
-              12px
-              calc(140px + env(safe-area-inset-bottom))
-              12px !important;
-            border-radius: 0 !important;
-            overflow-y: auto !important;
-            overflow-x: hidden !important;
-            -webkit-overflow-scrolling: touch !important;
-          }
-
-          .requestModalHead {
-            position: sticky !important;
-            top: -12px !important;
-            z-index: 20 !important;
-            margin: -12px -12px 14px !important;
-            padding:
-              max(12px, env(safe-area-inset-top))
-              12px
-              10px !important;
-            background: #fff !important;
-            border-bottom: 1px solid #eaecf0 !important;
-          }
-
-          .requestModalHead h2 {
-            margin: 0 !important;
-            max-width: calc(100vw - 120px) !important;
-            font-size: 21px !important;
-            line-height: 1.15 !important;
-            overflow-wrap: anywhere !important;
-          }
-
-          .requestModal .formGrid {
-            display: grid !important;
-            grid-template-columns: 1fr !important;
-            gap: 12px !important;
-          }
-
-          .requestProductTableHead {
-            display: none !important;
-          }
-
-          .requestProductVisualRow {
-            display: grid !important;
-            grid-template-columns: 1fr !important;
-            width: 100% !important;
-            gap: 12px !important;
-            padding: 14px 12px !important;
-            overflow: hidden !important;
-          }
-
-          .requestProductVisualRow > div {
-            width: 100% !important;
-            max-width: 100% !important;
-            min-width: 0 !important;
-          }
-
-          .requestProductVisualRow > div:first-child {
-            align-items: flex-start !important;
-          }
-
-          .requestProductPhoto {
-            width: 56px !important;
-            height: 56px !important;
-            min-width: 56px !important;
-            flex: 0 0 56px !important;
-          }
-
-          .requestProductVisualRow select,
-          .requestProductVisualRow input[type="number"] {
-            width: 100% !important;
-            max-width: 100% !important;
-            min-width: 0 !important;
-            min-height: 46px !important;
-          }
-
-          .requestProductVisualRow > div:last-child {
+          .requestModal .destinationNativeSelect,
+          .view-phone .requestModal .destinationNativeSelect {
             display: block !important;
-          }
-
-          .requestProductVisualRow > div:last-child button {
-            width: 100% !important;
-            min-height: 46px !important;
-          }
-
-          .requestModalActions {
-            position: fixed !important;
-            left: 0 !important;
-            right: 0 !important;
-            bottom: 0 !important;
-            z-index: 30 !important;
-            display: grid !important;
-            grid-template-columns: 1fr 1.35fr !important;
-            gap: 8px !important;
-            width: 100vw !important;
-            margin: 0 !important;
-            padding:
-              10px
-              12px
-              calc(10px + env(safe-area-inset-bottom)) !important;
-            background: #fff !important;
-            border-top: 1px solid #e4e7ec !important;
-            box-shadow: 0 -8px 24px rgba(15,23,42,.12) !important;
-          }
-
-          .requestModalActions button {
+            visibility: visible !important;
+            opacity: 1 !important;
             width: 100% !important;
             max-width: 100% !important;
             min-width: 0 !important;
-            min-height: 50px !important;
-            padding: 10px 8px !important;
-            font-size: 14px !important;
-            white-space: normal !important;
-            line-height: 1.15 !important;
-          }
-        }
-
-        @media (max-width: 420px) {
-          .requestModal {
-            padding-left: 10px !important;
-            padding-right: 10px !important;
+            min-height: 48px !important;
+            margin: 0 !important;
+            box-sizing: border-box !important;
+            font-size: 16px !important;
           }
 
-          .requestProductVisualRow {
-            padding-left: 10px !important;
-            padding-right: 10px !important;
-          }
-
-          .requestProductPhoto {
-            width: 50px !important;
-            height: 50px !important;
-            min-width: 50px !important;
-            flex-basis: 50px !important;
-          }
-
-          .requestModalActions {
-            grid-template-columns: 1fr !important;
+          .requestModal .field {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
           }
         }
       `}</style>
