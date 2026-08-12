@@ -23,6 +23,45 @@ import type {
   Product,
 } from '@/lib/types'
 
+const DEFAULT_LOCATIONS = [
+  'Bungalow infini',
+  ...Array.from(
+    { length: 16 },
+    (_, index) => `Bungalow ${index}`
+  ),
+  'Villa 16 - Salon',
+  'Villa 16 - Queen',
+  'Villa 16 - King',
+  'Villa 17 - Salon',
+  'Villa 17 - Queen',
+  'Villa 17 - King',
+  'Business Center',
+  'Container',
+  'Extension Bar',
+  'Extension Bar - Meuble à Vin',
+  'Fare Intendant',
+  'Fitness',
+  'Mirador',
+  'Poker',
+  'Reception',
+  'Resto - Meuble 1',
+  'Resto - Meuble 2',
+  'Salle de Jeux',
+  'Spa 1',
+  'Spa 2',
+  'Sporting',
+  'VDM',
+].sort((a, b) =>
+  a.localeCompare(
+    b,
+    'fr',
+    {
+      numeric: true,
+      sensitivity: 'base',
+    }
+  )
+)
+
 const departments = [
   'Activités',
   'Bar',
@@ -124,6 +163,7 @@ export default function Requests() {
   const {
     items,
     save,
+    removeRequest,
   } = useRequests()
 
   const {
@@ -168,74 +208,17 @@ export default function Requests() {
     )
 
   const allKnownLocations =
-    useMemo(() => {
-      const map =
-        new Map<
-          string,
-          string
-        >()
-
-      for (
-        const location of
-        centralLocations
-      ) {
-        map.set(
-          normalizeLocation(
-            location
-          ),
-          location
-        )
-      }
-
-      for (
-        const product of
-        products
-      ) {
-        for (
-          const lot of
-          product.lots
-        ) {
-          const location =
-            lot.location?.trim()
-
-          if (!location) {
-            continue
-          }
-
-          const key =
-            normalizeLocation(
-              location
-            )
-
-          if (!map.has(key)) {
-            map.set(
-              key,
-              location
-            )
-          }
-        }
-      }
-
-      return [
-        ...map.values(),
-      ].sort((a, b) =>
-        a.localeCompare(
-          b,
-          'fr',
-          {
-            numeric: true,
-            sensitivity:
-              'base',
-          }
-        )
-      )
-    }, [
-      centralLocations,
-      products,
-    ])
+    useMemo(
+      () =>
+        centralLocations.length
+          ? centralLocations
+          : DEFAULT_LOCATIONS,
+      [centralLocations]
+    )
 
   const [open, setOpen] =
     useState(false)
+
 
   const [
     editingRequestId,
@@ -371,6 +354,10 @@ export default function Requests() {
         qty: 1,
       },
     ])
+  }
+
+  const closeRequestModal = () => {
+    setOpen(false)
   }
 
   const openNewRequest = () => {
@@ -712,7 +699,7 @@ export default function Requests() {
       )
   }
 
-  const deleteRequest = (
+  const deleteRequest = async (
     request: InternalRequest
   ) => {
     if (request.stockAppliedAt) {
@@ -731,18 +718,29 @@ export default function Requests() {
       return
     }
 
-    save(
-      items.filter(
-        (item) =>
-          item.id !==
-          request.id
-      )
-    )
-
+    setMsg('')
     setError('')
-    setMsg(
-      `Réquisition ${request.id} supprimée.`
-    )
+
+    try {
+      await removeRequest(
+        request.id
+      )
+
+      setMsg(
+        `Réquisition ${request.id} supprimée définitivement.`
+      )
+    } catch (caughtError) {
+      console.error(
+        'Suppression réquisition :',
+        caughtError
+      )
+
+      setError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'Erreur lors de la suppression de la réquisition.'
+      )
+    }
   }
 
   const getProductLocations =
@@ -1481,9 +1479,9 @@ export default function Requests() {
       </div>
 
       {open && (
-        <div className="modalBackdrop">
-          <div className="modal">
-            <div className="modalHead">
+        <div className="modalBackdrop requestModalBackdrop">
+          <div className="modal requestModal">
+            <div className="modalHead requestModalHead">
               <h2>
                 {editingRequestId
                   ? `Modifier ${editingRequestId}`
@@ -1492,11 +1490,7 @@ export default function Requests() {
 
               <button
                 className="button secondary small"
-                onClick={() =>
-                  setOpen(
-                    false
-                  )
-                }
+                onClick={closeRequestModal}
               >
                 Fermer
               </button>
@@ -1541,6 +1535,7 @@ export default function Requests() {
                 </label>
 
                 <select
+                  className="destinationNativeSelect"
                   value={
                     destination
                   }
@@ -1573,45 +1568,32 @@ export default function Requests() {
                     )
                   )}
                 </select>
+
+
               </div>
             </div>
 
             <div
               style={{
-                marginTop: 20,
-                padding: 12,
-                borderRadius:
-                  10,
-                background:
-                  'rgba(59,130,246,.08)',
-                fontSize: 12,
-              }}
-            >
-              Le lieu source est choisi au moment du traitement. Les lieux réellement présents dans le stock restent disponibles même s'ils ne figurent pas encore dans le référentiel central.
-            </div>
-
-            <div
-              style={{
-                marginTop: 20,
-                display:
-                  'flex',
-                justifyContent:
-                  'space-between',
-                alignItems:
-                  'center',
-                gap: 10,
+                marginTop: 22,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 12,
+                flexWrap: 'wrap',
               }}
             >
               <h3
                 style={{
                   margin: 0,
+                  fontSize: 22,
                 }}
               >
-                Produits demandés
+                Produits requis
               </h3>
 
               <button
-                className="button secondary small"
+                className="button"
                 type="button"
                 onClick={add}
               >
@@ -1620,150 +1602,338 @@ export default function Requests() {
             </div>
 
             <div
+              className="requestProductTable"
               style={{
-                marginTop: 12,
-                display:
-                  'flex',
-                flexDirection:
-                  'column',
-                gap: 10,
+                marginTop: 14,
+                border: '1px solid #e4e7ec',
+                borderRadius: 14,
+                overflow: 'hidden',
+                background: '#fff',
               }}
             >
+              <div
+                className="requestProductTableHead"
+                style={{
+                  minHeight: 50,
+                  padding: '0 14px',
+                  display: 'grid',
+                  gridTemplateColumns:
+                    'minmax(0,1.8fr) minmax(150px,.65fr) 120px',
+                  gap: 14,
+                  alignItems: 'center',
+                  background: '#f8fafc',
+                  color: '#475467',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}
+              >
+                <div>Produit</div>
+                <div>Quantité demandée</div>
+                <div style={{ textAlign: 'right' }}>
+                  Actions
+                </div>
+              </div>
+
+              <div
+                style={{
+                  padding: '10px 14px',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 10,
+                  borderTop: '1px solid #b2ccff',
+                  borderBottom: '1px solid #b2ccff',
+                  background: '#eff8ff',
+                  color: '#344054',
+                  fontSize: 12,
+                  lineHeight: 1.45,
+                }}
+              >
+                <span
+                  style={{
+                    flex: '0 0 auto',
+                    width: 20,
+                    height: 20,
+                    display: 'grid',
+                    placeItems: 'center',
+                    borderRadius: 999,
+                    background: '#1570ef',
+                    color: '#fff',
+                    fontWeight: 900,
+                  }}
+                >
+                  i
+                </span>
+
+                <div>
+                  <strong>
+                    La quantité demandée est exprimée en unité
+                  </strong>{' '}
+                  (pièce, bouteille, canette, etc.).
+                  <div>
+                    Le conditionnement n&apos;apparaît pas pour éviter toute confusion.
+                  </div>
+                </div>
+              </div>
+
               {lines.map(
                 (
                   line,
                   index
-                ) => (
-                  <div
-                    key={
-                      index
-                    }
-                    style={{
-                      display:
-                        'grid',
-                      gridTemplateColumns:
-                        '1fr 120px 90px',
-                      gap: 10,
-                      alignItems:
-                        'end',
-                    }}
-                  >
-                    <div className="field">
-                      <label>
-                        Produit
-                      </label>
+                ) => {
+                  const selectedProduct =
+                    products.find(
+                      (product) =>
+                        product.id ===
+                        line.productId
+                    )
 
-                      <select
-                        value={
-                          line.productId
-                        }
-                        onChange={(e) =>
-                          updateLine(
-                            index,
-                            {
-                              productId:
-                                e
-                                  .target
-                                  .value,
-                            }
-                          )
-                        }
+                  return (
+                    <div
+                      key={index}
+                      className="requestFormProductRow requestProductVisualRow"
+                      style={{
+                        minHeight: 100,
+                        padding: '12px 14px',
+                        display: 'grid',
+                        gridTemplateColumns:
+                          'minmax(0,1.8fr) minmax(150px,.65fr) 120px',
+                        gap: 14,
+                        alignItems: 'center',
+                        borderBottom:
+                          index === lines.length - 1
+                            ? 'none'
+                            : '1px solid #eaecf0',
+                      }}
+                    >
+                      <div
+                        style={{
+                          minWidth: 0,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 12,
+                        }}
                       >
-                        <option value="">
-                          Choisir un produit
-                        </option>
+                        <div
+                          className="requestProductPhoto"
+                          style={{
+                            flex: '0 0 auto',
+                            width: 66,
+                            height: 66,
+                            overflow: 'hidden',
+                            display: 'grid',
+                            placeItems: 'center',
+                            border: '1px solid #e4e7ec',
+                            borderRadius: 10,
+                            background: '#f8fafc',
+                          }}
+                        >
+                          {selectedProduct?.photo ? (
+                            <img
+                              src={selectedProduct.photo}
+                              alt={selectedProduct.name}
+                              style={{
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'contain',
+                              }}
+                            />
+                          ) : (
+                            <span
+                              style={{
+                                color: '#98a2b3',
+                                fontSize: 11,
+                                fontWeight: 800,
+                              }}
+                            >
+                              PHOTO
+                            </span>
+                          )}
+                        </div>
 
-                        {[...products]
-                          .sort(
-                            (
-                              a,
-                              b
-                            ) =>
-                              a.name.localeCompare(
-                                b.name,
-                                'fr'
+                        <div
+                          style={{
+                            minWidth: 0,
+                            flex: '1 1 auto',
+                          }}
+                        >
+                          <select
+                            value={
+                              line.productId
+                            }
+                            onChange={(e) =>
+                              updateLine(
+                                index,
+                                {
+                                  productId:
+                                    e.target.value,
+                                }
                               )
-                          )
-                          .map(
-                            (
-                              product
-                            ) => (
-                              <option
-                                key={
-                                  product.id
-                                }
-                                value={
-                                  product.id
-                                }
+                            }
+                            style={{
+                              width: '100%',
+                              minHeight: 44,
+                              fontWeight: 700,
+                            }}
+                          >
+                            <option value="">
+                              Choisir un produit
+                            </option>
+
+                            {[...products]
+                              .sort(
+                                (
+                                  a,
+                                  b
+                                ) =>
+                                  a.name.localeCompare(
+                                    b.name,
+                                    'fr'
+                                  )
+                              )
+                              .map(
+                                (
+                                  product
+                                ) => (
+                                  <option
+                                    key={
+                                      product.id
+                                    }
+                                    value={
+                                      product.id
+                                    }
+                                  >
+                                    {
+                                      product.name
+                                    }
+                                  </option>
+                                )
+                              )}
+                          </select>
+
+                          {selectedProduct && (
+                            <div
+                              style={{
+                                marginTop: 6,
+                                display: 'grid',
+                                gap: 2,
+                                color: '#667085',
+                                fontSize: 12,
+                              }}
+                            >
+                              <strong
+                                style={{
+                                  color: '#475467',
+                                }}
                               >
                                 {
-                                  product.name
+                                  selectedProduct.internalRef ||
+                                  ''
                                 }
-                              </option>
-                            )
+                              </strong>
+
+                              <span>
+                                {
+                                  [
+                                    selectedProduct.category,
+                                    selectedProduct.subcategory,
+                                  ]
+                                    .filter(Boolean)
+                                    .join(' > ')
+                                }
+                              </span>
+                            </div>
                           )}
-                      </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <input
+                          type="number"
+                          min="1"
+                          value={
+                            line.qty
+                          }
+                          onChange={(e) =>
+                            updateLine(
+                              index,
+                              {
+                                qty:
+                                  Math.max(
+                                    1,
+                                    Number(
+                                      e.target.value
+                                    ) || 1
+                                  ),
+                              }
+                            )
+                          }
+                          style={{
+                            width: '100%',
+                            minHeight: 44,
+                            boxSizing: 'border-box',
+                          }}
+                        />
+
+                        <div
+                          style={{
+                            marginTop: 5,
+                            color: '#175cd3',
+                            fontSize: 11,
+                            fontWeight: 800,
+                          }}
+                        >
+                          unité
+                        </div>
+                      </div>
+
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'flex-end',
+                        }}
+                      >
+                        <button
+                          className="button secondary small"
+                          type="button"
+                          disabled={
+                            lines.length <= 1
+                          }
+                          onClick={() =>
+                            remove(
+                              index
+                            )
+                          }
+                          style={{
+                            minHeight: 44,
+                            color: '#b42318',
+                            borderColor: '#fda29b',
+                          }}
+                        >
+                          Retirer
+                        </button>
+                      </div>
                     </div>
-
-                    <div className="field">
-                      <label>
-                        Quantité
-                      </label>
-
-                      <input
-                        type="number"
-                        min="1"
-                        value={
-                          line.qty
-                        }
-                        onChange={(e) =>
-                          updateLine(
-                            index,
-                            {
-                              qty:
-                                Math.max(
-                                  1,
-                                  Number(
-                                    e
-                                      .target
-                                      .value
-                                  ) ||
-                                    1
-                                ),
-                            }
-                          )
-                        }
-                      />
-                    </div>
-
-                    <button
-                      className="button secondary small"
-                      type="button"
-                      disabled={
-                        lines.length <=
-                        1
-                      }
-                      onClick={() =>
-                        remove(
-                          index
-                        )
-                      }
-                    >
-                      Retirer
-                    </button>
-                  </div>
-                )
-              )}
-            </div>
-
-            <div className="actions">
-              <button
-                className="button secondary"
-                onClick={() =>
-                  setOpen(
-                    false
                   )
                 }
+              )}
+
+              <div
+                style={{
+                  padding: '11px 14px',
+                  borderTop: '1px solid #eaecf0',
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}
+              >
+                Total de lignes : {lines.length}
+              </div>
+            </div>
+
+            <div className="actions requestModalActions">
+              <button
+                className="button secondary"
+                onClick={closeRequestModal}
               >
                 Annuler
               </button>
@@ -2272,6 +2442,248 @@ export default function Requests() {
           .list {
             gap: 12px !important;
           }
+
+
+          /* Nouvelle réquisition — correction téléphone */
+          .view-phone:has(.requestModalBackdrop) .nskMobileNav {
+            display: none !important;
+          }
+
+          .requestModalBackdrop {
+            position: fixed !important;
+            inset: 0 !important;
+            z-index: 1000 !important;
+            width: 100vw !important;
+            height: 100svh !important;
+            max-height: 100svh !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            display: block !important;
+            overflow: hidden !important;
+          }
+
+          .requestModal {
+            position: relative !important;
+            width: 100vw !important;
+            max-width: 100vw !important;
+            height: 100svh !important;
+            max-height: 100svh !important;
+            margin: 0 !important;
+            border-radius: 0 !important;
+            box-sizing: border-box !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+            overscroll-behavior: contain !important;
+            -webkit-overflow-scrolling: touch !important;
+            padding:
+              max(12px, env(safe-area-inset-top))
+              14px
+              calc(150px + env(safe-area-inset-bottom))
+              14px !important;
+          }
+
+          .requestModalHead {
+            position: sticky !important;
+            top: 0 !important;
+            z-index: 1010 !important;
+            margin: -12px -14px 14px !important;
+            padding:
+              max(12px, env(safe-area-inset-top))
+              14px
+              10px !important;
+            background: inherit !important;
+          }
+
+          .requestModalHead h2 {
+            margin: 0 !important;
+            min-width: 0 !important;
+            font-size: 20px !important;
+          }
+
+          .requestModalHead button {
+            flex: 0 0 auto !important;
+            min-height: 42px !important;
+          }
+
+          .requestModal .formGrid {
+            grid-template-columns: 1fr !important;
+            gap: 12px !important;
+          }
+
+          .requestModal select,
+          .requestModal input {
+            display: block !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            min-height: 48px !important;
+            box-sizing: border-box !important;
+            font-size: 16px !important;
+          }
+
+          .requestFormProductRow {
+            grid-template-columns: 1fr !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            gap: 8px !important;
+          }
+
+          .requestFormProductRow > * {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+          }
+
+          .requestFormProductRow button {
+            min-height: 44px !important;
+          }
+
+          .requestModalActions {
+            position: fixed !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            z-index: 1020 !important;
+            display: grid !important;
+            grid-template-columns: 1fr 1.35fr !important;
+            gap: 8px !important;
+            width: 100vw !important;
+            margin: 0 !important;
+            padding:
+              10px
+              12px
+              calc(10px + env(safe-area-inset-bottom)) !important;
+            background: #ffffff !important;
+            border-top: 1px solid #e5e7eb !important;
+            box-shadow: 0 -8px 24px rgba(15,23,42,.12) !important;
+          }
+
+          .requestModalActions button {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            min-height: 50px !important;
+            padding: 10px !important;
+            white-space: normal !important;
+            line-height: 1.15 !important;
+            font-size: 14px !important;
+          }
+
+          .view-phone .destinationNativeSelect {
+            display: none !important;
+          }
+
+          .view-phone .destinationMobileButton {
+            width: 100% !important;
+            min-height: 48px !important;
+            padding: 0 14px !important;
+            border: 1px solid #d0d5dd !important;
+            border-radius: 12px !important;
+            background: #fff !important;
+            color: #101828 !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: space-between !important;
+            gap: 10px !important;
+            text-align: left !important;
+            font-size: 16px !important;
+            font-weight: 500 !important;
+          }
+
+          .view-phone .destinationMobileButton span:first-child {
+            min-width: 0 !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
+          }
+
+          .view-phone .destinationPickerBackdrop {
+            position: fixed !important;
+            inset: 0 !important;
+            z-index: 1100 !important;
+            display: flex !important;
+            align-items: flex-end !important;
+            background: rgba(15,23,42,.45) !important;
+          }
+
+          .view-phone .destinationPickerSheet {
+            width: 100% !important;
+            max-height: 82svh !important;
+            display: flex !important;
+            flex-direction: column !important;
+            border-radius: 22px 22px 0 0 !important;
+            background: #fff !important;
+            overflow: hidden !important;
+            box-shadow: 0 -18px 50px rgba(15,23,42,.22) !important;
+          }
+
+          .view-phone .destinationPickerHeader {
+            flex: 0 0 auto !important;
+            min-height: 72px !important;
+            padding: 14px 16px !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: space-between !important;
+            gap: 12px !important;
+            border-bottom: 1px solid #eaecf0 !important;
+          }
+
+          .view-phone .destinationPickerHeader > div {
+            min-width: 0 !important;
+            display: flex !important;
+            flex-direction: column !important;
+          }
+
+          .view-phone .destinationPickerHeader strong {
+            font-size: 18px !important;
+          }
+
+          .view-phone .destinationPickerHeader span {
+            margin-top: 3px !important;
+            color: #667085 !important;
+            font-size: 12px !important;
+          }
+
+          .view-phone .destinationPickerHeader button {
+            min-height: 42px !important;
+            padding: 0 14px !important;
+            border: 1px solid #d0d5dd !important;
+            border-radius: 10px !important;
+            background: #fff !important;
+            color: #344054 !important;
+            font-size: 14px !important;
+            font-weight: 700 !important;
+          }
+
+          .view-phone .destinationPickerList {
+            flex: 1 1 auto !important;
+            min-height: 0 !important;
+            overflow-y: auto !important;
+            -webkit-overflow-scrolling: touch !important;
+            padding-bottom: env(safe-area-inset-bottom) !important;
+          }
+
+          .view-phone .destinationPickerList button {
+            width: 100% !important;
+            min-height: 58px !important;
+            padding: 12px 18px !important;
+            border: 0 !important;
+            border-bottom: 1px solid #f0f2f5 !important;
+            background: #fff !important;
+            color: #101828 !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: space-between !important;
+            gap: 12px !important;
+            text-align: left !important;
+            font-size: 16px !important;
+          }
+
+          .view-phone .destinationPickerList button.active {
+            background: #fff9e8 !important;
+            font-weight: 800 !important;
+          }
         }
 
         @media (max-width: 390px) {
@@ -2380,6 +2792,32 @@ export default function Requests() {
             flex-direction: column !important;
           }
         }
+
+        @media (max-width: 767px) {
+          .requestProductTableHead {
+            display: none !important;
+          }
+
+          .requestProductVisualRow {
+            grid-template-columns: 1fr !important;
+            gap: 10px !important;
+            align-items: stretch !important;
+          }
+
+          .requestProductPhoto {
+            width: 58px !important;
+            height: 58px !important;
+          }
+
+          .requestProductVisualRow > div:last-child {
+            justify-content: stretch !important;
+          }
+
+          .requestProductVisualRow > div:last-child button {
+            width: 100% !important;
+          }
+        }
+
       `}</style>
     </Page>
   )

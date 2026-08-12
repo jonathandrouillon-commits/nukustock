@@ -37,7 +37,6 @@ const navItems: NavItem[] = [
   { href: '/suppliers', label: 'Fournisseurs', icon: '◇' },
   { href: '/import', label: 'Import / Export', icon: '⇅' },
   { href: '/labels', label: 'Étiquettes', icon: '▦' },
-  { href: '/reports', label: 'Rapports', icon: '▥' },
   { href: '/setup', label: 'SET UP', icon: '◫' },
   { href: '/settings', label: 'Réglages', icon: '⚙' },
 ]
@@ -125,7 +124,7 @@ export function AppShell({
 
   const rootClass = useMemo(
     () =>
-      `nukuShell view-${effectiveMode}`,
+      `nskAppShell view-${effectiveMode}`,
     [effectiveMode]
   )
 
@@ -141,7 +140,22 @@ export function AppShell({
       saved === 'tablet' ||
       saved === 'pc'
     ) {
-      setViewMode(saved)
+      const isDesktopScreen =
+        window.innerWidth >= 1200
+
+      if (
+        isDesktopScreen &&
+        (saved === 'phone' ||
+          saved === 'tablet')
+      ) {
+        setViewMode('pc')
+        window.localStorage.setItem(
+          VIEW_MODE_KEY,
+          'pc'
+        )
+      } else {
+        setViewMode(saved)
+      }
     }
 
     const handleResize = () => {
@@ -198,7 +212,7 @@ export function AppShell({
       {tabletMenuOpen && (
         <button
           type="button"
-          className="tabletOverlay"
+          className="nskTabletOverlay"
           aria-label="Fermer le menu"
           onClick={() =>
             setTabletMenuOpen(false)
@@ -207,18 +221,18 @@ export function AppShell({
       )}
 
       <aside
-        className={`sidebar ${
+        className={`nskSidebar ${
           tabletMenuOpen
-            ? 'tabletOpen'
+            ? 'nskTabletOpen'
             : ''
         }`}
       >
-        <div className="sidebarBrand">
-          <div className="brandMark">
+        <div className="nskSidebarBrand">
+          <div className="nskBrandMark">
             N
           </div>
 
-          <div className="brandText">
+          <div className="nskBrandText">
             <strong>
               NukuStock
             </strong>
@@ -229,7 +243,7 @@ export function AppShell({
 
           <button
             type="button"
-            className="tabletClose"
+            className="nskTabletClose"
             aria-label="Fermer"
             onClick={() =>
               setTabletMenuOpen(false)
@@ -239,7 +253,7 @@ export function AppShell({
           </button>
         </div>
 
-        <nav className="sidebarNav">
+        <nav className="nskSidebarNav">
           {navItems.map(
             (item) => (
               <Link
@@ -255,7 +269,7 @@ export function AppShell({
                 }
               >
                 <span
-                  className="sidebarIcon"
+                  className="nskSidebarIcon"
                   aria-hidden="true"
                 >
                   {item.icon}
@@ -269,7 +283,7 @@ export function AppShell({
           )}
         </nav>
 
-        <div className="sidebarFoot">
+        <div className="nskSidebarFoot">
           <strong>
             NukuStock
           </strong>
@@ -279,12 +293,12 @@ export function AppShell({
         </div>
       </aside>
 
-      <main className="main">
-        <header className="topbar">
-          <div className="topbarLeft">
+      <main className="nskMain">
+        <header className="nskTopbar">
+          <div className="nskTopbarLeft">
             <button
               type="button"
-              className="tabletMenuButton"
+              className="nskTabletMenuButton"
               aria-label="Ouvrir le menu"
               onClick={() =>
                 setTabletMenuOpen(true)
@@ -293,8 +307,8 @@ export function AppShell({
               ☰
             </button>
 
-            <div className="topbarTitle">
-              <span className="eyebrow">
+            <div className="nskTopbarTitle">
+              <span className="nskEyebrow">
                 NUKUTEPIPI
               </span>
               <strong>
@@ -303,11 +317,11 @@ export function AppShell({
             </div>
           </div>
 
-          <div className="topbarRight">
-            <div className="viewSelector">
+          <div className="nskTopbarRight">
+            <div className="nskViewSelector">
               <button
                 type="button"
-                className="viewSelectorButton"
+                className="nskViewSelectorButton"
                 onClick={() =>
                   setSelectorOpen(
                     (open) => !open
@@ -324,7 +338,7 @@ export function AppShell({
               </button>
 
               {selectorOpen && (
-                <div className="viewSelectorMenu">
+                <div className="nskViewSelectorMenu">
                   <button
                     type="button"
                     className={
@@ -404,7 +418,7 @@ export function AppShell({
               )}
             </div>
 
-            <div className="nukutepipiLogoWrap">
+            <div className="nskLogoWrap">
               <img
                 src="/images/nukutepipi.jpg"
                 alt="Nukutepipi"
@@ -415,14 +429,14 @@ export function AppShell({
           </div>
         </header>
 
-        <div className="viewStage">
-          <div className="viewCanvas">
+        <div className="nskViewStage">
+          <div className="nskViewCanvas">
             {children}
           </div>
         </div>
       </main>
 
-      <nav className="mobileNav">
+      <nav className="nskMobileNav">
         {navItems
           .filter((item) =>
             mobileQuickLinks.includes(
@@ -443,12 +457,12 @@ export function AppShell({
               }
             >
               <span
-                className="mobileNavIcon"
+                className="nskMobileNavIcon"
                 aria-hidden="true"
               >
                 {item.icon}
               </span>
-              <span className="mobileNavLabel">
+              <span className="nskMobileNavLabel">
                 {item.label}
               </span>
             </Link>
@@ -466,20 +480,20 @@ export function AppShell({
           }
         >
           <span
-            className="mobileNavIcon"
+            className="nskMobileNavIcon"
             aria-hidden="true"
           >
             ☰
           </span>
-          <span className="mobileNavLabel">
+          <span className="nskMobileNavLabel">
             Menu
           </span>
         </button>
       </nav>
 
       {mobileMenuOpen && (
-        <div className="mobileMenuScreen">
-          <div className="mobileMenuHeader">
+        <div className="nskMobileMenuScreen">
+          <div className="nskMobileMenuHeader">
             <div>
               <span>
                 NUKUTEPIPI
@@ -500,7 +514,7 @@ export function AppShell({
             </button>
           </div>
 
-          <div className="mobileMenuGrid">
+          <div className="nskMobileMenuGrid">
             {navItems.map(
               (item) => (
                 <Link
@@ -516,7 +530,7 @@ export function AppShell({
                   }
                 >
                   <span
-                    className="mobileMenuIcon"
+                    className="nskMobileMenuIcon"
                     aria-hidden="true"
                   >
                     {item.icon}
@@ -547,12 +561,12 @@ export function AppShell({
           overflow-x: auto;
         }
 
-        .nukuShell {
+        .nskAppShell {
           min-height: 100vh;
           background: #f4f6f9;
         }
 
-        .sidebar {
+        .nskSidebar {
           position: fixed;
           inset: 0 auto 0 0;
           z-index: 60;
@@ -563,7 +577,7 @@ export function AppShell({
           color: #fff;
         }
 
-        .sidebarBrand {
+        .nskSidebarBrand {
           min-height: 80px;
           padding: 18px 16px;
           display: flex;
@@ -572,7 +586,7 @@ export function AppShell({
           border-bottom: 1px solid rgba(255,255,255,.08);
         }
 
-        .brandMark {
+        .nskBrandMark {
           width: 38px;
           height: 38px;
           flex: 0 0 auto;
@@ -584,22 +598,22 @@ export function AppShell({
           font-weight: 900;
         }
 
-        .brandText {
+        .nskBrandText {
           display: flex;
           flex-direction: column;
         }
 
-        .brandText strong {
+        .nskBrandText strong {
           font-size: 14px;
         }
 
-        .brandText span {
+        .nskBrandText span {
           margin-top: 3px;
           color: #7f8ca3;
           font-size: 11px;
         }
 
-        .tabletClose {
+        .nskTabletClose {
           display: none;
           margin-left: auto;
           width: 36px;
@@ -611,13 +625,13 @@ export function AppShell({
           font-size: 22px;
         }
 
-        .sidebarNav {
+        .nskSidebarNav {
           flex: 1;
           overflow-y: auto;
           padding: 14px 10px;
         }
 
-        .sidebarNav a {
+        .nskSidebarNav a {
           min-height: 42px;
           margin-bottom: 3px;
           padding: 0 12px;
@@ -631,19 +645,19 @@ export function AppShell({
           font-weight: 600;
         }
 
-        .sidebarNav a.active {
+        .nskSidebarNav a.active {
           background: #17243a;
           color: #fff;
         }
 
-        .sidebarIcon {
+        .nskSidebarIcon {
           width: 18px;
           display: inline-flex;
           justify-content: center;
           flex: 0 0 auto;
         }
 
-        .sidebarFoot {
+        .nskSidebarFoot {
           padding: 16px;
           display: flex;
           flex-direction: column;
@@ -651,17 +665,17 @@ export function AppShell({
           border-top: 1px solid rgba(255,255,255,.08);
         }
 
-        .sidebarFoot span {
+        .nskSidebarFoot span {
           color: #728097;
           font-size: 10px;
         }
 
-        .main {
+        .nskMain {
           min-height: 100vh;
           margin-left: 208px;
         }
 
-        .topbar {
+        .nskTopbar {
           position: sticky;
           top: 0;
           z-index: 50;
@@ -676,42 +690,42 @@ export function AppShell({
           backdrop-filter: blur(12px);
         }
 
-        .topbarLeft,
-        .topbarRight {
+        .nskTopbarLeft,
+        .nskTopbarRight {
           display: flex;
           align-items: center;
         }
 
-        .topbarLeft {
+        .nskTopbarLeft {
           min-width: 0;
           gap: 12px;
         }
 
-        .topbarRight {
+        .nskTopbarRight {
           flex: 0 0 auto;
           gap: 12px;
         }
 
-        .topbarTitle {
+        .nskTopbarTitle {
           display: flex;
           flex-direction: column;
           min-width: 0;
         }
 
-        .topbarTitle .eyebrow {
+        .nskTopbarTitle .nskEyebrow {
           color: #9aa4b2;
           font-size: 10px;
           font-weight: 800;
           letter-spacing: .08em;
         }
 
-        .topbarTitle strong {
+        .nskTopbarTitle strong {
           margin-top: 2px;
           font-size: 14px;
           white-space: nowrap;
         }
 
-        .tabletMenuButton {
+        .nskTabletMenuButton {
           display: none;
           width: 42px;
           height: 42px;
@@ -721,7 +735,7 @@ export function AppShell({
           font-size: 20px;
         }
 
-        .nukutepipiLogoWrap {
+        .nskLogoWrap {
           width: 110px;
           height: 52px;
           display: grid;
@@ -731,17 +745,17 @@ export function AppShell({
           background: #fff;
         }
 
-        .nukutepipiLogoWrap img {
+        .nskLogoWrap img {
           max-width: 100%;
           max-height: 100%;
           object-fit: contain;
         }
 
-        .viewSelector {
+        .nskViewSelector {
           position: relative;
         }
 
-        .viewSelectorButton {
+        .nskViewSelectorButton {
           min-width: 118px;
           height: 44px;
           padding: 6px 10px;
@@ -759,25 +773,25 @@ export function AppShell({
           cursor: pointer;
         }
 
-        .viewSelectorButton span {
+        .nskViewSelectorButton span {
           grid-column: 1;
           color: #98a2b3;
           font-size: 9px;
         }
 
-        .viewSelectorButton strong {
+        .nskViewSelectorButton strong {
           grid-column: 1;
           font-size: 11px;
         }
 
-        .viewSelectorButton b {
+        .nskViewSelectorButton b {
           grid-column: 2;
           grid-row: 1 / span 2;
           align-self: center;
           font-size: 14px;
         }
 
-        .viewSelectorMenu {
+        .nskViewSelectorMenu {
           position: absolute;
           top: calc(100% + 8px);
           right: 0;
@@ -790,7 +804,7 @@ export function AppShell({
           box-shadow: 0 20px 50px rgba(15,23,42,.16);
         }
 
-        .viewSelectorMenu button {
+        .nskViewSelectorMenu button {
           width: 100%;
           padding: 10px 11px;
           border: 0;
@@ -803,82 +817,82 @@ export function AppShell({
           cursor: pointer;
         }
 
-        .viewSelectorMenu button.active {
+        .nskViewSelectorMenu button.active {
           background: #eef3f8;
           color: #0c1525;
         }
 
-        .viewSelectorMenu span {
+        .nskViewSelectorMenu span {
           font-size: 12px;
           font-weight: 800;
         }
 
-        .viewSelectorMenu small {
+        .nskViewSelectorMenu small {
           margin-top: 2px;
           color: #98a2b3;
           font-size: 10px;
         }
 
-        .viewStage {
+        .nskViewStage {
           width: 100%;
           min-width: 0;
           overflow: auto;
         }
 
-        .viewCanvas {
+        .nskViewCanvas {
           min-width: 0;
           background: #f4f6f9;
         }
 
-        .mobileNav,
-        .mobileMenuScreen,
-        .tabletOverlay {
+        .nskMobileNav,
+        .nskMobileMenuScreen,
+        .nskTabletOverlay {
           display: none;
         }
 
         /* PC */
-        .view-pc .sidebar {
+        .view-pc .nskSidebar {
           display: flex;
           transform: none;
         }
 
-        .view-pc .main {
+        .view-pc .nskMain {
           margin-left: 208px;
         }
 
-        .view-pc .viewCanvas {
+        .view-pc .nskViewCanvas {
           width: 100%;
           max-width: none;
           margin: 0;
         }
 
         /* TABLETTE */
-        .view-tablet .sidebar {
+        .view-tablet .nskSidebar {
           width: 260px;
           transform: translateX(-100%);
           transition: transform .2s ease;
           box-shadow: 18px 0 50px rgba(0,0,0,.18);
         }
 
-        .view-tablet .sidebar.tabletOpen {
+        .view-tablet .nskSidebar.nskTabletOpen {
           transform: translateX(0);
         }
 
-        .view-tablet .tabletClose {
+        .view-tablet .nskTabletClose {
           display: grid;
           place-items: center;
         }
 
-        .view-tablet .main {
+        .view-tablet .nskMain {
           margin-left: 0;
         }
 
-        .view-tablet .tabletMenuButton {
+        .view-tablet .nskTabletMenuButton {
           display: grid;
           place-items: center;
         }
 
-        .view-tablet .tabletOverlay {
+        .view-tablet .nskTabletOverlay {
           display: block;
           position: fixed;
           inset: 0;
@@ -887,13 +901,13 @@ export function AppShell({
           background: rgba(10,18,30,.34);
         }
 
-        .view-tablet .viewStage {
+        .view-tablet .nskViewStage {
           display: flex;
           justify-content: center;
           padding: 16px;
         }
 
-        .view-tablet .viewCanvas {
+        .view-tablet .nskViewCanvas {
           width: min(100%, 1024px);
           min-width: 768px;
           border-radius: 16px;
@@ -909,62 +923,62 @@ export function AppShell({
             calc(72px + env(safe-area-inset-bottom));
         }
 
-        .view-phone .sidebar,
-        .view-phone .tabletOverlay {
+        .view-phone .nskSidebar,
+        .view-phone .nskTabletOverlay {
           display: none !important;
         }
 
-        .view-phone .main {
+        .view-phone .nskMain {
           width: 100%;
           min-width: 0;
           margin-left: 0;
         }
 
-        .view-phone .topbar {
+        .view-phone .nskTopbar {
           height: 62px;
           padding: 0 10px;
         }
 
-        .view-phone .tabletMenuButton,
-        .view-phone .topbarTitle .eyebrow {
+        .view-phone .nskTabletMenuButton,
+        .view-phone .nskTopbarTitle .nskEyebrow {
           display: none;
         }
 
-        .view-phone .topbarTitle strong {
+        .view-phone .nskTopbarTitle strong {
           font-size: 12px;
         }
 
-        .view-phone .topbarRight {
+        .view-phone .nskTopbarRight {
           gap: 5px;
         }
 
-        .view-phone .viewSelectorButton {
+        .view-phone .nskViewSelectorButton {
           min-width: 94px;
           height: 38px;
           padding: 4px 7px;
         }
 
-        .view-phone .viewSelectorButton span {
+        .view-phone .nskViewSelectorButton span {
           display: none;
         }
 
-        .view-phone .viewSelectorButton strong {
+        .view-phone .nskViewSelectorButton strong {
           font-size: 10px;
           align-self: center;
         }
 
-        .view-phone .nukutepipiLogoWrap {
+        .view-phone .nskLogoWrap {
           width: 48px;
           height: 32px;
         }
 
-        .view-phone .viewStage {
+        .view-phone .nskViewStage {
           width: 100%;
           padding: 0;
           overflow-x: hidden;
         }
 
-        .view-phone .viewCanvas {
+        .view-phone .nskViewCanvas {
           width: 100%;
           max-width: 430px;
           min-width: 0;
@@ -972,40 +986,40 @@ export function AppShell({
           overflow-x: hidden;
         }
 
-        .view-phone .viewCanvas > * {
+        .view-phone .nskViewCanvas > * {
           width: 100% !important;
           max-width: 100% !important;
           min-width: 0 !important;
         }
 
-        .view-phone .viewCanvas .toolbar {
+        .view-phone .nskViewCanvas .toolbar {
           display: grid !important;
           grid-template-columns: 1fr !important;
           gap: 8px !important;
         }
 
-        .view-phone .viewCanvas .toolbar > * {
+        .view-phone .nskViewCanvas .toolbar > * {
           width: 100% !important;
           min-width: 0 !important;
         }
 
-        .view-phone .viewCanvas .formGrid {
+        .view-phone .nskViewCanvas .formGrid {
           grid-template-columns: 1fr !important;
         }
 
-        .view-phone .viewCanvas input,
-        .view-phone .viewCanvas select,
-        .view-phone .viewCanvas textarea,
-        .view-phone .viewCanvas button {
+        .view-phone .nskViewCanvas input,
+        .view-phone .nskViewCanvas select,
+        .view-phone .nskViewCanvas textarea,
+        .view-phone .nskViewCanvas button {
           font-size: 16px;
         }
 
-        .view-phone .viewCanvas .tableWrap {
+        .view-phone .nskViewCanvas .tableWrap {
           max-width: 100%;
           overflow-x: auto !important;
         }
 
-        .view-phone .mobileNav {
+        .view-phone .nskMobileNav {
           position: fixed;
           left: 0;
           right: 0;
@@ -1024,8 +1038,8 @@ export function AppShell({
           box-shadow: 0 -8px 30px rgba(15,23,42,.08);
         }
 
-        .view-phone .mobileNav a,
-        .view-phone .mobileNav button {
+        .view-phone .nskMobileNav a,
+        .view-phone .nskMobileNav button {
           min-width: 0;
           border: 0;
           background: transparent;
@@ -1038,17 +1052,17 @@ export function AppShell({
           gap: 4px;
         }
 
-        .view-phone .mobileNav a.active,
-        .view-phone .mobileNav button.active {
+        .view-phone .nskMobileNav a.active,
+        .view-phone .nskMobileNav button.active {
           color: #0c1525;
         }
 
-        .mobileNavIcon {
+        .nskMobileNavIcon {
           font-size: 18px;
           line-height: 1;
         }
 
-        .mobileNavLabel {
+        .nskMobileNavLabel {
           width: 100%;
           padding: 0 2px;
           overflow: hidden;
@@ -1059,7 +1073,7 @@ export function AppShell({
           font-weight: 700;
         }
 
-        .view-phone .mobileMenuScreen {
+        .view-phone .nskMobileMenuScreen {
           position: fixed;
           inset: 0;
           z-index: 250;
@@ -1068,7 +1082,7 @@ export function AppShell({
           background: #f4f6f9;
         }
 
-        .mobileMenuHeader {
+        .nskMobileMenuHeader {
           min-height: 72px;
           padding:
             calc(10px + env(safe-area-inset-top))
@@ -1081,24 +1095,24 @@ export function AppShell({
           border-bottom: 1px solid #e7eaf0;
         }
 
-        .mobileMenuHeader > div {
+        .nskMobileMenuHeader > div {
           display: flex;
           flex-direction: column;
         }
 
-        .mobileMenuHeader span {
+        .nskMobileMenuHeader span {
           color: #98a2b3;
           font-size: 9px;
           font-weight: 800;
           letter-spacing: .08em;
         }
 
-        .mobileMenuHeader strong {
+        .nskMobileMenuHeader strong {
           margin-top: 2px;
           font-size: 19px;
         }
 
-        .mobileMenuHeader button {
+        .nskMobileMenuHeader button {
           width: 44px;
           height: 44px;
           border: 1px solid #e4e7ec;
@@ -1107,7 +1121,7 @@ export function AppShell({
           font-size: 25px;
         }
 
-        .mobileMenuGrid {
+        .nskMobileMenuGrid {
           flex: 1;
           overflow-y: auto;
           padding:
@@ -1121,7 +1135,7 @@ export function AppShell({
           align-content: start;
         }
 
-        .mobileMenuGrid a {
+        .nskMobileMenuGrid a {
           min-width: 0;
           min-height: 72px;
           padding: 11px;
@@ -1137,12 +1151,12 @@ export function AppShell({
           font-weight: 700;
         }
 
-        .mobileMenuGrid a.active {
+        .nskMobileMenuGrid a.active {
           background: #eef3f8;
           color: #0c1525;
         }
 
-        .mobileMenuIcon {
+        .nskMobileMenuIcon {
           width: 34px;
           height: 34px;
           flex: 0 0 auto;
@@ -1152,12 +1166,37 @@ export function AppShell({
           background: #f2f4f7;
         }
 
+
+        /* Sécurité PC : sur un écran large, le menu latéral ne peut plus
+           être masqué par un ancien style global. */
+        @media (min-width: 1200px) {
+          .nskAppShell.view-pc .nskSidebar {
+            display: flex !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+            transform: none !important;
+            left: 0 !important;
+          }
+
+          .nskAppShell.view-pc .nskMain {
+            margin-left: 208px !important;
+            width: auto !important;
+          }
+
+          .nskAppShell.view-pc .nskMobileNav,
+          .nskAppShell.view-pc .nskMobileMenuScreen,
+          .nskAppShell.view-pc .nskTabletOverlay,
+          .nskAppShell.view-pc .nskTabletMenuButton {
+            display: none !important;
+          }
+        }
+
         @media (max-width: 420px) {
-          .view-phone .nukutepipiLogoWrap {
+          .view-phone .nskLogoWrap {
             display: none;
           }
 
-          .view-phone .topbarTitle strong {
+          .view-phone .nskTopbarTitle strong {
             max-width: 110px;
             overflow: hidden;
             text-overflow: ellipsis;

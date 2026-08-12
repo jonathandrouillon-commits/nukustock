@@ -8,7 +8,7 @@ import {
   useOrders,
   useProducts,
   useRequests,
-  useSetups,
+  useTransfers,
 } from '@/lib/store'
 
 export default function Home() {
@@ -16,7 +16,7 @@ export default function Home() {
   const { items: orders } = useOrders()
   const { items: requests } = useRequests()
   const { items: inventories } = useInventories()
-  const { items: setups } = useSetups()
+  const { items: transfers } = useTransfers()
 
   const stats = useMemo(() => {
     const today = new Date()
@@ -181,6 +181,74 @@ export default function Home() {
     [requests]
   )
 
+  const byLocation = useMemo(() => {
+    const locations = Array.from(
+      new Set(
+        products.flatMap((product) =>
+          product.lots
+            .map((lot) => lot.location)
+            .filter(Boolean)
+        )
+      )
+    )
+
+    return locations
+      .map((location) => {
+        const rows = products.flatMap((product) =>
+          product.lots
+            .filter((lot) => lot.location === location)
+            .map((lot) => ({ product, lot }))
+        )
+
+        return {
+          location,
+          qty: rows.reduce(
+            (sum, row) =>
+              sum +
+              Math.max(
+                0,
+                Number(row.lot.quantity) || 0
+              ),
+            0
+          ),
+          value: rows.reduce(
+            (sum, row) =>
+              sum +
+              Math.max(
+                0,
+                Number(row.lot.quantity) || 0
+              ) *
+                Math.max(
+                  0,
+                  Number(
+                    row.product.purchasePrice
+                  ) || 0
+                ),
+            0
+          ),
+        }
+      })
+      .sort(
+        (a, b) =>
+          b.value - a.value
+      )
+  }, [products])
+
+  const deliveredRequests =
+    requests.filter(
+      (request) =>
+        request.status ===
+        'Livrée'
+    ).length
+
+  const activeLots =
+    products.reduce(
+      (sum, product) =>
+        sum +
+        product.lots.length,
+      0
+    )
+
   const statStyle = {
     padding: 18,
     borderRadius: 16,
@@ -193,55 +261,249 @@ export default function Home() {
       title="Dashboard"
       subtitle="Vue d’ensemble de NukuStock"
     >
+
+
       <Card>
         <div
           style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 18,
-            flexWrap: 'wrap',
+            fontSize: 11,
+            color: '#667085',
+            fontWeight: 800,
+            letterSpacing: '.08em',
           }}
         >
-          <div>
+          RAPPORTS & ANALYSES
+        </div>
+
+        <h2
+          style={{
+            margin: '5px 0 14px',
+            fontSize: 22,
+          }}
+        >
+          Synthèse opérationnelle
+        </h2>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns:
+              'repeat(auto-fit,minmax(180px,1fr))',
+            gap: 12,
+          }}
+        >
+          <div style={statStyle}>
             <div
               style={{
-                fontSize: 11,
+                fontSize: 12,
                 color: '#667085',
-                fontWeight: 800,
-                letterSpacing: '.08em',
               }}
             >
-              SET UP
+              Valeur stock
             </div>
 
-            <h2
+            <div
               style={{
-                margin: '5px 0 5px',
                 fontSize: 22,
+                fontWeight: 900,
+                marginTop: 7,
               }}
             >
-              Fiches et photos des Set Up Bar
-            </h2>
+              {stats.totalStockValue.toLocaleString(
+                'fr-FR'
+              )}{' '}
+              XPF
+            </div>
 
             <div
               style={{
-                color: '#667085',
-                fontSize: 13,
+                marginTop: 4,
+                fontSize: 11,
+                color: '#98a2b3',
               }}
             >
-              {setups.length} Set Up enregistré
-              {setups.length > 1 ? 's' : ''} · photos, matériel,
-              verrerie, produits et consignes par lieu.
+              Tous les lieux
             </div>
           </div>
 
-          <Link
-            href="/setup"
-            className="button"
+          <div style={statStyle}>
+            <div
+              style={{
+                fontSize: 12,
+                color: '#667085',
+              }}
+            >
+              Demandes livrées
+            </div>
+
+            <div
+              style={{
+                fontSize: 22,
+                fontWeight: 900,
+                marginTop: 7,
+              }}
+            >
+              {deliveredRequests}
+            </div>
+
+            <div
+              style={{
+                marginTop: 4,
+                fontSize: 11,
+                color: '#98a2b3',
+              }}
+            >
+              Depuis la remise à zéro
+            </div>
+          </div>
+
+          <div style={statStyle}>
+            <div
+              style={{
+                fontSize: 12,
+                color: '#667085',
+              }}
+            >
+              Transferts
+            </div>
+
+            <div
+              style={{
+                fontSize: 22,
+                fontWeight: 900,
+                marginTop: 7,
+              }}
+            >
+              {transfers.length}
+            </div>
+
+            <div
+              style={{
+                marginTop: 4,
+                fontSize: 11,
+                color: '#98a2b3',
+              }}
+            >
+              Mouvements enregistrés
+            </div>
+          </div>
+
+          <div style={statStyle}>
+            <div
+              style={{
+                fontSize: 12,
+                color: '#667085',
+              }}
+            >
+              Lots actifs
+            </div>
+
+            <div
+              style={{
+                fontSize: 22,
+                fontWeight: 900,
+                marginTop: 7,
+              }}
+            >
+              {activeLots}
+            </div>
+
+            <div
+              style={{
+                marginTop: 4,
+                fontSize: 11,
+                color: '#98a2b3',
+              }}
+            >
+              Avec DLUO / DLC
+            </div>
+          </div>
+        </div>
+
+        <div
+          style={{
+            marginTop: 18,
+          }}
+        >
+          <h3
+            style={{
+              margin: '0 0 10px',
+              fontSize: 16,
+            }}
           >
-            Ouvrir SET UP
-          </Link>
+            Stock par lieu
+          </h3>
+
+          <div className="tableWrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Lieu</th>
+                  <th>Quantité</th>
+                  <th>Valorisation</th>
+                  <th>Part</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {byLocation.map(
+                  (item) => (
+                    <tr
+                      key={
+                        item.location
+                      }
+                    >
+                      <td>
+                        <strong>
+                          {
+                            item.location
+                          }
+                        </strong>
+                      </td>
+
+                      <td>
+                        {item.qty.toLocaleString(
+                          'fr-FR'
+                        )}
+                      </td>
+
+                      <td>
+                        {item.value.toLocaleString(
+                          'fr-FR'
+                        )}{' '}
+                        XPF
+                      </td>
+
+                      <td>
+                        <Badge tone="neutral">
+                          {stats.totalQty
+                            ? Math.round(
+                                (item.qty /
+                                  Math.max(
+                                    1,
+                                    stats.totalQty
+                                  )) *
+                                  100
+                              )
+                            : 0}
+                          %
+                        </Badge>
+                      </td>
+                    </tr>
+                  )
+                )}
+
+                {byLocation.length ===
+                  0 && (
+                  <tr>
+                    <td colSpan={4}>
+                      Aucun stock par lieu disponible.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </Card>
 

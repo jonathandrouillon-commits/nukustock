@@ -1,15 +1,25 @@
-import type { Metadata, Viewport } from 'next'
+import type {
+  Metadata,
+  Viewport,
+} from 'next'
+
 import './globals.css'
-import { AuthGate } from '@/components/auth-gate'
+
+import AuthGate from '@/components/auth-gate'
 
 export const metadata: Metadata = {
   title: 'NukuStock',
-  description: 'Gestion des stocks et approvisionnements de Nukutepipi',
-  manifest: '/manifest.webmanifest',
+  description:
+    'Gestion des stocks et approvisionnements de Nukutepipi',
+
+  manifest:
+    '/manifest.webmanifest',
+
   appleWebApp: {
     capable: true,
     title: 'NukuStock',
-    statusBarStyle: 'default',
+    statusBarStyle:
+      'default',
   },
 }
 
@@ -28,7 +38,9 @@ export default function RootLayout({
   return (
     <html lang="fr">
       <body>
-        <AuthGate>{children}</AuthGate>
+        <AuthGate>
+          {children}
+        </AuthGate>
       </body>
     </html>
   )

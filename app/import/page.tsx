@@ -1,1963 +1,2249 @@
 'use client'
 
-import { useMemo, useState, type CSSProperties } from 'react'
-import { Page, Card, Badge } from '@/components/ui'
-import { useProducts } from '@/lib/store'
+import {
+  useRef,
+  useState,
+  type ChangeEvent,
+} from 'react'
+
 import * as XLSX from 'xlsx'
-import { jsPDF } from 'jspdf'
-import { autoTable } from 'jspdf-autotable'
+import { supabase } from '@/lib/supabase'
 
-type QuantityFilter =
-  | 'Tous'
-  | 'Rupture'
-  | '1-10'
-  | '11-50'
-  | '51-100'
-  | '100+'
-  | 'Sous minimum'
+import {
+  Page,
+  Card,
+} from '@/components/ui'
 
-type ExpiryFilter =
-  | 'Toutes'
-  | 'Périmé'
-  | "Moins d'un mois"
-  | 'De 1 à 3 mois'
-  | 'De 3 à 6 mois'
-  | 'De 6 mois à 1 an'
-  | "+ d'un an"
-  | 'Sans DLUO'
+import {
+  useMasterData,
+  useProducts,
+  useSuppliers,
+} from '@/lib/store'
 
-type ZoneFilter =
-  | 'All'
-  | 'Beverage'
-  | 'Food'
-  | 'Matériel & Accessoires'
+type ImportKind =
+  | 'products'
+  | 'suppliers'
+  | 'locations'
 
-type SortKey =
-  | 'product'
-  | 'category'
-  | 'subcategory'
-  | 'supplier'
-  | 'location'
-  | 'expiry'
-  | 'quantity'
-  | 'price'
-  | 'value'
+type Row = Record<string, any>
 
-type SortDirection = 'asc' | 'desc'
-
-type StockRow = {
-  product: any
-  lot: any
-  quantity: number
-  value: number
-  expiryPriority: string
-}
-
-function normalizeZoneText(value: string) {
-  return value
+function normalizeText(
+  value: unknown
+) {
+  return String(value ?? '')
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim()
-}
-
-function detectProductZone(product: any): ZoneFilter {
-  const explicitZone = String(
-    product.zone ||
-      product.family ||
-      product.inventoryScope ||
+    .replace(
+      /[\u0300-\u036f]/g,
       ''
-  ).trim()
-
-  if (
-    explicitZone === 'Beverage' ||
-    explicitZone === 'Food' ||
-    explicitZone === 'Matériel & Accessoires'
-  ) {
-    return explicitZone
-  }
-
-  const text = normalizeZoneText(
-    `${product.category || ''} ${product.subcategory || ''} ${
-      product.name || ''
-    }`
-  )
-
-  const foodWords = [
-    'food',
-    'aliment',
-    'epicerie',
-    'fruit',
-    'legume',
-    'viande',
-    'poisson',
-    'produit frais',
-    'surgele',
-    'cuisine',
-  ]
-
-  const materialWords = [
-    'materiel',
-    'accessoire',
-    'verrerie',
-    'verre',
-    'equipement',
-    'ustensile',
-    'barware',
-    'assiette',
-    'couvert',
-  ]
-
-  if (
-    foodWords.some((word) =>
-      text.includes(word)
     )
-  ) {
-    return 'Food'
-  }
-
-  if (
-    materialWords.some((word) =>
-      text.includes(word)
-    )
-  ) {
-    return 'Matériel & Accessoires'
-  }
-
-  return 'Beverage'
+    .trim()
+    .toLowerCase()
 }
 
-export default function Stocks() {
-  const { items } = useProducts()
+function valueFrom(
+  row: Row,
+  candidates: string[]
+) {
+  const entries =
+    Object.entries(row)
 
-  const [search, setSearch] = useState('')
-  const [categoryFilter, setCategoryFilter] =
-    useState('Toutes')
-  const [subcategoryFilter, setSubcategoryFilter] =
-    useState('Toutes')
-  const [supplierFilter, setSupplierFilter] =
-    useState('Tous')
-  const [locationFilter, setLocationFilter] =
-    useState('Tous')
+  for (
+    const candidate of candidates
+  ) {
+    const wanted =
+      normalizeText(candidate)
 
-  const [zoneFilter, setZoneFilter] =
-    useState<ZoneFilter>('All')
+    const found =
+      entries.find(
+        ([key]) =>
+          normalizeText(key) ===
+          wanted
+      )
 
-  const [quantityFilter, setQuantityFilter] =
-    useState<QuantityFilter>('Tous')
-
-  const [expiryFilter, setExpiryFilter] =
-    useState<ExpiryFilter>('Toutes')
-
-  const [sortKey, setSortKey] =
-    useState<SortKey>('product')
-
-  const [sortDirection, setSortDirection] =
-    useState<SortDirection>('asc')
-
-  const getExpiryPriority = (
-    expiryDate: string
-  ) => {
-    if (!expiryDate) {
-      return 'Sans DLUO'
+    if (
+      found &&
+      found[1] !== undefined &&
+      found[1] !== null &&
+      String(found[1]).trim() !== ''
+    ) {
+      return found[1]
     }
+  }
 
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
+  return ''
+}
 
-    const target = new Date(
-      `${expiryDate}T00:00:00`
+function toNumber(
+  value: unknown
+) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ''
+  ) {
+    return 0
+  }
+
+  if (
+    typeof value === 'number'
+  ) {
+    return Number.isFinite(value)
+      ? value
+      : 0
+  }
+
+  const normalized =
+    String(value)
+      .replace(/\s/g, '')
+      .replace(',', '.')
+
+  const number =
+    Number(normalized)
+
+  return Number.isFinite(number)
+    ? number
+    : 0
+}
+
+function toIsoDate(
+  value: unknown
+) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ''
+  ) {
+    return ''
+  }
+
+  if (
+    value instanceof Date &&
+    !Number.isNaN(
+      value.getTime()
     )
-    target.setHours(0, 0, 0, 0)
-
-    const days =
-      (target.getTime() -
-        today.getTime()) /
-      (1000 * 60 * 60 * 24)
-
-    if (days < 0) return 'Périmé'
-    if (days < 30) {
-      return "Moins d'un mois"
-    }
-    if (days < 90) {
-      return 'De 1 à 3 mois'
-    }
-    if (days < 180) {
-      return 'De 3 à 6 mois'
-    }
-    if (days < 365) {
-      return 'De 6 mois à 1 an'
-    }
-
-    return "+ d'un an"
+  ) {
+    return value
+      .toISOString()
+      .slice(0, 10)
   }
 
-  const getExpiryTone = (
-    expiryDate: string
-  ):
-    | 'danger'
-    | 'warn'
-    | 'good'
-    | 'neutral'
-    | 'info' => {
-    const priority =
-      getExpiryPriority(expiryDate)
+  if (
+    typeof value === 'number'
+  ) {
+    const parsed =
+      XLSX.SSF.parse_date_code(
+        value
+      )
 
-    if (
-      priority === 'Périmé' ||
-      priority === "Moins d'un mois"
-    ) {
-      return 'danger'
+    if (parsed) {
+      return [
+        String(parsed.y)
+          .padStart(4, '0'),
+        String(parsed.m)
+          .padStart(2, '0'),
+        String(parsed.d)
+          .padStart(2, '0'),
+      ].join('-')
     }
-
-    if (
-      priority === 'De 1 à 3 mois' ||
-      priority === 'De 3 à 6 mois'
-    ) {
-      return 'warn'
-    }
-
-    if (
-      priority === 'De 6 mois à 1 an'
-    ) {
-      return 'info'
-    }
-
-    if (priority === "+ d'un an") {
-      return 'good'
-    }
-
-    return 'neutral'
   }
 
-  const categories = useMemo(
-    () =>
-      [
-        ...new Set(
-          items
-            .map((product) =>
-              product.category
-            )
-            .filter(Boolean)
-        ),
-      ].sort((a, b) =>
-        a.localeCompare(b, 'fr')
-      ),
-    [items]
+  const text =
+    String(value).trim()
+
+  const french =
+    text.match(
+      /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/
+    )
+
+  if (french) {
+    const year =
+      french[3].length === 2
+        ? `20${french[3]}`
+        : french[3]
+
+    return `${year}-${french[2].padStart(
+      2,
+      '0'
+    )}-${french[1].padStart(
+      2,
+      '0'
+    )}`
+  }
+
+  const iso =
+    text.match(
+      /^(\d{4})-(\d{2})-(\d{2})/
+    )
+
+  if (iso) {
+    return `${iso[1]}-${iso[2]}-${iso[3]}`
+  }
+
+  const date =
+    new Date(text)
+
+  if (
+    !Number.isNaN(
+      date.getTime()
+    )
+  ) {
+    return date
+      .toISOString()
+      .slice(0, 10)
+  }
+
+  return ''
+}
+
+function readSheet(
+  workbook: XLSX.WorkBook,
+  names: string[]
+) {
+  const wanted =
+    names.map(
+      normalizeText
+    )
+
+  const sheetName =
+    workbook.SheetNames.find(
+      (name) =>
+        wanted.includes(
+          normalizeText(name)
+        )
+    )
+
+  if (!sheetName) {
+    return []
+  }
+
+  const sheet =
+    workbook.Sheets[sheetName]
+
+  return XLSX.utils.sheet_to_json<Row>(
+    sheet,
+    {
+      defval: '',
+      raw: true,
+    }
   )
+}
 
-  const subcategories = useMemo(
-    () =>
-      [
-        ...new Set(
-          items
-            .filter(
-              (product) =>
-                categoryFilter ===
-                  'Toutes' ||
-                product.category ===
-                  categoryFilter
-            )
-            .map((product) =>
-              product.subcategory
-            )
-            .filter(Boolean)
-        ),
-      ].sort((a, b) =>
-        a.localeCompare(b, 'fr')
-      ),
-    [items, categoryFilter]
+async function readWorkbook(
+  file: File
+) {
+  const buffer =
+    await file.arrayBuffer()
+
+  return XLSX.read(
+    buffer,
+    {
+      type: 'array',
+      cellDates: true,
+    }
   )
+}
 
-  const suppliers = useMemo(
-    () =>
-      [
-        ...new Set(
-          items
-            .map((product) =>
-              product.mainSupplier
-            )
-            .filter(Boolean)
-        ),
-      ].sort((a, b) =>
-        a.localeCompare(b, 'fr')
-      ),
-    [items]
-  )
+function uniqueByName<T extends {
+  name?: string
+}>(
+  rows: T[]
+) {
+  const map =
+    new Map<string, T>()
 
+  for (const row of rows) {
+    const key =
+      normalizeText(
+        row.name
+      )
 
-  const locations = useMemo(
-    () =>
-      [
-        ...new Set(
-          items.flatMap((product) =>
-            product.lots
-              .map((lot) => lot.location)
-              .filter(Boolean)
+    if (!key) continue
+
+    if (!map.has(key)) {
+      map.set(
+        key,
+        row
+      )
+    }
+  }
+
+  return [
+    ...map.values(),
+  ]
+}
+
+export default function ImportExportPage() {
+  const {
+    items: products,
+    save: saveProducts,
+  } = useProducts()
+
+  const {
+    items: suppliers,
+    save: saveSuppliers,
+  } = useSuppliers()
+
+  const {
+    items: masterData,
+    save: saveMasterData,
+  } = useMasterData()
+
+  const productsInput =
+    useRef<HTMLInputElement>(
+      null
+    )
+
+  const suppliersInput =
+    useRef<HTMLInputElement>(
+      null
+    )
+
+  const locationsInput =
+    useRef<HTMLInputElement>(
+      null
+    )
+
+  const [
+    busy,
+    setBusy,
+  ] = useState<
+    ImportKind | 'clear-locations' | ''
+  >('')
+
+  const [
+    message,
+    setMessage,
+  ] = useState('')
+
+  const [
+    error,
+    setError,
+  ] = useState('')
+
+  const startImport = (
+    kind: ImportKind
+  ) => {
+    setMessage('')
+    setError('')
+
+    if (
+      kind === 'products'
+    ) {
+      productsInput
+        .current
+        ?.click()
+      return
+    }
+
+    if (
+      kind === 'suppliers'
+    ) {
+      suppliersInput
+        .current
+        ?.click()
+      return
+    }
+
+    locationsInput
+      .current
+      ?.click()
+  }
+
+  const importProducts =
+    async (
+      event:
+        ChangeEvent<HTMLInputElement>
+    ) => {
+      const file =
+        event.target.files?.[0]
+
+      event.target.value = ''
+
+      if (!file) return
+
+      setBusy('products')
+      setMessage('')
+      setError('')
+
+      try {
+        const workbook =
+          await readWorkbook(
+            file
           )
-        ),
-      ].sort((a, b) =>
-        a.localeCompare(b, 'fr')
-      ),
-    [items]
-  )
 
-  const allRows =
-    useMemo<StockRow[]>(() => {
-      return items.flatMap(
-        (product) => {
-          /*
-           * Même si un produit n'a aucun lot,
-           * on l'affiche avec un stock à zéro.
-           */
-          if (!product.lots.length) {
-            return [
-              {
-                product,
-                lot: {
-                  id: `empty-${product.id}`,
-                  lotNumber: '',
-                  expiry: '',
-                  location: '',
-                  quantity: 0,
-                },
-                quantity: 0,
-                value: 0,
-                expiryPriority:
-                  'Sans DLUO',
-              },
+        const productRows =
+          readSheet(
+            workbook,
+            [
+              'Produits',
+              'Products',
             ]
+          )
+
+        if (
+          !productRows.length
+        ) {
+          throw new Error(
+            'La feuille "Produits" est introuvable ou vide.'
+          )
+        }
+
+        const stockRows =
+          readSheet(
+            workbook,
+            [
+              'Stocks_DLUO',
+              'Stocks DLUO',
+              'Stocks',
+              'Lots',
+            ]
+          )
+
+        const lotsByRef =
+          new Map<
+            string,
+            any[]
+          >()
+
+        for (
+          const row of stockRows
+        ) {
+          const ref =
+            String(
+              valueFrom(
+                row,
+                [
+                  'Réf interne',
+                  'Ref interne',
+                  'Reference interne',
+                  'Référence interne',
+                ]
+              ) || ''
+            ).trim()
+
+          if (!ref) {
+            continue
           }
 
-          return product.lots.map(
-            (lot) => {
-              const quantity = Math.max(
-                0,
-                Number(
-                  lot.quantity
-                ) || 0
+          const quantity =
+            Math.max(
+              0,
+              toNumber(
+                valueFrom(
+                  row,
+                  [
+                    'Quantité',
+                    'Quantite',
+                    'Quantity',
+                    'Stock',
+                  ]
+                )
               )
+            )
+
+          const location =
+            String(
+              valueFrom(
+                row,
+                [
+                  'Lieu de stockage',
+                  'Lieu',
+                  'Location',
+                ]
+              ) || ''
+            ).trim()
+
+          const expiry =
+            toIsoDate(
+              valueFrom(
+                row,
+                [
+                  'DLUO / DLC',
+                  'DLUO',
+                  'DLC',
+                  'DDM',
+                  'Expiry',
+                ]
+              )
+            )
+
+          const lotNumber =
+            String(
+              valueFrom(
+                row,
+                [
+                  'N° lot',
+                  'No lot',
+                  'Lot',
+                  'Numero de lot',
+                  'Numéro de lot',
+                ]
+              ) || ''
+            ).trim()
+
+          if (
+            !location &&
+            !expiry &&
+            !lotNumber &&
+            quantity <= 0
+          ) {
+            continue
+          }
+
+          const current =
+            lotsByRef.get(
+              ref
+            ) || []
+
+          current.push({
+            id:
+              crypto.randomUUID(),
+            lotNumber,
+            expiry,
+            location:
+              location ||
+              'Non affecté',
+            quantity,
+          })
+
+          lotsByRef.set(
+            ref,
+            current
+          )
+        }
+
+        const existingByRef =
+          new Map(
+            products
+              .filter(
+                (product) =>
+                  product.internalRef
+              )
+              .map(
+                (product) => [
+                  normalizeText(
+                    product.internalRef
+                  ),
+                  product,
+                ]
+              )
+          )
+
+        const existingByName =
+          new Map(
+            products.map(
+              (product) => [
+                normalizeText(
+                  product.name
+                ),
+                product,
+              ]
+            )
+          )
+
+        const imported:
+          any[] = []
+
+        for (
+          let index = 0;
+          index <
+          productRows.length;
+          index++
+        ) {
+          const row =
+            productRows[index]
+
+          const name =
+            String(
+              valueFrom(
+                row,
+                [
+                  'Nom',
+                  'Produit',
+                  'Désignation',
+                  'Designation',
+                  'Name',
+                ]
+              ) || ''
+            ).trim()
+
+          if (!name) {
+            continue
+          }
+
+          const internalRef =
+            String(
+              valueFrom(
+                row,
+                [
+                  'Réf interne',
+                  'Ref interne',
+                  'Reference interne',
+                  'Référence interne',
+                ]
+              ) ||
+                `IMP-${String(
+                  index + 1
+                ).padStart(
+                  5,
+                  '0'
+                )}`
+            ).trim()
+
+          const existing =
+            existingByRef.get(
+              normalizeText(
+                internalRef
+              )
+            ) ||
+            existingByName.get(
+              normalizeText(
+                name
+              )
+            )
+
+          const hasExpiryRaw =
+            normalizeText(
+              valueFrom(
+                row,
+                [
+                  'Gestion DLUO/DLC',
+                  'Gestion DLUO',
+                  'DLUO',
+                  'Has expiry',
+                ]
+              )
+            )
+
+          const lots =
+            lotsByRef.get(
+              internalRef
+            ) ||
+            existing?.lots ||
+            []
+
+          imported.push({
+            id:
+              existing?.id ||
+              crypto.randomUUID(),
+
+            internalRef,
+
+            supplierRef:
+              String(
+                valueFrom(
+                  row,
+                  [
+                    'Réf fournisseur',
+                    'Ref fournisseur',
+                    'Référence fournisseur',
+                    'Reference fournisseur',
+                  ]
+                ) || ''
+              ).trim(),
+
+            name,
+
+            photo:
+              String(
+                valueFrom(
+                  row,
+                  [
+                    'Photo',
+                    'Photo URL',
+                  ]
+                ) || ''
+              ).trim(),
+
+            hasExpiry:
+              hasExpiryRaw
+                ? [
+                    'oui',
+                    'yes',
+                    'true',
+                    '1',
+                  ].includes(
+                    hasExpiryRaw
+                  )
+                : lots.some(
+                    (lot) =>
+                      Boolean(
+                        lot.expiry
+                      )
+                  ),
+
+            category:
+              String(
+                valueFrom(
+                  row,
+                  [
+                    'Catégorie',
+                    'Categorie',
+                    'Category',
+                  ]
+                ) || ''
+              ).trim(),
+
+            subcategory:
+              String(
+                valueFrom(
+                  row,
+                  [
+                    'Sous-catégorie',
+                    'Sous categorie',
+                    'Subcategory',
+                  ]
+                ) || ''
+              ).trim(),
+
+            brand:
+              String(
+                valueFrom(
+                  row,
+                  [
+                    'Marque',
+                    'Brand',
+                  ]
+                ) || ''
+              ).trim(),
+
+            packaging:
+              String(
+                valueFrom(
+                  row,
+                  [
+                    'Conditionnement',
+                    'Packaging',
+                  ]
+                ) ||
+                  'Unité'
+              ).trim(),
+
+            unit:
+              String(
+                valueFrom(
+                  row,
+                  [
+                    'Unité',
+                    'Unite',
+                    'Unit',
+                  ]
+                ) ||
+                  'unité'
+              ).trim(),
+
+            purchasePrice:
+              Math.max(
+                0,
+                toNumber(
+                  valueFrom(
+                    row,
+                    [
+                      "Prix d'achat",
+                      'Prix achat',
+                      'Prix unitaire',
+                      'Purchase price',
+                    ]
+                  )
+                )
+              ),
+
+            priceUpdatedAt:
+              toIsoDate(
+                valueFrom(
+                  row,
+                  [
+                    'Date MAJ prix',
+                    'Date mise à jour prix',
+                    'Price updated',
+                  ]
+                )
+              ) ||
+              new Date()
+                .toISOString()
+                .slice(0, 10),
+
+            mainSupplier:
+              String(
+                valueFrom(
+                  row,
+                  [
+                    'Fournisseur principal',
+                    'Fournisseur',
+                    'Supplier',
+                  ]
+                ) || ''
+              ).trim(),
+
+            minStock:
+              Math.max(
+                0,
+                toNumber(
+                  valueFrom(
+                    row,
+                    [
+                      'Stock mini',
+                      'Stock minimum',
+                      'Minimum stock',
+                    ]
+                  )
+                )
+              ),
+
+            productType:
+              String(
+                valueFrom(
+                  row,
+                  [
+                    'Type produit',
+                    'Product type',
+                  ]
+                ) ||
+                  'acheté'
+              ).trim(),
+
+            lots,
+          })
+        }
+
+        if (
+          !imported.length
+        ) {
+          throw new Error(
+            'Aucun produit valide trouvé dans le fichier.'
+          )
+        }
+
+        const importedKeys =
+          new Set(
+            imported.flatMap(
+              (product) => [
+                `ref:${normalizeText(
+                  product.internalRef
+                )}`,
+                `name:${normalizeText(
+                  product.name
+                )}`,
+              ]
+            )
+          )
+
+        const untouched =
+          products.filter(
+            (product) =>
+              !importedKeys.has(
+                `ref:${normalizeText(
+                  product.internalRef
+                )}`
+              ) &&
+              !importedKeys.has(
+                `name:${normalizeText(
+                  product.name
+                )}`
+              )
+          )
+
+        saveProducts([
+          ...untouched,
+          ...imported,
+        ])
+
+        const supplierNames =
+          uniqueByName(
+            imported
+              .filter(
+                (product) =>
+                  product.mainSupplier
+              )
+              .map(
+                (product) => ({
+                  name:
+                    product.mainSupplier,
+                })
+              )
+          )
+
+        const existingSupplierNames =
+          new Set(
+            suppliers.map(
+              (supplier) =>
+                normalizeText(
+                  supplier.name
+                )
+            )
+          )
+
+        const newSuppliers =
+          supplierNames
+            .filter(
+              (supplier) =>
+                !existingSupplierNames.has(
+                  normalizeText(
+                    supplier.name
+                  )
+                )
+            )
+            .map(
+              (supplier) => ({
+                id:
+                  crypto.randomUUID(),
+                name:
+                  supplier.name,
+                contact: '',
+                phone: '',
+                payment: '',
+                notes:
+                  'Créé automatiquement lors de l’import Produits',
+                contactPerson: '',
+                email: '',
+                address: '',
+                deliveryLeadTime:
+                  '',
+                currency: 'XPF',
+                active: true,
+              })
+            )
+
+        if (
+          newSuppliers.length
+        ) {
+          saveSuppliers([
+            ...suppliers,
+            ...newSuppliers,
+          ])
+        }
+
+        setMessage(
+          `${imported.length} produit(s) importé(s) ou mis à jour. ${stockRows.length} ligne(s) de stock/DLUO lue(s).`
+        )
+      } catch (
+        caughtError
+      ) {
+        console.error(
+          'Import produits :',
+          caughtError
+        )
+
+        setError(
+          caughtError instanceof
+            Error
+            ? caughtError.message
+            : "Erreur pendant l'import des produits."
+        )
+      } finally {
+        setBusy('')
+      }
+    }
+
+  const importSuppliers =
+    async (
+      event:
+        ChangeEvent<HTMLInputElement>
+    ) => {
+      const file =
+        event.target.files?.[0]
+
+      event.target.value = ''
+
+      if (!file) return
+
+      setBusy('suppliers')
+      setMessage('')
+      setError('')
+
+      try {
+        const workbook =
+          await readWorkbook(
+            file
+          )
+
+        const rows =
+          readSheet(
+            workbook,
+            [
+              'Fournisseurs',
+              'Suppliers',
+              'Feuil1',
+              'Sheet1',
+            ]
+          )
+
+        if (!rows.length) {
+          const first =
+            workbook
+              .SheetNames[0]
+
+          if (first) {
+            rows.push(
+              ...XLSX.utils
+                .sheet_to_json<Row>(
+                  workbook
+                    .Sheets[first],
+                  {
+                    defval: '',
+                    raw: true,
+                  }
+                )
+            )
+          }
+        }
+
+        const existingByName =
+          new Map(
+            suppliers.map(
+              (supplier) => [
+                normalizeText(
+                  supplier.name
+                ),
+                supplier,
+              ]
+            )
+          )
+
+        const imported:
+          any[] = []
+
+        for (
+          const row of rows
+        ) {
+          const name =
+            String(
+              valueFrom(
+                row,
+                [
+                  'Nom',
+                  'Fournisseur',
+                  'Supplier',
+                  'Name',
+                ]
+              ) || ''
+            ).trim()
+
+          if (!name) {
+            continue
+          }
+
+          const existing =
+            existingByName.get(
+              normalizeText(
+                name
+              )
+            )
+
+          imported.push({
+            id:
+              existing?.id ||
+              crypto.randomUUID(),
+
+            name,
+
+            contact:
+              String(
+                valueFrom(
+                  row,
+                  [
+                    'Contact',
+                  ]
+                ) ||
+                  existing?.contact ||
+                  ''
+              ).trim(),
+
+            phone:
+              String(
+                valueFrom(
+                  row,
+                  [
+                    'Téléphone',
+                    'Telephone',
+                    'Phone',
+                  ]
+                ) ||
+                  existing?.phone ||
+                  ''
+              ).trim(),
+
+            payment:
+              String(
+                valueFrom(
+                  row,
+                  [
+                    'Paiement',
+                    'Payment',
+                  ]
+                ) ||
+                  existing?.payment ||
+                  ''
+              ).trim(),
+
+            notes:
+              String(
+                valueFrom(
+                  row,
+                  [
+                    'Notes',
+                  ]
+                ) ||
+                  existing?.notes ||
+                  ''
+              ).trim(),
+
+            contactPerson:
+              String(
+                valueFrom(
+                  row,
+                  [
+                    'Contact principal',
+                    'Contact person',
+                  ]
+                ) ||
+                  existing
+                    ?.contactPerson ||
+                  ''
+              ).trim(),
+
+            email:
+              String(
+                valueFrom(
+                  row,
+                  [
+                    'Email',
+                    'E-mail',
+                  ]
+                ) ||
+                  existing?.email ||
+                  ''
+              ).trim(),
+
+            address:
+              String(
+                valueFrom(
+                  row,
+                  [
+                    'Adresse',
+                    'Address',
+                  ]
+                ) ||
+                  existing?.address ||
+                  ''
+              ).trim(),
+
+            deliveryLeadTime:
+              String(
+                valueFrom(
+                  row,
+                  [
+                    'Délai livraison',
+                    'Delai livraison',
+                    'Delivery lead time',
+                  ]
+                ) ||
+                  existing
+                    ?.deliveryLeadTime ||
+                  ''
+              ).trim(),
+
+            currency:
+              String(
+                valueFrom(
+                  row,
+                  [
+                    'Devise',
+                    'Currency',
+                  ]
+                ) ||
+                  existing?.currency ||
+                  'XPF'
+              ).trim(),
+
+            active: true,
+          })
+        }
+
+        const clean =
+          uniqueByName(
+            imported
+          )
+
+        if (!clean.length) {
+          throw new Error(
+            'Aucun fournisseur valide trouvé.'
+          )
+        }
+
+        const importedNames =
+          new Set(
+            clean.map(
+              (supplier) =>
+                normalizeText(
+                  supplier.name
+                )
+            )
+          )
+
+        saveSuppliers([
+          ...suppliers.filter(
+            (supplier) =>
+              !importedNames.has(
+                normalizeText(
+                  supplier.name
+                )
+              )
+          ),
+          ...clean,
+        ])
+
+        setMessage(
+          `${clean.length} fournisseur(s) importé(s) ou mis à jour.`
+        )
+      } catch (
+        caughtError
+      ) {
+        console.error(
+          'Import fournisseurs :',
+          caughtError
+        )
+
+        setError(
+          caughtError instanceof
+            Error
+            ? caughtError.message
+            : "Erreur pendant l'import des fournisseurs."
+        )
+      } finally {
+        setBusy('')
+      }
+    }
+
+  const importLocations =
+    async (
+      event:
+        ChangeEvent<HTMLInputElement>
+    ) => {
+      const file =
+        event.target.files?.[0]
+
+      event.target.value = ''
+
+      if (!file) return
+
+      setBusy('locations')
+      setMessage('')
+      setError('')
+
+      try {
+        const workbook =
+          await readWorkbook(
+            file
+          )
+
+        let rows =
+          readSheet(
+            workbook,
+            [
+              'Lieux',
+              'Lieux de stockage',
+              'Locations',
+              'Storage locations',
+              'Feuil1',
+              'Sheet1',
+            ]
+          )
+
+        if (!rows.length) {
+          const first =
+            workbook
+              .SheetNames[0]
+
+          if (first) {
+            rows =
+              XLSX.utils
+                .sheet_to_json<Row>(
+                  workbook
+                    .Sheets[first],
+                  {
+                    defval: '',
+                    raw: true,
+                  }
+                )
+          }
+        }
+
+        const names =
+          [
+            ...new Set(
+              rows
+                .map(
+                  (row) =>
+                    String(
+                      valueFrom(
+                        row,
+                        [
+                          'Nom',
+                          'Lieu',
+                          'Lieu de stockage',
+                          'Location',
+                          'Name',
+                        ]
+                      ) || ''
+                    ).trim()
+                )
+                .filter(
+                  Boolean
+                )
+            ),
+          ]
+
+        if (!names.length) {
+          throw new Error(
+            'Aucun lieu de stockage valide trouvé.'
+          )
+        }
+
+        const existingLocations =
+          masterData.filter(
+            (item) =>
+              item.type ===
+              'location'
+          )
+
+        const otherMasterData =
+          masterData.filter(
+            (item) =>
+              item.type !==
+              'location'
+          )
+
+        const byName =
+          new Map(
+            existingLocations.map(
+              (item) => [
+                normalizeText(
+                  item.name
+                ),
+                item,
+              ]
+            )
+          )
+
+        const imported =
+          names.map(
+            (name) => {
+              const existing =
+                byName.get(
+                  normalizeText(
+                    name
+                  )
+                )
 
               return {
-                product,
-                lot,
-                quantity,
-                value:
-                  quantity *
-                  Math.max(
-                    0,
-                    Number(
-                      product.purchasePrice
-                    ) || 0
-                  ),
-                expiryPriority:
-                  getExpiryPriority(
-                    lot.expiry
-                  ),
+                id:
+                  existing?.id ||
+                  crypto.randomUUID(),
+                type:
+                  'location' as const,
+                name,
+                active: true,
               }
             }
           )
-        }
-      )
-    }, [items])
 
-  const matchesQuantityFilter = (
-    quantity: number,
-    minStock: number
-  ) => {
-    switch (quantityFilter) {
-      case 'Rupture':
-        return quantity === 0
-
-      case '1-10':
-        return (
-          quantity >= 1 &&
-          quantity <= 10
-        )
-
-      case '11-50':
-        return (
-          quantity >= 11 &&
-          quantity <= 50
-        )
-
-      case '51-100':
-        return (
-          quantity >= 51 &&
-          quantity <= 100
-        )
-
-      case '100+':
-        return quantity > 100
-
-      case 'Sous minimum':
-        return quantity < minStock
-
-      default:
-        return true
-    }
-  }
-
-  const filteredRows = useMemo(
-    () => {
-      const query = search
-        .trim()
-        .toLowerCase()
-
-      const rows = allRows.filter(
-        ({
-          product,
-          lot,
-          quantity,
-          expiryPriority,
-        }) => {
-          const haystack =
-            `${product.internalRef || ''} ${
-              product.name || ''
-            } ${
-              product.category || ''
-            } ${
-              product.subcategory || ''
-            } ${
-              product.mainSupplier || ''
-            } ${lot.location || ''} ${
-              lot.lotNumber || ''
-            }`
-              .toLowerCase()
-
-          if (
-            query &&
-            !haystack.includes(query)
-          ) {
-            return false
-          }
-
-          if (
-            zoneFilter !== 'All' &&
-            detectProductZone(product) !== zoneFilter
-          ) {
-            return false
-          }
-
-          if (
-            categoryFilter !==
-              'Toutes' &&
-            product.category !==
-              categoryFilter
-          ) {
-            return false
-          }
-
-          if (
-            subcategoryFilter !==
-              'Toutes' &&
-            product.subcategory !==
-              subcategoryFilter
-          ) {
-            return false
-          }
-
-          if (
-            supplierFilter !==
-              'Tous' &&
-            product.mainSupplier !==
-              supplierFilter
-          ) {
-            return false
-          }
-
-          if (
-            locationFilter !==
-              'Tous' &&
-            lot.location !==
-              locationFilter
-          ) {
-            return false
-          }
-
-          if (
-            expiryFilter !==
-              'Toutes' &&
-            expiryPriority !==
-              expiryFilter
-          ) {
-            return false
-          }
-
-          if (
-            !matchesQuantityFilter(
-              quantity,
-              Math.max(
-                0,
-                Number(
-                  product.minStock
-                ) || 0
-              )
+        const importedNames =
+          new Set(
+            imported.map(
+              (item) =>
+                normalizeText(
+                  item.name
+                )
             )
-          ) {
-            return false
-          }
-
-          return true
-        }
-      )
-
-      return [...rows].sort(
-        (a, b) => {
-          const getValue = (
-            row: StockRow
-          ) => {
-            switch (sortKey) {
-              case 'category':
-                return (
-                  row.product
-                    .category || ''
-                )
-
-              case 'subcategory':
-                return (
-                  row.product
-                    .subcategory || ''
-                )
-
-              case 'supplier':
-                return (
-                  row.product
-                    .mainSupplier || ''
-                )
-
-              case 'location':
-                return (
-                  row.lot.location || ''
-                )
-
-              case 'expiry':
-                return (
-                  row.lot.expiry ||
-                  '9999-12-31'
-                )
-
-              case 'quantity':
-                return row.quantity
-
-              case 'price':
-                return (
-                  Number(
-                    row.product
-                      .purchasePrice
-                  ) || 0
-                )
-
-              case 'value':
-                return row.value
-
-              case 'product':
-              default:
-                return (
-                  row.product.name ||
-                  ''
-                )
-            }
-          }
-
-          const av = getValue(a)
-          const bv = getValue(b)
-
-          const result =
-            typeof av === 'number' &&
-            typeof bv === 'number'
-              ? av - bv
-              : String(
-                  av
-                ).localeCompare(
-                  String(bv),
-                  'fr'
-                )
-
-          return sortDirection ===
-            'asc'
-            ? result
-            : -result
-        }
-      )
-    },
-    [
-      allRows,
-      search,
-      zoneFilter,
-      categoryFilter,
-      subcategoryFilter,
-      supplierFilter,
-      locationFilter,
-      quantityFilter,
-      expiryFilter,
-      sortKey,
-      sortDirection,
-    ]
-  )
-
-  const filteredProductIds =
-    useMemo(
-      () =>
-        new Set(
-          filteredRows.map(
-            (row) =>
-              row.product.id
           )
-        ),
-      [filteredRows]
-    )
 
-  const totalQty =
-    filteredRows.reduce(
-      (sum, row) =>
-        sum + row.quantity,
-      0
-    )
+        const untouchedLocations =
+          existingLocations.filter(
+            (item) =>
+              !importedNames.has(
+                normalizeText(
+                  item.name
+                )
+              )
+          )
 
-  const totalValue =
-    filteredRows.reduce(
-      (sum, row) =>
-        sum + row.value,
-      0
-    )
+        saveMasterData([
+          ...otherMasterData,
+          ...untouchedLocations,
+          ...imported,
+        ])
 
-  const expiredCount =
-    filteredRows.filter(
-      (row) =>
-        row.expiryPriority ===
-        'Périmé'
-    ).length
+        setMessage(
+          `${imported.length} lieu(x) de stockage importé(s) ou mis à jour.`
+        )
+      } catch (
+        caughtError
+      ) {
+        console.error(
+          'Import lieux :',
+          caughtError
+        )
 
-  const underOneMonthCount =
-    filteredRows.filter(
-      (row) =>
-        row.expiryPriority ===
-        "Moins d'un mois"
-    ).length
-
-  const resetFilters = () => {
-    setSearch('')
-    setCategoryFilter('Toutes')
-    setSubcategoryFilter('Toutes')
-    setSupplierFilter('Tous')
-    setLocationFilter('Tous')
-    setZoneFilter('All')
-    setQuantityFilter('Tous')
-    setExpiryFilter('Toutes')
-  }
-
-  const toggleSort = (
-    key: SortKey
-  ) => {
-    if (sortKey === key) {
-      setSortDirection(
-        (current) =>
-          current === 'asc'
-            ? 'desc'
-            : 'asc'
-      )
-      return
+        setError(
+          caughtError instanceof
+            Error
+            ? caughtError.message
+            : "Erreur pendant l'import des lieux."
+        )
+      } finally {
+        setBusy('')
+      }
     }
 
-    setSortKey(key)
-    setSortDirection('asc')
-  }
+  const clearAllProducts =
+    async () => {
+      setMessage('')
+      setError('')
 
-  const sortIndicator = (
-    key: SortKey
-  ) =>
-    sortKey === key
-      ? sortDirection === 'asc'
-        ? ' ▲'
-        : ' ▼'
-      : ''
+      if (!products.length) {
+        setError(
+          'Il n’y a aucun produit à supprimer.'
+        )
+        return
+      }
 
-  const getExportRows = () =>
-    filteredRows.map(
-      ({
-        product,
-        lot,
-        quantity,
-        value,
-      }) => ({
-        Référence:
-          product.internalRef || '',
-        Produit: product.name || '',
-        Zone:
-          detectProductZone(product),
-        Catégorie:
-          product.category || '',
-        'Sous-catégorie':
-          product.subcategory || '',
-        Marque:
-          product.brand || '',
-        Fournisseur:
-          product.mainSupplier || '',
-        Lieu:
-          lot.location || '',
-        Lot:
-          lot.lotNumber || '',
-        'DLUO / DLC':
-          lot.expiry
-            ? new Date(
-                `${lot.expiry}T00:00:00`
-              ).toLocaleDateString(
-                'fr-FR'
-              )
-            : 'Sans DLUO',
-        Disponible: quantity,
-        Unité:
-          product.unit || '',
-        'Prix unitaire XPF':
-          Math.max(
-            0,
-            Number(
-              product.purchasePrice
-            ) || 0
-          ),
-        'Valeur XPF': value,
-      })
-    )
+      const firstConfirm =
+        window.confirm(
+          `ATTENTION : tu vas supprimer les ${products.length} produit(s) actuellement présents dans NukuStock.\n\nCette action supprimera également leurs lots et leur stock affiché.\n\nContinuer ?`
+        )
 
-  const exportExcel = () => {
-    const rows = getExportRows()
+      if (!firstConfirm) {
+        return
+      }
 
-    const worksheet =
-      XLSX.utils.json_to_sheet(
-        rows
-      )
+      const secondConfirm =
+        window.confirm(
+          `DERNIÈRE CONFIRMATION\n\nEffacer définitivement TOUS les produits actifs de NukuStock ?\n\nLes fournisseurs et les lieux de stockage seront conservés.`
+        )
 
-    worksheet['!cols'] = [
-      { wch: 20 },
-      { wch: 32 },
-      { wch: 24 },
-      { wch: 20 },
-      { wch: 22 },
-      { wch: 18 },
-      { wch: 24 },
-      { wch: 22 },
-      { wch: 18 },
-      { wch: 16 },
-      { wch: 12 },
-      { wch: 12 },
-      { wch: 18 },
-      { wch: 18 },
-    ]
+      if (!secondConfirm) {
+        return
+      }
 
-    const workbook =
-      XLSX.utils.book_new()
+      setBusy('products')
 
-    XLSX.utils.book_append_sheet(
-      workbook,
-      worksheet,
-      'Stock disponible'
-    )
+      try {
+        const {
+          data: {
+            session,
+          },
+        } =
+          await supabase
+            .auth
+            .getSession()
 
-    XLSX.writeFile(
-      workbook,
-      `NukuStock-Stock-${new Date()
-        .toISOString()
-        .slice(0, 10)}.xlsx`
-    )
-  }
-
-  const exportPdf = () => {
-    const doc = new jsPDF({
-      orientation: 'landscape',
-      unit: 'mm',
-      format: 'a4',
-    })
-
-    doc.setFontSize(17)
-    doc.text(
-      'NUKUTEPIPI - NukuStock',
-      12,
-      13
-    )
-
-    doc.setFontSize(12)
-    doc.text(
-      `État du stock disponible - Zone : ${zoneFilter}`,
-      12,
-      19
-    )
-
-    doc.setFontSize(8)
-    doc.text(
-      `Édité le ${new Date().toLocaleDateString(
-        'fr-FR'
-      )} - ${filteredProductIds.size} référence(s) - ${totalQty.toLocaleString(
-        'fr-FR'
-      )} unité(s)`,
-      12,
-      24
-    )
-
-    autoTable(doc, {
-      startY: 29,
-
-      head: [
-        [
-          'Référence',
-          'Produit',
-          'Catégorie',
-          'Sous-cat.',
-          'Lieu',
-          'DLUO/DLC',
-          'Disponible',
-          'Prix XPF',
-          'Valeur XPF',
-        ],
-      ],
-
-      body: filteredRows.map(
-        ({
-          product,
-          lot,
-          quantity,
-          value,
-        }) => [
-          product.internalRef ||
-            '',
-          product.name || '',
-          product.category ||
-            '',
-          product.subcategory ||
-            '',
-          lot.location ||
-            'Non affecté',
-          lot.expiry
-            ? new Date(
-                `${lot.expiry}T00:00:00`
-              ).toLocaleDateString(
-                'fr-FR'
-              )
-            : 'Sans DLUO',
-          `${quantity} ${
-            product.unit || ''
-          }`,
-          Math.max(
-            0,
-            Number(
-              product.purchasePrice
-            ) || 0
-          ).toLocaleString(
-            'fr-FR'
-          ),
-          value.toLocaleString(
-            'fr-FR'
-          ),
-        ]
-      ),
-
-      styles: {
-        fontSize: 6.5,
-        cellPadding: 1.5,
-        overflow: 'linebreak',
-      },
-
-      headStyles: {
-        fontStyle: 'bold',
-      },
-
-      margin: {
-        left: 7,
-        right: 7,
-      },
-    })
-
-    doc.save(
-      `NukuStock-Stock-${new Date()
-        .toISOString()
-        .slice(0, 10)}.pdf`
-    )
-  }
-
-  const printStock = () => {
-    const rows = filteredRows
-      .map(
-        ({
-          product,
-          lot,
-          quantity,
-          value,
-        }) => {
-          const expiryText = lot.expiry
-            ? new Date(
-                `${lot.expiry}T00:00:00`
-              ).toLocaleDateString('fr-FR')
-            : 'Sans DLUO'
-
-          const price = Math.max(
-            0,
-            Number(product.purchasePrice) || 0
-          ).toLocaleString('fr-FR')
-
-          const total = value.toLocaleString('fr-FR')
-
-          return `
-            <tr>
-              <td>${product.internalRef || ''}</td>
-              <td>${product.name || ''}</td>
-              <td>${product.category || ''}</td>
-              <td>${product.subcategory || ''}</td>
-              <td>${lot.location || 'Non affecté'}</td>
-              <td>${expiryText}</td>
-              <td>${quantity} ${product.unit || ''}</td>
-              <td>${price}</td>
-              <td>${total}</td>
-            </tr>
-          `
+        if (
+          !session
+            ?.access_token
+        ) {
+          throw new Error(
+            'Session administrateur introuvable. Reconnecte-toi.'
+          )
         }
-      )
-      .join('')
 
-    const printWindow = window.open(
-      '',
-      '_blank',
-      'width=1200,height=900'
-    )
+        const response =
+          await fetch(
+            '/api/admin/sync-products',
+            {
+              method:
+                'DELETE',
+              headers: {
+                Authorization:
+                  `Bearer ${session.access_token}`,
+              },
+            }
+          )
 
-    if (!printWindow) {
-      window.alert(
-        "Impossible d'ouvrir la fenêtre d'impression."
-      )
-      return
+        const data =
+          await response.json()
+
+        if (!response.ok) {
+          throw new Error(
+            data.error ||
+              'Suppression globale impossible.'
+          )
+        }
+
+        if (
+          Number(
+            data.remaining
+          ) !== 0
+        ) {
+          throw new Error(
+            `Suppression incomplète : ${data.remaining} produit(s) restent actifs.`
+          )
+        }
+
+        // Maintenant seulement on vide l'état local.
+        // Le cache passe donc également à [] et ne pourra
+        // plus réinjecter d'anciens produits.
+        saveProducts([])
+
+        setMessage(
+          `${data.deleted || products.length} produit(s) supprimé(s). Il reste 0 produit actif. Fournisseurs et lieux conservés.`
+        )
+      } catch (
+        caughtError
+      ) {
+        console.error(
+          'Effacement global produits :',
+          caughtError
+        )
+
+        setError(
+          caughtError instanceof
+            Error
+            ? caughtError.message
+            : 'Erreur pendant la suppression globale des produits.'
+        )
+      } finally {
+        setBusy('')
+      }
     }
 
-    printWindow.document.write(`
-      <!doctype html>
-      <html lang="fr">
-        <head>
-          <meta charset="utf-8" />
-          <title>NukuStock - Stock disponible</title>
+  const clearAllLocations =
+    async () => {
+      setMessage('')
+      setError('')
 
-          <style>
-            @page {
-              size: A4 landscape;
-              margin: 10mm;
-            }
+      const locations =
+        masterData.filter(
+          (item) =>
+            item.type ===
+            'location'
+        )
 
-            * {
-              box-sizing: border-box;
-            }
+      if (!locations.length) {
+        setError(
+          'Il n’y a aucun lieu de stockage à supprimer.'
+        )
+        return
+      }
 
-            body {
-              margin: 0;
-              font-family: Arial, Helvetica, sans-serif;
-              color: #111;
-              background: #fff;
-            }
+      const firstConfirm =
+        window.confirm(
+          `ATTENTION : tu vas supprimer les ${locations.length} lieu(x) de stockage actuellement présents dans NukuStock.\n\nLes produits, fournisseurs, catégories et sous-catégories seront conservés.\n\nContinuer ?`
+        )
 
-            .header {
-              margin-bottom: 8mm;
-            }
+      if (!firstConfirm) {
+        return
+      }
 
-            .brand {
-              font-size: 18px;
-              font-weight: 800;
-            }
+      const secondConfirm =
+        window.confirm(
+          `DERNIÈRE CONFIRMATION\n\nEffacer définitivement TOUS les lieux de stockage ?\n\nCette action ne supprime pas les produits ni les fournisseurs.`
+        )
 
-            .title {
-              margin-top: 3px;
-              font-size: 13px;
-              font-weight: 700;
-            }
+      if (!secondConfirm) {
+        return
+      }
 
-            .meta {
-              margin-top: 5px;
-              font-size: 9px;
-            }
+      setBusy(
+        'clear-locations'
+      )
 
-            .zone {
-              margin-top: 6px;
-              padding: 5px 0;
-              border-top: 1px solid #111;
-              border-bottom: 1px solid #111;
-              text-align: center;
-              font-size: 11px;
-              font-weight: 800;
-            }
+      try {
+        // Suppression directe dans Supabase.
+        // Les IDs sont supprimés un par un pour ne pas dépendre
+        // d'une condition artificielle du type "id != ...".
+        const ids =
+          locations.map(
+            (item) => item.id
+          )
 
-            table {
-              width: 100%;
-              border-collapse: collapse;
-              table-layout: fixed;
-              font-size: 7px;
-            }
+        const { error:
+          deleteError } =
+          await supabase
+            .from(
+              'storage_locations'
+            )
+            .delete()
+            .in('id', ids)
 
-            th,
-            td {
-              border: 1px solid #999;
-              padding: 3px 4px;
-              vertical-align: middle;
-              overflow-wrap: anywhere;
-            }
+        if (deleteError) {
+          throw deleteError
+        }
 
-            th {
-              background: #f2f2f2;
-              font-weight: 700;
-            }
+        // Vérification réelle : aucun des lieux supprimés
+        // ne doit encore exister dans Supabase.
+        const {
+          data: remainingRows,
+          error:
+            verificationError,
+        } =
+          await supabase
+            .from(
+              'storage_locations'
+            )
+            .select('id')
+            .in('id', ids)
 
-            th:nth-child(1),
-            td:nth-child(1) {
-              width: 11%;
-            }
+        if (
+          verificationError
+        ) {
+          throw verificationError
+        }
 
-            th:nth-child(2),
-            td:nth-child(2) {
-              width: 20%;
-            }
+        if (
+          (remainingRows || [])
+            .length !== 0
+        ) {
+          throw new Error(
+            `Suppression incomplète : ${(remainingRows || []).length} lieu(x) sont encore présents dans Supabase.`
+          )
+        }
 
-            th:nth-child(3),
-            td:nth-child(3) {
-              width: 11%;
-            }
+        // On retire ensuite uniquement les lieux de l'état local.
+        // Tous les autres référentiels restent intacts.
+        saveMasterData(
+          masterData.filter(
+            (item) =>
+              item.type !==
+              'location'
+          )
+        )
 
-            th:nth-child(4),
-            td:nth-child(4) {
-              width: 12%;
-            }
+        setMessage(
+          `${locations.length} lieu(x) de stockage supprimé(s). Produits, fournisseurs, catégories et sous-catégories conservés.`
+        )
+      } catch (
+        caughtError
+      ) {
+        console.error(
+          'Effacement global lieux :',
+          caughtError
+        )
 
-            th:nth-child(5),
-            td:nth-child(5) {
-              width: 12%;
-            }
+        setError(
+          caughtError instanceof
+            Error
+            ? caughtError.message
+            : 'Erreur pendant la suppression globale des lieux.'
+        )
+      } finally {
+        setBusy('')
+      }
+    }
 
-            th:nth-child(6),
-            td:nth-child(6) {
-              width: 10%;
-            }
+  const exportBackup =
+    () => {
+      const payload = {
+        exportedAt:
+          new Date()
+            .toISOString(),
+        products,
+        suppliers,
+        masterData,
+      }
 
-            th:nth-child(7),
-            td:nth-child(7) {
-              width: 9%;
-            }
+      const blob =
+        new Blob(
+          [
+            JSON.stringify(
+              payload,
+              null,
+              2
+            ),
+          ],
+          {
+            type:
+              'application/json;charset=utf-8',
+          }
+        )
 
-            th:nth-child(8),
-            td:nth-child(8) {
-              width: 7%;
-            }
+      const url =
+        URL.createObjectURL(
+          blob
+        )
 
-            th:nth-child(9),
-            td:nth-child(9) {
-              width: 8%;
-            }
+      const anchor =
+        document.createElement(
+          'a'
+        )
 
-            tr {
-              break-inside: avoid;
-            }
-          </style>
-        </head>
+      anchor.href = url
+      anchor.download =
+        `NukuStock-backup-${new Date()
+          .toISOString()
+          .slice(0, 10)}.json`
 
-        <body>
-          <div class="header">
-            <div class="brand">
-              NUKUTEPIPI - NukuStock
-            </div>
+      anchor.click()
 
-            <div class="title">
-              État du stock disponible
-            </div>
+      URL.revokeObjectURL(
+        url
+      )
 
-            <div class="meta">
-              Édité le ${new Date().toLocaleDateString(
-                'fr-FR'
-              )} -
-              ${filteredProductIds.size} référence(s) -
-              ${totalQty.toLocaleString(
-                'fr-FR'
-              )} unité(s)
-            </div>
-
-            <div class="zone">
-              ZONE : ${zoneFilter}
-            </div>
-          </div>
-
-          <table>
-            <thead>
-              <tr>
-                <th>Référence</th>
-                <th>Produit</th>
-                <th>Catégorie</th>
-                <th>Sous-cat.</th>
-                <th>Lieu</th>
-                <th>DLUO/DLC</th>
-                <th>Disponible</th>
-                <th>Prix XPF</th>
-                <th>Valeur XPF</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              ${rows}
-            </tbody>
-          </table>
-
-          <script>
-            window.onload = () => {
-              window.print()
-              window.onafterprint = () => window.close()
-            }
-          </script>
-        </body>
-      </html>
-    `)
-
-    printWindow.document.close()
-  }
-
-  const statBox: CSSProperties = {
-    padding: 14,
-    borderRadius: 13,
-    background: '#ffffff',
-    border:
-      '1px solid #e5e7eb',
-  }
-
-  const thButton: CSSProperties = {
-    border: 0,
-    background: 'transparent',
-    font: 'inherit',
-    fontWeight: 700,
-    cursor: 'pointer',
-    padding: 0,
-    color: 'inherit',
-    textAlign: 'left',
-  }
+      setMessage(
+        'Sauvegarde JSON exportée.'
+      )
+    }
 
   return (
     <Page
-      title="Stocks"
-      subtitle="Consultation du stock disponible — les modifications se font uniquement dans Produits"
+      title="Import / Export"
+      subtitle="Importer les bases NukuStock sans modifier manuellement les fiches une par une"
       action={
-        <div
-          className="screenOnly"
-          style={{
-            display: 'flex',
-            gap: 8,
-            flexWrap: 'wrap',
-          }}
+        <button
+          type="button"
+          className="button secondary"
+          onClick={
+            exportBackup
+          }
         >
-          <button
-            className="button secondary"
-            type="button"
-            onClick={exportExcel}
-          >
-            Exporter Excel
-          </button>
-
-          <button
-            className="button secondary"
-            type="button"
-            onClick={exportPdf}
-          >
-            Exporter PDF
-          </button>
-
-          <button
-            className="button"
-            type="button"
-            onClick={printStock}
-          >
-            Imprimer le stock
-          </button>
-        </div>
+          Exporter une sauvegarde
+        </button>
       }
     >
-      <div
-        className="printOnly"
+      <input
+        ref={productsInput}
+        type="file"
+        accept=".xlsx,.xls,.xlsm"
         style={{
           display: 'none',
         }}
-      >
+        onChange={
+          importProducts
+        }
+      />
+
+      <input
+        ref={suppliersInput}
+        type="file"
+        accept=".xlsx,.xls,.xlsm"
+        style={{
+          display: 'none',
+        }}
+        onChange={
+          importSuppliers
+        }
+      />
+
+      <input
+        ref={locationsInput}
+        type="file"
+        accept=".xlsx,.xls,.xlsm"
+        style={{
+          display: 'none',
+        }}
+        onChange={
+          importLocations
+        }
+      />
+
+      {message && (
         <div
+          className="notice goodNotice"
           style={{
-            textAlign: 'center',
-            marginBottom: 10,
+            marginBottom: 16,
           }}
         >
-          <div
-            style={{
-              fontSize: 16,
-              fontWeight: 900,
-            }}
-          >
-            NUKUTEPIPI · NUKUSTOCK
-          </div>
-
-          <div
-            style={{
-              marginTop: 3,
-              fontSize: 12,
-              fontWeight: 700,
-            }}
-          >
-            État du stock disponible
-          </div>
-
-          <div
-            style={{
-              marginTop: 4,
-              fontSize: 9,
-            }}
-          >
-            Date d'impression :{' '}
-            {new Date().toLocaleDateString('fr-FR')}{' '}
-            {new Date().toLocaleTimeString('fr-FR', {
-              hour: '2-digit',
-              minute: '2-digit',
-            })}
-          </div>
+          {message}
         </div>
+      )}
 
+      {error && (
         <div
+          className="notice"
           style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, 1fr)',
-            gap: 8,
-            marginBottom: 10,
-            fontSize: 9,
+            marginBottom: 16,
+            background:
+              'rgba(220,38,38,.08)',
+            border:
+              '1px solid rgba(220,38,38,.2)',
+            color: '#b42318',
           }}
         >
-          <div
-            style={{
-              gridColumn: '1 / -1',
-              textAlign: 'center',
-              fontSize: 11,
-              fontWeight: 900,
-              padding: '5px 0',
-              borderTop: '1px solid #000',
-              borderBottom: '1px solid #000',
-            }}
-          >
-            ZONE : {zoneFilter}
-          </div>
-
-          <div>
-            <strong>Références :</strong>{' '}
-            {filteredProductIds.size}
-          </div>
-
-          <div>
-            <strong>Stock total :</strong>{' '}
-            {totalQty.toLocaleString('fr-FR')}
-          </div>
+          {error}
         </div>
-
-        <div
-          style={{
-            marginBottom: 8,
-            fontSize: 8,
-            textAlign: 'center',
-          }}
-        >
-          Impression simplifiée : la zone est indiquée en en-tête et les numéros de lot ne sont pas imprimés.
-        </div>
-      </div>
+      )}
 
       <div
         style={{
-          padding: 12,
-          borderRadius: 12,
-          marginBottom: 16,
-          background:
-            'rgba(59,130,246,.08)',
+          padding: 14,
+          marginBottom: 18,
+          borderRadius: 14,
           border:
             '1px solid rgba(59,130,246,.18)',
-          fontSize: 12,
-          lineHeight: 1.5,
+          background:
+            'rgba(59,130,246,.07)',
+          fontSize: 13,
+          lineHeight: 1.55,
         }}
       >
         <strong>
-          Consultation uniquement.
+          Import sécurisé :
         </strong>{' '}
-        Les quantités, DLUO/DLC,
-        lots et lieux de stockage ne
-        peuvent pas être modifiés ici.
-        Pour effectuer une entrée ou
-        modifier le stock, utilise
-        l&apos;onglet{' '}
-        <strong>Produits</strong>.
+        une référence déjà présente est
+        mise à jour. Les autres produits,
+        fournisseurs et lieux existants
+        sont conservés.
       </div>
 
       <div
+        className="importGrid"
         style={{
           display: 'grid',
           gridTemplateColumns:
-            'repeat(auto-fit,minmax(170px,1fr))',
-          gap: 12,
-          marginBottom: 16,
+            'repeat(3,minmax(0,1fr))',
+          gap: 16,
         }}
       >
-        <div style={statBox}>
+        <Card>
           <div
             style={{
-              fontSize: 11,
-              color: '#667085',
+              minHeight: 235,
+              display: 'flex',
+              flexDirection:
+                'column',
             }}
           >
-            Références affichées
-          </div>
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 900,
+                letterSpacing:
+                  '.05em',
+                color: '#667085',
+              }}
+            >
+              BASE PRODUITS
+            </div>
 
-          <div
-            style={{
-              fontSize: 24,
-              fontWeight: 800,
-              marginTop: 4,
-            }}
-          >
-            {filteredProductIds.size}
-          </div>
-        </div>
+            <h2
+              style={{
+                margin:
+                  '8px 0 8px',
+              }}
+            >
+              Importer Produits
+            </h2>
 
-        <div style={statBox}>
-          <div
-            style={{
-              fontSize: 11,
-              color: '#667085',
-            }}
-          >
-            Stock disponible
-          </div>
+            <p
+              className="muted"
+              style={{
+                margin: 0,
+                lineHeight: 1.5,
+              }}
+            >
+              Compatible avec le fichier
+              NukuStock contenant les
+              feuilles Produits et
+              Stocks_DLUO.
+            </p>
 
-          <div
-            style={{
-              fontSize: 24,
-              fontWeight: 800,
-              marginTop: 4,
-            }}
-          >
-            {totalQty.toLocaleString(
-              'fr-FR'
-            )}
+            <div
+              style={{
+                marginTop: 'auto',
+                paddingTop: 22,
+              }}
+            >
+              <button
+                type="button"
+                className="button"
+                style={{
+                  width: '100%',
+                }}
+                disabled={
+                  busy !== ''
+                }
+                onClick={() =>
+                  startImport(
+                    'products'
+                  )
+                }
+              >
+                {busy ===
+                'products'
+                  ? 'Import en cours...'
+                  : 'Importer Produits'}
+              </button>
+            </div>
           </div>
-        </div>
+        </Card>
 
-        <div style={statBox}>
+        <Card>
           <div
             style={{
-              fontSize: 11,
-              color: '#667085',
+              minHeight: 235,
+              display: 'flex',
+              flexDirection:
+                'column',
             }}
           >
-            Valeur du stock
-          </div>
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 900,
+                letterSpacing:
+                  '.05em',
+                color: '#667085',
+              }}
+            >
+              RÉFÉRENTIEL
+            </div>
 
-          <div
-            style={{
-              fontSize: 20,
-              fontWeight: 800,
-              marginTop: 4,
-            }}
-          >
-            {totalValue.toLocaleString(
-              'fr-FR'
-            )}{' '}
-            XPF
-          </div>
-        </div>
+            <h2
+              style={{
+                margin:
+                  '8px 0 8px',
+              }}
+            >
+              Importer Fournisseurs
+            </h2>
 
-        <div style={statBox}>
-          <div
-            style={{
-              fontSize: 11,
-              color: '#667085',
-            }}
-          >
-            Lots périmés
-          </div>
+            <p
+              className="muted"
+              style={{
+                margin: 0,
+                lineHeight: 1.5,
+              }}
+            >
+              Importe les noms, contacts,
+              téléphones, paiements,
+              emails, adresses et notes.
+            </p>
 
-          <div
-            style={{
-              fontSize: 24,
-              fontWeight: 800,
-              marginTop: 4,
-            }}
-          >
-            {expiredCount}
+            <div
+              style={{
+                marginTop: 'auto',
+                paddingTop: 22,
+              }}
+            >
+              <button
+                type="button"
+                className="button"
+                style={{
+                  width: '100%',
+                }}
+                disabled={
+                  busy !== ''
+                }
+                onClick={() =>
+                  startImport(
+                    'suppliers'
+                  )
+                }
+              >
+                {busy ===
+                'suppliers'
+                  ? 'Import en cours...'
+                  : 'Importer Fournisseurs'}
+              </button>
+            </div>
           </div>
-        </div>
+        </Card>
 
-        <div style={statBox}>
+        <Card>
           <div
             style={{
-              fontSize: 11,
-              color: '#667085',
+              minHeight: 235,
+              display: 'flex',
+              flexDirection:
+                'column',
             }}
           >
-            DLUO &lt; 1 mois
-          </div>
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 900,
+                letterSpacing:
+                  '.05em',
+                color: '#667085',
+              }}
+            >
+              STOCKAGE
+            </div>
 
-          <div
-            style={{
-              fontSize: 24,
-              fontWeight: 800,
-              marginTop: 4,
-            }}
-          >
-            {underOneMonthCount}
+            <h2
+              style={{
+                margin:
+                  '8px 0 8px',
+              }}
+            >
+              Importer Lieux
+            </h2>
+
+            <p
+              className="muted"
+              style={{
+                margin: 0,
+                lineHeight: 1.5,
+              }}
+            >
+              Ajoute ou met à jour les
+              lieux du référentiel central
+              de stockage.
+            </p>
+
+            <div
+              style={{
+                marginTop: 'auto',
+                paddingTop: 22,
+              }}
+            >
+              <button
+                type="button"
+                className="button"
+                style={{
+                  width: '100%',
+                }}
+                disabled={
+                  busy !== ''
+                }
+                onClick={() =>
+                  startImport(
+                    'locations'
+                  )
+                }
+              >
+                {busy ===
+                'locations'
+                  ? 'Import en cours...'
+                  : 'Importer Lieux'}
+              </button>
+            </div>
           </div>
-        </div>
+        </Card>
       </div>
+
+      <Card>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 16,
+            flexWrap: 'wrap',
+            padding: 2,
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 900,
+                color: '#b42318',
+                marginBottom: 4,
+              }}
+            >
+              ZONE DE SÉCURITÉ
+            </div>
+
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: 800,
+              }}
+            >
+              Effacer tous les produits
+            </div>
+
+            <div
+              className="muted"
+              style={{
+                marginTop: 4,
+                fontSize: 12,
+                lineHeight: 1.5,
+              }}
+            >
+              Supprime tous les produits et leurs stocks affichés.
+              Les fournisseurs et les lieux de stockage sont conservés.
+              Deux confirmations sont obligatoires.
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="button"
+            disabled={
+              busy !== '' ||
+              products.length === 0
+            }
+            onClick={
+              clearAllProducts
+            }
+            style={{
+              background: '#b42318',
+              borderColor: '#b42318',
+              color: '#ffffff',
+              minWidth: 220,
+            }}
+          >
+            Effacer tous les produits
+          </button>
+        </div>
+      </Card>
+
+      <Card>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 16,
+            flexWrap: 'wrap',
+            padding: 2,
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 900,
+                color: '#b42318',
+                marginBottom: 4,
+              }}
+            >
+              ZONE DE SÉCURITÉ
+            </div>
+
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: 800,
+              }}
+            >
+              Réinitialiser tous les lieux
+            </div>
+
+            <div
+              className="muted"
+              style={{
+                marginTop: 4,
+                fontSize: 12,
+                lineHeight: 1.5,
+              }}
+            >
+              Supprime tous les lieux de stockage du référentiel.
+              Les produits, fournisseurs, catégories et sous-catégories sont conservés.
+              Deux confirmations sont obligatoires.
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="button"
+            disabled={
+              busy !== '' ||
+              masterData.filter(
+                (item) =>
+                  item.type ===
+                  'location'
+              ).length === 0
+            }
+            onClick={
+              clearAllLocations
+            }
+            style={{
+              background: '#b42318',
+              borderColor: '#b42318',
+              color: '#ffffff',
+              minWidth: 220,
+            }}
+          >
+            {busy ===
+            'clear-locations'
+              ? 'Suppression en cours...'
+              : 'Réinitialiser les lieux'}
+          </button>
+        </div>
+      </Card>
 
       <Card>
         <div
           style={{
             display: 'grid',
             gridTemplateColumns:
-              'repeat(auto-fit,minmax(180px,1fr))',
-            gap: 10,
+              'repeat(3,minmax(0,1fr))',
+            gap: 16,
           }}
+          className="importStats"
         >
-          <input
-            className="input"
-            placeholder="Rechercher..."
-            value={search}
-            onChange={(event) =>
-              setSearch(
-                event.target.value
-              )
-            }
-          />
-
-          <select
-            className="select"
-            value={zoneFilter}
-            onChange={(event) =>
-              setZoneFilter(
-                event.target.value as ZoneFilter
-              )
-            }
-          >
-            <option value="All">
-              Toutes les zones
-            </option>
-            <option value="Beverage">
-              Beverage
-            </option>
-            <option value="Food">
-              Food
-            </option>
-            <option value="Matériel & Accessoires">
-              Matériel & Accessoires
-            </option>
-          </select>
-
-          <select
-            className="select"
-            value={categoryFilter}
-            onChange={(event) => {
-              setCategoryFilter(
-                event.target.value
-              )
-              setSubcategoryFilter(
-                'Toutes'
-              )
-            }}
-          >
-            <option value="Toutes">
-              Toutes les catégories
-            </option>
-
-            {categories.map(
-              (category) => (
-                <option
-                  key={category}
-                  value={category}
-                >
-                  {category}
-                </option>
-              )
-            )}
-          </select>
-
-          <select
-            className="select"
-            value={
-              subcategoryFilter
-            }
-            onChange={(event) =>
-              setSubcategoryFilter(
-                event.target.value
-              )
-            }
-          >
-            <option value="Toutes">
-              Toutes les
-              sous-catégories
-            </option>
-
-            {subcategories.map(
-              (subcategory) => (
-                <option
-                  key={subcategory}
-                  value={subcategory}
-                >
-                  {subcategory}
-                </option>
-              )
-            )}
-          </select>
-
-          <select
-            className="select"
-            value={supplierFilter}
-            onChange={(event) =>
-              setSupplierFilter(
-                event.target.value
-              )
-            }
-          >
-            <option value="Tous">
-              Tous les fournisseurs
-            </option>
-
-            {suppliers.map(
-              (supplier) => (
-                <option
-                  key={supplier}
-                  value={supplier}
-                >
-                  {supplier}
-                </option>
-              )
-            )}
-          </select>
-
-
-          <select
-            className="select"
-            value={locationFilter}
-            onChange={(event) =>
-              setLocationFilter(
-                event.target.value
-              )
-            }
-          >
-            <option value="Tous">
-              Tous les lieux
-            </option>
-
-            {locations.map(
-              (location) => (
-                <option
-                  key={location}
-                  value={location}
-                >
-                  {location}
-                </option>
-              )
-            )}
-          </select>
-
-          <select
-            className="select"
-            value={quantityFilter}
-            onChange={(event) =>
-              setQuantityFilter(
-                event.target
-                  .value as QuantityFilter
-              )
-            }
-          >
-            <option value="Tous">
-              Toutes les quantités
-            </option>
-            <option value="Rupture">
-              Stock = 0
-            </option>
-            <option value="1-10">
-              1 à 10
-            </option>
-            <option value="11-50">
-              11 à 50
-            </option>
-            <option value="51-100">
-              51 à 100
-            </option>
-            <option value="100+">
-              Plus de 100
-            </option>
-            <option value="Sous minimum">
-              Sous stock minimum
-            </option>
-          </select>
-
-          <select
-            className="select"
-            value={expiryFilter}
-            onChange={(event) =>
-              setExpiryFilter(
-                event.target
-                  .value as ExpiryFilter
-              )
-            }
-          >
-            <option value="Toutes">
-              Toutes les DLUO/DLC
-            </option>
-            <option value="Périmé">
-              Périmé
-            </option>
-            <option value="Moins d'un mois">
-              Moins d&apos;un mois
-            </option>
-            <option value="De 1 à 3 mois">
-              1 à 3 mois
-            </option>
-            <option value="De 3 à 6 mois">
-              3 à 6 mois
-            </option>
-            <option value="De 6 mois à 1 an">
-              6 mois à 1 an
-            </option>
-            <option value="+ d'un an">
-              Plus d&apos;un an
-            </option>
-            <option value="Sans DLUO">
-              Sans DLUO
-            </option>
-          </select>
-
-          <button
-            className="button secondary"
-            type="button"
-            onClick={resetFilters}
-          >
-            Réinitialiser filtres
-          </button>
-        </div>
-      </Card>
-
-      <Card>
-        <div
-          style={{
-            overflowX: 'auto',
-          }}
-        >
-          <div
-            style={{
-              minWidth: 1450,
-            }}
-          >
+          <div>
             <div
+              className="muted"
               style={{
-                display: 'grid',
-                gridTemplateColumns:
-                  '150px minmax(230px,2fr) 165px 150px 165px 160px 160px 145px 135px 120px 120px',
-                gap: 12,
-                padding:
-                  '0 0 12px',
-                fontWeight: 700,
-                alignItems: 'center',
+                fontSize: 12,
               }}
             >
-              <div>Référence</div>
-
-              <button
-                style={thButton}
-                onClick={() =>
-                  toggleSort(
-                    'product'
-                  )
-                }
-              >
-                Produit
-                {sortIndicator(
-                  'product'
-                )}
-              </button>
-
-              <div className="screenOnly">Zone</div>
-
-              <button
-                style={thButton}
-                onClick={() =>
-                  toggleSort(
-                    'category'
-                  )
-                }
-              >
-                Catégorie
-                {sortIndicator(
-                  'category'
-                )}
-              </button>
-
-              <button
-                style={thButton}
-                onClick={() =>
-                  toggleSort(
-                    'subcategory'
-                  )
-                }
-              >
-                Sous-catégorie
-                {sortIndicator(
-                  'subcategory'
-                )}
-              </button>
-
-              <button
-                style={thButton}
-                onClick={() =>
-                  toggleSort(
-                    'location'
-                  )
-                }
-              >
-                Lieu
-                {sortIndicator(
-                  'location'
-                )}
-              </button>
-
-              <div className="screenOnly">Lot</div>
-
-              <button
-                style={thButton}
-                onClick={() =>
-                  toggleSort(
-                    'expiry'
-                  )
-                }
-              >
-                DLUO / DLC
-                {sortIndicator(
-                  'expiry'
-                )}
-              </button>
-
-              <button
-                style={thButton}
-                onClick={() =>
-                  toggleSort(
-                    'quantity'
-                  )
-                }
-              >
-                Disponible
-                {sortIndicator(
-                  'quantity'
-                )}
-              </button>
-
-              <button
-                style={thButton}
-                onClick={() =>
-                  toggleSort(
-                    'price'
-                  )
-                }
-              >
-                Prix
-                {sortIndicator(
-                  'price'
-                )}
-              </button>
-
-              <button
-                style={thButton}
-                onClick={() =>
-                  toggleSort(
-                    'value'
-                  )
-                }
-              >
-                Valeur
-                {sortIndicator(
-                  'value'
-                )}
-              </button>
+              Produits actuels
             </div>
 
-            {filteredRows.map(
-              (
-                {
-                  product,
-                  lot,
-                  quantity,
-                  value,
-                },
-                index
-              ) => (
-                <div
-                  key={`${product.id}-${lot.id}-${index}`}
-                  style={{
-                    display:
-                      'grid',
-                    gridTemplateColumns:
-                      '150px minmax(230px,2fr) 165px 150px 165px 160px 160px 145px 135px 120px 120px',
-                    gap: 12,
-                    padding:
-                      '13px 0',
-                    borderTop:
-                      '1px solid rgba(255,255,255,.08)',
-                    alignItems:
-                      'center',
-                  }}
-                >
-                  <strong
-                    style={{
-                      fontSize: 11,
-                      letterSpacing:
-                        '.03em',
-                    }}
-                  >
-                    {product.internalRef ||
-                      '—'}
-                  </strong>
+            <strong
+              style={{
+                display: 'block',
+                marginTop: 5,
+                fontSize: 26,
+              }}
+            >
+              {products.length}
+            </strong>
+          </div>
 
-                  <div>
-                    <div
-                      style={{
-                        fontWeight:
-                          800,
-                      }}
-                    >
-                      {product.name}
-                    </div>
+          <div>
+            <div
+              className="muted"
+              style={{
+                fontSize: 12,
+              }}
+            >
+              Fournisseurs actuels
+            </div>
 
-                    <div
-                      style={{
-                        marginTop: 3,
-                        fontSize: 11,
-                        opacity: 0.65,
-                      }}
-                    >
-                      {[
-                        product.packaging,
-                      ]
-                        .filter(
-                          Boolean
-                        )
-                        .join(' · ')}
-                    </div>
-                  </div>
+            <strong
+              style={{
+                display: 'block',
+                marginTop: 5,
+                fontSize: 26,
+              }}
+            >
+              {suppliers.length}
+            </strong>
+          </div>
 
-                  <div className="screenOnly">
-                    <Badge tone="info">
-                      {detectProductZone(
-                        product
-                      )}
-                    </Badge>
-                  </div>
+          <div>
+            <div
+              className="muted"
+              style={{
+                fontSize: 12,
+              }}
+            >
+              Lieux actuels
+            </div>
 
-                  <div>
-                    {product.category ||
-                      '—'}
-                  </div>
-
-                  <div>
-                    {product.subcategory ||
-                      '—'}
-                  </div>
-
-                  <div>
-                    {lot.location ||
-                      'Non affecté'}
-                  </div>
-
-                  <div className="screenOnly">
-                    {lot.lotNumber ||
-                      '—'}
-                  </div>
-
-                  <div>
-                    {lot.expiry ? (
-                      <Badge
-                        tone={getExpiryTone(
-                          lot.expiry
-                        )}
-                      >
-                        {new Date(
-                          `${lot.expiry}T00:00:00`
-                        ).toLocaleDateString(
-                          'fr-FR'
-                        )}
-                      </Badge>
-                    ) : (
-                      <span
-                        style={{
-                          opacity: 0.5,
-                          fontSize: 12,
-                        }}
-                      >
-                        Sans DLUO
-                      </span>
-                    )}
-                  </div>
-
-                  <div>
-                    <Badge
-                      tone={
-                        quantity <= 0
-                          ? 'danger'
-                          : quantity <
-                            Math.max(
-                              0,
-                              Number(
-                                product.minStock
-                              ) || 0
-                            )
-                          ? 'warn'
-                          : 'good'
-                      }
-                    >
-                      {quantity}{' '}
-                      {product.unit}
-                    </Badge>
-                  </div>
-
-                  <div>
-                    {Math.max(
-                      0,
-                      Number(
-                        product.purchasePrice
-                      ) || 0
-                    ).toLocaleString(
-                      'fr-FR'
-                    )}{' '}
-                    XPF
-                  </div>
-
-                  <div>
-                    {value.toLocaleString(
-                      'fr-FR'
-                    )}{' '}
-                    XPF
-                  </div>
-                </div>
-              )
-            )}
-
-            {filteredRows.length ===
-              0 && (
-              <div
-                style={{
-                  padding: 24,
-                  textAlign:
-                    'center',
-                  opacity: 0.65,
-                }}
-              >
-                Aucun stock ne
-                correspond aux
-                filtres.
-              </div>
-            )}
+            <strong
+              style={{
+                display: 'block',
+                marginTop: 5,
+                fontSize: 26,
+              }}
+            >
+              {
+                masterData.filter(
+                  (item) =>
+                    item.type ===
+                    'location'
+                ).length
+              }
+            </strong>
           </div>
         </div>
       </Card>
 
       <style jsx global>{`
-        @media print {
-          @page {
-            size: A4 landscape;
-            margin: 10mm;
+        @media (max-width: 900px) {
+          .importGrid {
+            grid-template-columns: 1fr !important;
+          }
+
+          .importStats {
+            grid-template-columns: 1fr !important;
           }
         }
       `}</style>

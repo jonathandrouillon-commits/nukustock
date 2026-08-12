@@ -6,6 +6,12 @@ import {
 } from 'react'
 
 import {
+  useUnifiedProducts,
+  useUnifiedRequests,
+  useUnifiedMasterData,
+} from './supabase-unified-store'
+
+import {
   demoOrders,
   demoProducts,
   demoRequests,
@@ -53,6 +59,165 @@ export const KEYS = {
   // Historique central de tous les mouvements.
   stockMovements:
     'nukustock_stock_movements_v1',
+}
+
+function nextSequentialRef(
+  prefix: string,
+  refs: Array<string | undefined>
+) {
+  const matcher = new RegExp(
+    `^${prefix}-(\\d{3})$`,
+    'i'
+  )
+
+  const max = refs.reduce(
+    (current, ref) => {
+      const match =
+        (ref || '').trim().match(
+          matcher
+        )
+
+      if (!match) {
+        return current
+      }
+
+      const value =
+        Number(match[1])
+
+      return Number.isFinite(value)
+        ? Math.max(
+            current,
+            value
+          )
+        : current
+    },
+    0
+  )
+
+  return `${prefix}-${String(
+    max + 1
+  ).padStart(3, '0')}`
+}
+
+function withSupplierRefs(
+  suppliers: Supplier[]
+) {
+  const refs =
+    suppliers.map(
+      (supplier) =>
+        supplier.internalRef
+    )
+
+  return suppliers.map(
+    (supplier) => {
+      if (
+        supplier.internalRef
+          ?.trim()
+      ) {
+        return supplier
+      }
+
+      const internalRef =
+        nextSequentialRef(
+          'FOU',
+          refs
+        )
+
+      refs.push(internalRef)
+
+      return {
+        ...supplier,
+        internalRef,
+      }
+    }
+  )
+}
+
+function prefixForMasterType(
+  type: MasterDataItem['type']
+) {
+  switch (type) {
+    case 'location':
+      return 'LIE'
+    case 'zone':
+      return 'ZON'
+    case 'category':
+      return 'CAT'
+    case 'subcategory':
+      return 'SCA'
+    default:
+      return ''
+  }
+}
+
+function withMasterDataRefs(
+  items: MasterDataItem[]
+) {
+  const refsByType =
+    new Map<
+      MasterDataItem['type'],
+      Array<
+        string | undefined
+      >
+    >()
+
+  for (const item of items) {
+    const existing =
+      refsByType.get(
+        item.type
+      ) || []
+
+    existing.push(
+      item.internalRef
+    )
+
+    refsByType.set(
+      item.type,
+      existing
+    )
+  }
+
+  return items.map(
+    (item) => {
+      if (
+        item.internalRef?.trim()
+      ) {
+        return item
+      }
+
+      const prefix =
+        prefixForMasterType(
+          item.type
+        )
+
+      if (!prefix) {
+        return item
+      }
+
+      const refs =
+        refsByType.get(
+          item.type
+        ) || []
+
+      const internalRef =
+        nextSequentialRef(
+          prefix,
+          refs
+        )
+
+      refs.push(internalRef)
+
+      refsByType.set(
+        item.type,
+        refs
+      )
+
+      return {
+        ...item,
+        internalRef,
+      }
+    }
+  )
 }
 
 function readLocal<T>(
@@ -331,30 +496,52 @@ function normalizeSupplierOrder(
    ========================================================= */
 
 export function useProducts() {
-  return useLocalStore<
-    Product[]
-  >(
-    KEYS.products,
-    demoProducts as Product[]
-  )
+  return useUnifiedProducts()
 }
 
 export function useRequests() {
-  return useLocalStore<
-    InternalRequest[]
-  >(
-    KEYS.requests,
-    demoRequests as InternalRequest[]
-  )
+  return useUnifiedRequests()
 }
 
 export function useSuppliers() {
-  return useLocalStore<
-    Supplier[]
-  >(
-    KEYS.suppliers,
-    demoSuppliers as Supplier[]
-  )
+  const store =
+    useLocalStore<Supplier[]>(
+      KEYS.suppliers,
+      demoSuppliers
+    )
+
+  const items =
+    withSupplierRefs(
+      store.items
+    )
+
+  useEffect(() => {
+    const changed =
+      items.some(
+        (item, index) =>
+          item.internalRef !==
+          store.items[index]
+            ?.internalRef
+      )
+
+    if (changed) {
+      store.save(items)
+    }
+  }, [items, store])
+
+  const save = (
+    next: Supplier[]
+  ) => {
+    store.save(
+      withSupplierRefs(next)
+    )
+  }
+
+  return {
+    ...store,
+    items,
+    save,
+  }
 }
 
 export function useOrders() {
@@ -435,12 +622,41 @@ export function useInventories() {
 }
 
 export function useMasterData() {
-  return useLocalStore<
-    MasterDataItem[]
-  >(
-    KEYS.masterData,
-    []
-  )
+  const store =
+    useUnifiedMasterData()
+
+  const items =
+    withMasterDataRefs(
+      store.items
+    )
+
+  useEffect(() => {
+    const changed =
+      items.some(
+        (item, index) =>
+          item.internalRef !==
+          store.items[index]
+            ?.internalRef
+      )
+
+    if (changed) {
+      store.save(items)
+    }
+  }, [items, store])
+
+  const save = (
+    next: MasterDataItem[]
+  ) => {
+    store.save(
+      withMasterDataRefs(next)
+    )
+  }
+
+  return {
+    ...store,
+    items,
+    save,
+  }
 }
 
 export function useSetups() {

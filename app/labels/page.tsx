@@ -4,8 +4,7 @@ import { useMemo, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 
 import { Page, Card } from '@/components/ui'
-import { useProducts } from '@/lib/store'
-import { locations } from '@/lib/demo-data'
+import { useMasterData, useProducts } from '@/lib/store'
 import type { Product } from '@/lib/types'
 
 type LabelMode =
@@ -54,11 +53,17 @@ function productQrValue(product: Product) {
   })
 }
 
-function locationQrValue(location: string) {
+function locationQrValue(location: {
+  id: string
+  name: string
+  internalRef?: string
+}) {
   return JSON.stringify({
     app: 'NukuStock',
     type: 'location',
-    location,
+    id: location.id,
+    reference: location.internalRef || '',
+    location: location.name,
   })
 }
 
@@ -170,6 +175,28 @@ function LabelCard({
 
 export default function LabelsPage() {
   const { items: products } = useProducts()
+  const { items: masterData } = useMasterData()
+
+  const locations = useMemo(
+    () =>
+      masterData
+        .filter(
+          (item) =>
+            item.type === 'location' &&
+            item.active !== false
+        )
+        .sort((a, b) =>
+          a.name.localeCompare(
+            b.name,
+            'fr',
+            {
+              numeric: true,
+              sensitivity: 'base',
+            }
+          )
+        ),
+    [masterData]
+  )
 
   const [mode, setMode] =
     useState<LabelMode>('categories')
@@ -246,15 +273,14 @@ export default function LabelsPage() {
   const filteredLocations = useMemo(() => {
     const query = normalize(search)
 
-    return locations
-      .filter((location) =>
+    return locations.filter(
+      (location) =>
         !query ||
-        normalize(location).includes(query)
-      )
-      .sort((a, b) =>
-        a.localeCompare(b, 'fr')
-      )
-  }, [search])
+        normalize(
+          `${location.internalRef || ''} ${location.name}`
+        ).includes(query)
+    )
+  }, [locations, search])
 
   const filteredCategories = useMemo(() => {
     const query = normalize(search)
@@ -308,7 +334,7 @@ export default function LabelsPage() {
           )
         : filteredLocations.map(
             (location) =>
-              `location:${location}`
+              `location:${location.id}`
           )
 
     setSelectedIds((current) => [
@@ -343,7 +369,7 @@ export default function LabelsPage() {
   const selectedLocations =
     filteredLocations.filter((location) =>
       selectedIds.includes(
-        `location:${location}`
+        `location:${location.id}`
       )
     )
 
@@ -676,7 +702,7 @@ export default function LabelsPage() {
           filteredLocations.map(
             (location) => {
               const id =
-                `location:${location}`
+                `location:${location.id}`
 
               return (
                 <label
@@ -705,9 +731,21 @@ export default function LabelsPage() {
                     }
                   />
 
-                  <strong>
-                    {location}
-                  </strong>
+                  <div>
+                    <strong>
+                      {location.name}
+                    </strong>
+
+                    <div
+                      style={{
+                        marginTop: 3,
+                        fontSize: 11,
+                        opacity: 0.65,
+                      }}
+                    >
+                      {location.internalRef || ''}
+                    </div>
+                  </div>
                 </label>
               )
             }
@@ -777,9 +815,10 @@ export default function LabelsPage() {
           selectedLocations.map(
             (location) => (
               <LabelCard
-                key={location}
-                title={location}
+                key={location.id}
+                title={location.name}
                 subtitle="Lieu de stockage"
+                reference={location.internalRef}
                 qrValue={locationQrValue(
                   location
                 )}

@@ -21,44 +21,6 @@ import type {
   MasterDataItem,
 } from '@/lib/types'
 
-const defaultLocations = [
-  'Bungalow Infini',
-  ...Array.from(
-    { length: 16 },
-    (_, index) =>
-      `Bungalow ${index}`
-  ),
-  'Container',
-  'Extension Bar',
-  'Fare Intendant',
-  'Fitness',
-  'Mirador',
-  'Poker',
-  'Réception',
-  'Restaurant',
-  'Salle de Jeux',
-  'Salon Bar',
-  'Spa 1',
-  'Spa 2',
-  'Sporting',
-  'VDM',
-  'Villa 16 - King',
-  'Villa 16 - Queen',
-  'Villa 16 - Salon',
-  'Villa 17 - King',
-  'Villa 17 - Queen',
-  'Villa 17 - Salon',
-].sort((a, b) =>
-  a.localeCompare(
-    b,
-    'fr',
-    {
-      numeric: true,
-      sensitivity: 'base',
-    }
-  )
-)
-
 function normalize(
   value: string
 ) {
@@ -125,39 +87,6 @@ export default function LocationsPage() {
       [masterData]
     )
 
-  /*
-   * Initialisation automatique :
-   * si aucun lieu n'existe encore,
-   * NukuStock crée les lieux de base.
-   */
-  useEffect(() => {
-    if (
-      masterData.some(
-        (item) =>
-          item.type ===
-          'location'
-      )
-    ) {
-      return
-    }
-
-    const defaults:
-      MasterDataItem[] =
-        defaultLocations.map(
-          (location) => ({
-            id:
-              crypto.randomUUID(),
-            type: 'location',
-            name: location,
-            active: true,
-          })
-        )
-
-    saveMasterData([
-      ...masterData,
-      ...defaults,
-    ])
-  }, [])
 
   const filtered =
     useMemo(() => {
@@ -577,7 +506,7 @@ export default function LocationsPage() {
               style={{
                 display: 'grid',
                 gridTemplateColumns:
-                  'minmax(230px,1fr) 130px 130px 120px 300px',
+                  '120px minmax(230px,1fr) 130px 130px 120px 300px',
                 gap: 12,
                 padding:
                   '0 0 10px',
@@ -631,7 +560,7 @@ export default function LocationsPage() {
                       display:
                         'grid',
                       gridTemplateColumns:
-                        'minmax(230px,1fr) 130px 130px 120px 300px',
+                        '120px minmax(230px,1fr) 130px 130px 120px 300px',
                       gap: 12,
                       alignItems:
                         'center',

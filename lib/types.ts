@@ -14,6 +14,10 @@ export type Product = {
   photo?: string
   hasExpiry?: boolean
 
+  // Zone métier du produit (ex. BEVERAGE). Modifiable sans changer la référence interne.
+  zone?: string
+  zoneId?: string
+
   category: string
   categoryId?: string
 
@@ -79,6 +83,10 @@ export type InternalRequest = {
 
 export type Supplier = {
   id: string
+
+  // Référence interne permanente : FOU-001, FOU-002...
+  internalRef?: string
+
   name: string
 
   contact: string
@@ -236,9 +244,18 @@ export type MasterDataType =
   | 'unit'
   | 'location'
   | 'service'
+  | 'zone'
 
 export type MasterDataItem = {
   id: string
+
+  // Référence interne permanente selon le référentiel :
+  // LIE-001 = lieu
+  // ZON-001 = zone
+  // CAT-001 = catégorie
+  // SCA-001 = sous-catégorie
+  internalRef?: string
+
   type: MasterDataType
   name: string
   parentId?: string

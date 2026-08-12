@@ -2,8 +2,7 @@
 
 import { useMemo, useState, type CSSProperties } from 'react'
 import { Page, Card, Badge } from '@/components/ui'
-import { locations } from '@/lib/demo-data'
-import { useInventories, useProducts } from '@/lib/store'
+import { useInventories, useMasterData, useProducts } from '@/lib/store'
 
 type ActiveInventory = {
   id: string
@@ -138,6 +137,25 @@ const isProductInScope = (
 export default function Inventory() {
   const { items: products } = useProducts()
   const { items: history, save: saveHistory } = useInventories()
+  const { items: masterData } = useMasterData()
+
+  const locations = useMemo(
+    () =>
+      masterData
+        .filter(
+          (item) =>
+            item.type === 'location' &&
+            item.active !== false
+        )
+        .map((item) => item.name)
+        .sort((a, b) =>
+          a.localeCompare(b, 'fr', {
+            numeric: true,
+            sensitivity: 'base',
+          })
+        ),
+    [masterData]
+  )
 
   const [activeInventory, setActiveInventory] =
     useState<ActiveInventory | null>(null)

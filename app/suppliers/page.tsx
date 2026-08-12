@@ -2,9 +2,13 @@
 
 import {
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
+  type ChangeEvent,
 } from 'react'
+
+import * as XLSX from 'xlsx'
 
 import {
   Badge,
@@ -84,6 +88,11 @@ export default function Suppliers() {
 
   const [error, setError] =
     useState('')
+
+  const importInputRef =
+    useRef<HTMLInputElement | null>(
+      null
+    )
 
   const shown =
     useMemo(() => {
@@ -449,44 +458,115 @@ export default function Suppliers() {
           supplier
         )
 
+      const linkedDetails = [
+        linkedProducts.length
+          ? `${linkedProducts.length} produit(s)`
+          : '',
+        linkedOrders.length
+          ? `${linkedOrders.length} commande(s)`
+          : '',
+      ]
+        .filter(Boolean)
+        .join(' et ')
+
+      const firstMessage =
+        linkedDetails
+          ? `Le fournisseur "${supplier.name}" est encore lié à ${linkedDetails}.\n\nSi tu continues :\n- les produits seront détachés de ce fournisseur ;\n- les anciennes commandes conserveront le NOM du fournisseur dans leur historique, mais plus son identifiant actif.\n\nContinuer ?`
+          : `Supprimer le fournisseur "${supplier.name}" ?`
+
+      const firstConfirmed =
+        window.confirm(
+          firstMessage
+        )
+
+      if (!firstConfirmed) {
+        return
+      }
+
+      const secondConfirmed =
+        window.confirm(
+          `DERNIÈRE CONFIRMATION\n\nSupprimer définitivement le fournisseur "${supplier.name}" de la liste active ?`
+        )
+
+      if (!secondConfirmed) {
+        return
+      }
+
       /*
-       * Protection de la base :
-       * on ne supprime pas un
-       * fournisseur encore utilisé.
+       * Produits :
+       * on détache le fournisseur pour éviter
+       * une référence orpheline.
        */
       if (
         linkedProducts.length >
-          0 ||
-        linkedOrders.length >
-          0
+        0
       ) {
-        const details = [
-          linkedProducts.length
-            ? `${linkedProducts.length} produit(s)`
-            : '',
-
-          linkedOrders.length
-            ? `${linkedOrders.length} commande(s)`
-            : '',
-        ]
-          .filter(Boolean)
-          .join(' et ')
-
-        setError(
-          `Impossible de supprimer "${supplier.name}" : il est encore lié à ${details}. Modifie d'abord ces éléments ou désactive le fournisseur.`
+        saveProducts(
+          products.map(
+            (product) =>
+              product.mainSupplierId ===
+                supplier.id ||
+              (
+                !product.mainSupplierId &&
+                normalize(
+                  product.mainSupplier ||
+                    ''
+                ) ===
+                  normalize(
+                    supplier.name
+                  )
+              )
+                ? {
+                    ...product,
+                    mainSupplier: '',
+                    mainSupplierId: '',
+                  }
+                : product
+          )
         )
-        return
       }
 
-      const confirmed =
-        window.confirm(
-          `Supprimer définitivement le fournisseur "${supplier.name}" ?`
+      /*
+       * Commandes :
+       * on garde supplierName pour l'historique,
+       * mais on retire supplierId afin que
+       * l'ancienne commande ne bloque plus
+       * la suppression du référentiel.
+       */
+      if (
+        linkedOrders.length >
+        0
+      ) {
+        saveOrders(
+          orders.map(
+            (order) =>
+              order.supplierId ===
+                supplier.id ||
+              (
+                !order.supplierId &&
+                normalize(
+                  order.supplierName ||
+                    ''
+                ) ===
+                  normalize(
+                    supplier.name
+                  )
+              )
+                ? {
+                    ...order,
+                    supplierId: '',
+                    supplierName:
+                      order.supplierName ||
+                      supplier.name,
+                  }
+                : order
+          )
         )
-
-      if (!confirmed) {
-        return
       }
 
+      /*
+       * Suppression du référentiel fournisseur.
+       */
       save(
         items.filter(
           (item) =>
@@ -495,8 +575,20 @@ export default function Suppliers() {
         )
       )
 
+      if (
+        form.id ===
+        supplier.id
+      ) {
+        setOpen(false)
+        setForm(
+          emptySupplier
+        )
+      }
+
       setMsg(
-        `Fournisseur "${supplier.name}" supprimé.`
+        linkedDetails
+          ? `Fournisseur "${supplier.name}" supprimé. ${linkedDetails} ont été détaché(s) sans perdre l'historique des commandes.`
+          : `Fournisseur "${supplier.name}" supprimé.`
       )
     }
 
@@ -532,6 +624,431 @@ export default function Suppliers() {
       setError('')
     }
 
+  const importSuppliers =
+    async (
+      event:
+        ChangeEvent<HTMLInputElement>
+    ) => {
+      const file =
+        event.target.files?.[0]
+
+      event.target.value = ''
+
+      if (!file) {
+        return
+      }
+
+      setMsg('')
+      setError('')
+
+      try {
+        const buffer =
+          await file.arrayBuffer()
+
+        const workbook =
+          XLSX.read(buffer, {
+            type: 'array',
+          })
+
+        const sheetName =
+          workbook.SheetNames[0]
+
+        if (!sheetName) {
+          throw new Error(
+            'Le fichier ne contient aucune feuille.'
+          )
+        }
+
+        const sheet =
+          workbook.Sheets[
+            sheetName
+          ]
+
+        const rows =
+          XLSX.utils.sheet_to_json<
+            Record<string, unknown>
+          >(sheet, {
+            defval: '',
+          })
+
+        if (!rows.length) {
+          throw new Error(
+            'Le fichier ne contient aucun fournisseur.'
+          )
+        }
+
+        const findValue = (
+          row:
+            Record<
+              string,
+              unknown
+            >,
+          names: string[]
+        ) => {
+          const entries =
+            Object.entries(row)
+
+          for (
+            const name of names
+          ) {
+            const wanted =
+              normalize(name)
+
+            const found =
+              entries.find(
+                ([key]) =>
+                  normalize(
+                    key
+                  ) === wanted
+              )
+
+            if (found) {
+              return String(
+                found[1] ??
+                  ''
+              ).trim()
+            }
+          }
+
+          return ''
+        }
+
+        const next = [
+          ...items,
+        ]
+
+        let added = 0
+        let updated = 0
+
+        for (const row of rows) {
+          const name =
+            findValue(row, [
+              'Fournisseur',
+              'Nom',
+              'Nom fournisseur',
+            ])
+
+          if (!name) {
+            continue
+          }
+
+          const incomingRef =
+            findValue(row, [
+              'Référence',
+              'Reference',
+              'Réf interne',
+              'Ref interne',
+              'internal_ref',
+            ])
+
+          const existing =
+            next.find(
+              (supplier) =>
+                (
+                  incomingRef &&
+                  supplier.internalRef ===
+                    incomingRef
+                ) ||
+                normalize(
+                  supplier.name
+                ) ===
+                  normalize(
+                    name
+                  )
+            )
+
+          const imported:
+            Supplier = {
+            ...(existing ||
+              emptySupplier),
+
+            id:
+              existing?.id ||
+              crypto.randomUUID(),
+
+            internalRef:
+              existing?.internalRef ||
+              incomingRef ||
+              undefined,
+
+            name,
+
+            contactPerson:
+              findValue(row, [
+                'Contact principal',
+                'Contact',
+              ]),
+
+            email:
+              findValue(row, [
+                'Email',
+                'E-mail',
+                'Mail',
+              ]),
+
+            contact:
+              findValue(row, [
+                'Email',
+                'E-mail',
+                'Mail',
+              ]),
+
+            phone:
+              findValue(row, [
+                'Téléphone',
+                'Telephone',
+                'Phone',
+              ]),
+
+            address:
+              findValue(row, [
+                'Adresse',
+                'Address',
+              ]),
+
+            payment:
+              findValue(row, [
+                'Paiement',
+                'Conditions de paiement',
+              ]),
+
+            deliveryLeadTime:
+              findValue(row, [
+                'Délai',
+                'Delai',
+                'Délai de livraison',
+              ]),
+
+            currency:
+              findValue(row, [
+                'Devise',
+                'Currency',
+              ]) ||
+              existing?.currency ||
+              'XPF',
+
+            notes:
+              findValue(row, [
+                'Notes',
+                'Note',
+              ]),
+
+            active:
+              normalize(
+                findValue(
+                  row,
+                  [
+                    'Statut',
+                    'Actif',
+                    'Active',
+                  ]
+                )
+              ) !==
+              'inactif',
+          }
+
+          if (existing) {
+            const index =
+              next.findIndex(
+                (supplier) =>
+                  supplier.id ===
+                  existing.id
+              )
+
+            next[index] =
+              imported
+
+            updated += 1
+          } else {
+            next.push(
+              imported
+            )
+
+            added += 1
+          }
+        }
+
+        save(next)
+
+        setMsg(
+          `Import terminé : ${added} fournisseur(s) ajouté(s), ${updated} mis à jour.`
+        )
+      } catch (caught) {
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : 'Import impossible.'
+        )
+      }
+    }
+
+  const exportSuppliersExcel =
+    () => {
+      const rows =
+        items.map(
+          (supplier) => ({
+            'Référence':
+              supplier.internalRef ||
+              '',
+            'Fournisseur':
+              supplier.name,
+            'Contact principal':
+              supplier.contactPerson ||
+              '',
+            'Email':
+              supplier.email ||
+              supplier.contact ||
+              '',
+            'Téléphone':
+              supplier.phone ||
+              '',
+            'Adresse':
+              supplier.address ||
+              '',
+            'Paiement':
+              supplier.payment ||
+              '',
+            'Délai':
+              supplier.deliveryLeadTime ||
+              '',
+            'Devise':
+              supplier.currency ||
+              'XPF',
+            'Statut':
+              supplier.active ===
+              false
+                ? 'INACTIF'
+                : 'ACTIF',
+            'Notes':
+              supplier.notes ||
+              '',
+          })
+        )
+
+      const workbook =
+        XLSX.utils.book_new()
+
+      const worksheet =
+        XLSX.utils.json_to_sheet(
+          rows
+        )
+
+      XLSX.utils.book_append_sheet(
+        workbook,
+        worksheet,
+        'Fournisseurs'
+      )
+
+      XLSX.writeFile(
+        workbook,
+        'NukuStock-Fournisseurs.xlsx'
+      )
+    }
+
+  const exportSuppliersPdf =
+    () => {
+      const popup =
+        window.open(
+          '',
+          '_blank',
+          'width=1100,height=800'
+        )
+
+      if (!popup) {
+        setError(
+          'Le navigateur bloque la fenêtre PDF.'
+        )
+        return
+      }
+
+      const lines =
+        items
+          .map(
+            (supplier) => `
+              <tr>
+                <td>${supplier.internalRef || ''}</td>
+                <td>${supplier.name || ''}</td>
+                <td>${supplier.contactPerson || ''}</td>
+                <td>${supplier.email || supplier.contact || ''}</td>
+                <td>${supplier.phone || ''}</td>
+                <td>${supplier.payment || ''}</td>
+                <td>${supplier.deliveryLeadTime || ''}</td>
+                <td>${supplier.currency || 'XPF'}</td>
+                <td>${supplier.active === false ? 'INACTIF' : 'ACTIF'}</td>
+              </tr>
+            `
+          )
+          .join('')
+
+      popup.document.write(`
+        <!doctype html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <title>NukuStock - Fournisseurs</title>
+            <style>
+              body {
+                font-family: Arial, sans-serif;
+                padding: 28px;
+                color: #111827;
+              }
+              h1 {
+                margin: 0 0 18px;
+                font-size: 22px;
+              }
+              table {
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 10px;
+              }
+              th, td {
+                border: 1px solid #d0d5dd;
+                padding: 6px;
+                text-align: left;
+              }
+              th {
+                background: #f2f4f7;
+              }
+              @media print {
+                @page {
+                  size: landscape;
+                  margin: 10mm;
+                }
+              }
+            </style>
+          </head>
+          <body>
+            <h1>NukuStock — Fournisseurs</h1>
+            <table>
+              <thead>
+                <tr>
+                  <th>Référence</th>
+                  <th>Fournisseur</th>
+                  <th>Contact</th>
+                  <th>Email</th>
+                  <th>Téléphone</th>
+                  <th>Paiement</th>
+                  <th>Délai</th>
+                  <th>Devise</th>
+                  <th>Statut</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${lines}
+              </tbody>
+            </table>
+            <script>
+              window.onload = () => {
+                window.print();
+              };
+            </script>
+          </body>
+        </html>
+      `)
+
+      popup.document.close()
+    }
+
   const fieldStyle:
     CSSProperties = {
     display: 'flex',
@@ -552,13 +1069,63 @@ export default function Suppliers() {
       title="Fournisseurs"
       subtitle="Fiches fournisseurs, contacts, conditions et rattachement aux produits"
       action={
-        <button
-          className="button"
-          type="button"
-          onClick={openNew}
+        <div
+          style={{
+            display: 'flex',
+            gap: 8,
+            flexWrap: 'wrap',
+          }}
         >
-          + Ajouter un fournisseur
-        </button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            style={{
+              display: 'none',
+            }}
+            onChange={
+              importSuppliers
+            }
+          />
+
+          <button
+            className="button secondary"
+            type="button"
+            onClick={() =>
+              importInputRef.current?.click()
+            }
+          >
+            Importer Excel
+          </button>
+
+          <button
+            className="button secondary"
+            type="button"
+            onClick={
+              exportSuppliersExcel
+            }
+          >
+            Exporter Excel
+          </button>
+
+          <button
+            className="button secondary"
+            type="button"
+            onClick={
+              exportSuppliersPdf
+            }
+          >
+            Exporter PDF
+          </button>
+
+          <button
+            className="button"
+            type="button"
+            onClick={openNew}
+          >
+            + Ajouter un fournisseur
+          </button>
+        </div>
       }
     >
       {msg && (
@@ -605,6 +1172,10 @@ export default function Suppliers() {
           >
             <thead>
               <tr>
+                <th>
+                  Référence
+                </th>
+
                 <th>
                   Fournisseur
                 </th>
@@ -668,6 +1239,15 @@ export default function Suppliers() {
                         supplier.id
                       }
                     >
+                      <td>
+                        <strong>
+                          {
+                            supplier.internalRef ||
+                            '—'
+                          }
+                        </strong>
+                      </td>
+
                       <td>
                         <strong>
                           {
@@ -847,7 +1427,7 @@ export default function Suppliers() {
                 <tr>
                   <td
                     colSpan={
-                      10
+                      11
                     }
                   >
                     Aucun fournisseur trouvé.
@@ -923,6 +1503,31 @@ export default function Suppliers() {
                 marginTop: 18,
               }}
             >
+              {form.id && (
+                <div
+                  style={
+                    fieldStyle
+                  }
+                >
+                  <label
+                    style={
+                      labelStyle
+                    }
+                  >
+                    Référence interne
+                  </label>
+
+                  <input
+                    className="input"
+                    value={
+                      form.internalRef ||
+                      ''
+                    }
+                    readOnly
+                  />
+                </div>
+              )}
+
               <div
                 style={
                   fieldStyle
