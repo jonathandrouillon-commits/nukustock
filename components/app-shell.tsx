@@ -27,6 +27,7 @@ const VIEW_MODE_KEY = 'nukustock_view_mode'
 const navItems: NavItem[] = [
   { href: '/', label: 'Dashboard', icon: '⌂' },
   { href: '/products', label: 'Produits', icon: '▣' },
+  { href: '/product-images', label: 'Photos produits', icon: '▧' },
   { href: '/stocks', label: 'Stocks', icon: '▤' },
   { href: '/locations', label: 'Lieux de stockage', icon: '⌖' },
   { href: '/movements', label: 'Mouvements', icon: '↕' },
@@ -35,7 +36,6 @@ const navItems: NavItem[] = [
   { href: '/transfers', label: 'Transferts', icon: '⇄' },
   { href: '/inventory', label: 'Inventaires', icon: '☑' },
   { href: '/suppliers', label: 'Fournisseurs', icon: '◇' },
-  { href: '/import', label: 'Import / Export', icon: '⇅' },
   { href: '/labels', label: 'Étiquettes', icon: '▦' },
   { href: '/setup', label: 'SET UP', icon: '◫' },
   { href: '/settings', label: 'Réglages', icon: '⚙' },
@@ -1012,6 +1012,58 @@ export function AppShell({
         .view-phone .nskViewCanvas textarea,
         .view-phone .nskViewCanvas button {
           font-size: 16px;
+        }
+
+        /* Les listes déroulantes doivent rester totalement accessibles
+           en mode Téléphone, y compris dans les fenêtres modales. */
+        .view-phone .nskViewCanvas select {
+          display: block !important;
+          width: 100% !important;
+          max-width: none !important;
+          min-width: 0 !important;
+          height: 48px !important;
+          min-height: 48px !important;
+          overflow: visible !important;
+          appearance: auto !important;
+          -webkit-appearance: menulist !important;
+          position: relative !important;
+          z-index: 1 !important;
+        }
+
+        .view-phone .nskViewStage,
+        .view-phone .nskViewCanvas {
+          overflow-y: visible !important;
+        }
+
+        .view-phone .modalBackdrop {
+          position: fixed !important;
+          inset: 0 !important;
+          z-index: 500 !important;
+          width: 100vw !important;
+          max-width: 100vw !important;
+          height: 100dvh !important;
+          max-height: 100dvh !important;
+          overflow: hidden !important;
+        }
+
+        .view-phone .modal {
+          width: 100% !important;
+          max-width: 100% !important;
+          max-height: 100dvh !important;
+          overflow-y: auto !important;
+          overflow-x: visible !important;
+          -webkit-overflow-scrolling: touch !important;
+        }
+
+        .view-phone .modal .field,
+        .view-phone .modal .formGrid {
+          overflow: visible !important;
+        }
+
+        .view-phone .modal select {
+          position: relative !important;
+          z-index: 510 !important;
+          overflow: visible !important;
         }
 
         .view-phone .nskViewCanvas .tableWrap {
