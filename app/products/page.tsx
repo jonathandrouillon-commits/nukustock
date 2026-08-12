@@ -405,6 +405,18 @@ export default function Products() {
         ...new Set(
           [
             ...getMasterItems('packaging').map((item) => item.name),
+
+            // Récupère aussi tous les conditionnements déjà utilisés
+            // dans les produits existants afin que la liste ne soit
+            // jamais vide si le référentiel central n'a pas encore
+            // été initialisé.
+            ...items
+              .map((product) => product.packaging)
+              .filter(
+                (value): value is string =>
+                  Boolean(value?.trim())
+              ),
+
             form.packaging,
           ].filter((value): value is string => Boolean(value))
         ),
