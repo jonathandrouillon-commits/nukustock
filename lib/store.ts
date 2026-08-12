@@ -61,6 +61,153 @@ export const KEYS = {
     'nukustock_stock_movements_v1',
 }
 
+/* =========================================================
+   RÉFÉRENTIEL PRODUITS PAR DÉFAUT
+   ========================================================= */
+
+const DEFAULT_PRODUCT_TAXONOMY: Record<string, string[]> = {
+  ALCOOLS: [
+    'HYDROMEL',
+    'CIDRE',
+    'PORTO',
+    'APÉRITIF',
+    'ANISÉ',
+    'ARMAGNAC',
+    'CALVADOS',
+    'COGNAC',
+    'EAU DE VIE',
+    'LIQUEUR',
+    'GIN',
+    'CHARTREUSE',
+    'DIGESTIFS',
+    'CACHAÇA',
+    'RHUM INDUSTRIEL',
+    'RHUM AGRICOLE',
+    'TEQUILA',
+    'MEZCAL',
+    'VODKA',
+    'WHISKY SCOTCH',
+    'WHISKEY BOURBON',
+    'WHISKEY CANADIAN',
+    'WHISKY AMÉRICAIN',
+    'WHISKEY JAPONAIS',
+  ],
+  BIÈRES: ['DIVERS'],
+  CHAMPAGNES: ['CHAMPAGNE'],
+  'SOFT DRINKS': [
+    'DIVERS',
+    'SANS ALCOOL',
+    'THÉ',
+    'SODAS',
+    'EAUX GAZEUSE',
+    'EAUX PLATE',
+    'JUS',
+    'PREMIX',
+    'LIME JUICE',
+    'SIROP',
+    'IMPORTED',
+  ],
+  VINS: [
+    'VINS BLANC',
+    'VINS ROSÉ',
+    'VINS ROUGE',
+  ],
+}
+
+function normalizeMasterName(
+  value: string
+) {
+  return value
+    .normalize('NFD')
+    .replace(
+      /[\u0300-\u036f]/g,
+      ''
+    )
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
+function ensureDefaultProductTaxonomy(
+  source: MasterDataItem[]
+) {
+  const next = [...source]
+  let changed = false
+
+  for (
+    const [
+      categoryName,
+      subcategoryNames,
+    ] of Object.entries(
+      DEFAULT_PRODUCT_TAXONOMY
+    )
+  ) {
+    let category =
+      next.find(
+        (item) =>
+          item.type === 'category' &&
+          normalizeMasterName(
+            item.name
+          ) ===
+            normalizeMasterName(
+              categoryName
+            )
+      )
+
+    if (!category) {
+      category = {
+        id: crypto.randomUUID(),
+        type: 'category',
+        name: categoryName,
+        active: true,
+      }
+
+      next.push(category)
+      changed = true
+    }
+
+    for (
+      const subcategoryName of
+      subcategoryNames
+    ) {
+      const exists =
+        next.some(
+          (item) =>
+            item.type ===
+              'subcategory' &&
+            item.parentId ===
+              category!.id &&
+            normalizeMasterName(
+              item.name
+            ) ===
+              normalizeMasterName(
+                subcategoryName
+              )
+        )
+
+      if (exists) {
+        continue
+      }
+
+      next.push({
+        id: crypto.randomUUID(),
+        type: 'subcategory',
+        name: subcategoryName,
+        parentId: category.id,
+        active: true,
+      })
+
+      changed = true
+    }
+  }
+
+  return {
+    items: next,
+    changed,
+  }
+}
+
+
 function nextSequentialRef(
   prefix: string,
   refs: Array<string | undefined>
@@ -625,13 +772,18 @@ export function useMasterData() {
   const store =
     useUnifiedMasterData()
 
-  const items =
-    withMasterDataRefs(
+  const seeded =
+    ensureDefaultProductTaxonomy(
       store.items
     )
 
+  const items =
+    withMasterDataRefs(
+      seeded.items
+    )
+
   useEffect(() => {
-    const changed =
+    const refsChanged =
       items.some(
         (item, index) =>
           item.internalRef !==
@@ -639,16 +791,35 @@ export function useMasterData() {
             ?.internalRef
       )
 
-    if (changed) {
+    const lengthChanged =
+      items.length !==
+      store.items.length
+
+    if (
+      refsChanged ||
+      lengthChanged ||
+      seeded.changed
+    ) {
       store.save(items)
     }
-  }, [items, store])
+  }, [
+    items,
+    seeded.changed,
+    store,
+  ])
 
   const save = (
     next: MasterDataItem[]
   ) => {
+    const ensured =
+      ensureDefaultProductTaxonomy(
+        next
+      )
+
     store.save(
-      withMasterDataRefs(next)
+      withMasterDataRefs(
+        ensured.items
+      )
     )
   }
 
@@ -658,6 +829,7 @@ export function useMasterData() {
     save,
   }
 }
+
 
 export function useSetups() {
   return useLocalStore<
