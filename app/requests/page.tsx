@@ -2819,6 +2819,197 @@ export default function Requests() {
         }
 
       `}</style>
+
+      <style jsx global>{`
+        /* RESPONSIVE FINAL REQUISITIONS */
+        @media (max-width: 900px) {
+          .requestModalBackdrop,
+          .requestModal,
+          .requestProductTable,
+          .requestProductVisualRow,
+          .requestProductVisualRow > * {
+            max-width: 100% !important;
+            min-width: 0 !important;
+            box-sizing: border-box !important;
+          }
+
+          .requestModal {
+            width: 100% !important;
+            overflow-x: hidden !important;
+          }
+
+          .requestModal .formGrid {
+            grid-template-columns: 1fr !important;
+          }
+
+          .requestModal select,
+          .requestModal input,
+          .requestModal textarea {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            box-sizing: border-box !important;
+          }
+        }
+
+        @media (max-width: 767px) {
+          .requestModalBackdrop {
+            position: fixed !important;
+            inset: 0 !important;
+            width: 100vw !important;
+            height: 100svh !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            overflow: hidden !important;
+          }
+
+          .requestModal {
+            width: 100vw !important;
+            max-width: 100vw !important;
+            height: 100svh !important;
+            max-height: 100svh !important;
+            margin: 0 !important;
+            padding:
+              max(12px, env(safe-area-inset-top))
+              12px
+              calc(140px + env(safe-area-inset-bottom))
+              12px !important;
+            border-radius: 0 !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+            -webkit-overflow-scrolling: touch !important;
+          }
+
+          .requestModalHead {
+            position: sticky !important;
+            top: -12px !important;
+            z-index: 20 !important;
+            margin: -12px -12px 14px !important;
+            padding:
+              max(12px, env(safe-area-inset-top))
+              12px
+              10px !important;
+            background: #fff !important;
+            border-bottom: 1px solid #eaecf0 !important;
+          }
+
+          .requestModalHead h2 {
+            margin: 0 !important;
+            max-width: calc(100vw - 120px) !important;
+            font-size: 21px !important;
+            line-height: 1.15 !important;
+            overflow-wrap: anywhere !important;
+          }
+
+          .requestModal .formGrid {
+            display: grid !important;
+            grid-template-columns: 1fr !important;
+            gap: 12px !important;
+          }
+
+          .requestProductTableHead {
+            display: none !important;
+          }
+
+          .requestProductVisualRow {
+            display: grid !important;
+            grid-template-columns: 1fr !important;
+            width: 100% !important;
+            gap: 12px !important;
+            padding: 14px 12px !important;
+            overflow: hidden !important;
+          }
+
+          .requestProductVisualRow > div {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+          }
+
+          .requestProductVisualRow > div:first-child {
+            align-items: flex-start !important;
+          }
+
+          .requestProductPhoto {
+            width: 56px !important;
+            height: 56px !important;
+            min-width: 56px !important;
+            flex: 0 0 56px !important;
+          }
+
+          .requestProductVisualRow select,
+          .requestProductVisualRow input[type="number"] {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            min-height: 46px !important;
+          }
+
+          .requestProductVisualRow > div:last-child {
+            display: block !important;
+          }
+
+          .requestProductVisualRow > div:last-child button {
+            width: 100% !important;
+            min-height: 46px !important;
+          }
+
+          .requestModalActions {
+            position: fixed !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            z-index: 30 !important;
+            display: grid !important;
+            grid-template-columns: 1fr 1.35fr !important;
+            gap: 8px !important;
+            width: 100vw !important;
+            margin: 0 !important;
+            padding:
+              10px
+              12px
+              calc(10px + env(safe-area-inset-bottom)) !important;
+            background: #fff !important;
+            border-top: 1px solid #e4e7ec !important;
+            box-shadow: 0 -8px 24px rgba(15,23,42,.12) !important;
+          }
+
+          .requestModalActions button {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            min-height: 50px !important;
+            padding: 10px 8px !important;
+            font-size: 14px !important;
+            white-space: normal !important;
+            line-height: 1.15 !important;
+          }
+        }
+
+        @media (max-width: 420px) {
+          .requestModal {
+            padding-left: 10px !important;
+            padding-right: 10px !important;
+          }
+
+          .requestProductVisualRow {
+            padding-left: 10px !important;
+            padding-right: 10px !important;
+          }
+
+          .requestProductPhoto {
+            width: 50px !important;
+            height: 50px !important;
+            min-width: 50px !important;
+            flex-basis: 50px !important;
+          }
+
+          .requestModalActions {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      `}</style>
+
     </Page>
   )
 }
