@@ -22,6 +22,12 @@ type NavItem = {
   icon: string
 }
 
+type NavGroup = {
+  label: string
+  icon: string
+  items: NavItem[]
+}
+
 const VIEW_MODE_KEY = 'nukustock_view_mode'
 
 const navItems: NavItem[] = [
@@ -39,6 +45,38 @@ const navItems: NavItem[] = [
   { href: '/labels', label: 'Étiquettes', icon: '▦' },
   { href: '/setup', label: 'SET UP', icon: '◫' },
   { href: '/settings', label: 'Réglages', icon: '⚙' },
+]
+
+const navGroups: NavGroup[] = [
+  {
+    label: 'PRODUITS',
+    icon: '▣',
+    items: [
+      { href: '/products', label: 'Produits', icon: '▣' },
+      { href: '/product-images', label: 'Photos produits', icon: '▧' },
+      { href: '/labels', label: 'Étiquettes', icon: '▦' },
+    ],
+  },
+  {
+    label: 'STOCKS',
+    icon: '▤',
+    items: [
+      { href: '/stocks', label: 'Stocks', icon: '▤' },
+      { href: '/movements', label: 'Mouvements', icon: '↕' },
+      { href: '/transfers', label: 'Transferts', icon: '⇄' },
+      { href: '/inventory', label: 'Inventaires', icon: '☑' },
+      { href: '/locations', label: 'Lieux de stockage', icon: '⌖' },
+    ],
+  },
+  {
+    label: 'APPROVISIONNEMENT',
+    icon: '☷',
+    items: [
+      { href: '/requests', label: 'Réquisitions', icon: '☷' },
+      { href: '/orders', label: 'Commandes', icon: '▧' },
+      { href: '/suppliers', label: 'Fournisseurs', icon: '◇' },
+    ],
+  },
 ]
 
 const mobileQuickLinks = [
@@ -116,6 +154,19 @@ export function AppShell({
     mobileMenuOpen,
     setMobileMenuOpen,
   ] = useState(false)
+
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
+    PRODUITS: true,
+    STOCKS: true,
+    APPROVISIONNEMENT: true,
+  })
+
+  const toggleGroup = (label: string) => {
+    setOpenGroups((current) => ({
+      ...current,
+      [label]: !current[label],
+    }))
+  }
 
   const effectiveMode =
     viewMode === 'auto'
@@ -254,33 +305,80 @@ export function AppShell({
         </div>
 
         <nav className="nskSidebarNav">
-          {navItems.map(
-            (item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={
-                  isActive(
-                    pathname,
-                    item.href
-                  )
-                    ? 'active'
-                    : ''
-                }
-              >
-                <span
-                  className="nskSidebarIcon"
-                  aria-hidden="true"
-                >
-                  {item.icon}
-                </span>
+          <Link
+            href="/"
+            className={isActive(pathname, '/') ? 'active' : ''}
+          >
+            <span className="nskSidebarIcon" aria-hidden="true">⌂</span>
+            <span>Dashboard</span>
+          </Link>
 
-                <span>
-                  {item.label}
-                </span>
-              </Link>
+          {navGroups.map((group) => {
+            const groupActive = group.items.some((item) =>
+              isActive(pathname, item.href)
             )
-          )}
+            const groupOpen = openGroups[group.label] ?? groupActive
+
+            return (
+              <div className="nskNavGroup" key={group.label}>
+                <button
+                  type="button"
+                  className={`nskNavGroupButton ${groupActive ? 'activeGroup' : ''}`}
+                  onClick={() => toggleGroup(group.label)}
+                  aria-expanded={groupOpen}
+                >
+                  <span className="nskSidebarIcon" aria-hidden="true">
+                    {group.icon}
+                  </span>
+                  <span className="nskNavGroupLabel">{group.label}</span>
+                  <span className="nskNavChevron" aria-hidden="true">
+                    {groupOpen ? '⌄' : '›'}
+                  </span>
+                </button>
+
+                {groupOpen && (
+                  <div className="nskNavGroupItems">
+                    {group.items.map((item) => (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        className={isActive(pathname, item.href) ? 'active' : ''}
+                      >
+                        <span className="nskSidebarIcon" aria-hidden="true">
+                          {item.icon}
+                        </span>
+                        <span>{item.label}</span>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+
+          <Link
+            href="/setup"
+            className={isActive(pathname, '/setup') ? 'active' : ''}
+          >
+            <span className="nskSidebarIcon" aria-hidden="true">◫</span>
+            <span>SET UP</span>
+          </Link>
+
+          <Link
+            href="/reports"
+            className={isActive(pathname, '/reports') ? 'active' : ''}
+          >
+            <span className="nskSidebarIcon" aria-hidden="true">▦</span>
+            <span>Rapports</span>
+          </Link>
+
+          <Link
+            href="/settings"
+            className={isActive(pathname, '/settings') ? 'active' : ''}
+          >
+            <span className="nskSidebarIcon" aria-hidden="true">⚙</span>
+            <span>Réglages</span>
+          </Link>
         </nav>
 
         <div className="nskSidebarFoot">
@@ -648,6 +746,57 @@ export function AppShell({
         .nskSidebarNav a.active {
           background: #17243a;
           color: #fff;
+        }
+
+        .nskNavGroup {
+          margin: 5px 0;
+        }
+
+        .nskNavGroupButton {
+          width: 100%;
+          min-height: 42px;
+          padding: 0 12px;
+          border: 0;
+          border-radius: 10px;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          background: transparent;
+          color: #91a0b6;
+          cursor: pointer;
+          text-align: left;
+          font: inherit;
+          font-size: 11px;
+          font-weight: 800;
+          letter-spacing: .045em;
+        }
+
+        .nskNavGroupButton:hover,
+        .nskNavGroupButton.activeGroup {
+          color: #fff;
+          background: rgba(255,255,255,.035);
+        }
+
+        .nskNavGroupLabel {
+          flex: 1;
+        }
+
+        .nskNavChevron {
+          width: 18px;
+          text-align: center;
+          font-size: 15px;
+          color: #728097;
+        }
+
+        .nskNavGroupItems {
+          padding: 2px 0 4px 12px;
+        }
+
+        .nskNavGroupItems a {
+          min-height: 38px;
+          margin-bottom: 2px;
+          padding-left: 10px;
+          font-size: 12px;
         }
 
         .nskSidebarIcon {
