@@ -127,6 +127,17 @@ function detectProductZone(product: any): ZoneFilter {
   return 'Beverage'
 }
 
+function getProductPhoto(product: any) {
+  return (
+    product.photoUrl ||
+    product.photo_url ||
+    product.photo ||
+    product.imageUrl ||
+    product.image_url ||
+    ''
+  )
+}
+
 export default function Stocks() {
   const { items } = useProducts()
 
@@ -1640,14 +1651,14 @@ export default function Stocks() {
         >
           <div
             style={{
-              minWidth: 1450,
+              minWidth: 1540,
             }}
           >
             <div
               style={{
                 display: 'grid',
                 gridTemplateColumns:
-                  '150px minmax(230px,2fr) 165px 150px 165px 160px 160px 145px 135px 120px 120px',
+                  '150px 76px minmax(230px,2fr) 165px 150px 165px 160px 160px 145px 135px 120px 120px',
                 gap: 12,
                 padding:
                   '0 0 12px',
@@ -1656,6 +1667,8 @@ export default function Stocks() {
               }}
             >
               <div>Référence</div>
+
+              <div className="screenOnly">Photo</div>
 
               <button
                 style={thButton}
@@ -1790,7 +1803,7 @@ export default function Stocks() {
                     display:
                       'grid',
                     gridTemplateColumns:
-                      '150px minmax(230px,2fr) 165px 150px 165px 160px 160px 145px 135px 120px 120px',
+                      '150px 76px minmax(230px,2fr) 165px 150px 165px 160px 160px 145px 135px 120px 120px',
                     gap: 12,
                     padding:
                       '13px 0',
@@ -1810,6 +1823,53 @@ export default function Stocks() {
                     {product.internalRef ||
                       '—'}
                   </strong>
+
+                  <div className="screenOnly">
+                    {getProductPhoto(product) ? (
+                      <div
+                        style={{
+                          width: 64,
+                          height: 64,
+                          borderRadius: 10,
+                          background: '#fff',
+                          border: '1px solid #e5e7eb',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          overflow: 'hidden',
+                          padding: 4,
+                        }}
+                      >
+                        <img
+                          src={getProductPhoto(product)}
+                          alt={product.name || 'Produit'}
+                          loading="lazy"
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'contain',
+                            display: 'block',
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <div
+                        style={{
+                          width: 64,
+                          height: 64,
+                          borderRadius: 10,
+                          border: '1px dashed #cbd5e1',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: 10,
+                          opacity: 0.5,
+                        }}
+                      >
+                        PHOTO
+                      </div>
+                    )}
+                  </div>
 
                   <div>
                     <div
