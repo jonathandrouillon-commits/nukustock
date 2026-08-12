@@ -6,6 +6,7 @@ import { useProducts } from '@/lib/store'
 import * as XLSX from 'xlsx'
 import { jsPDF } from 'jspdf'
 import { autoTable } from 'jspdf-autotable'
+import { QRCodeSVG } from 'qrcode.react'
 
 type QuantityFilter =
   | 'Tous'
@@ -1651,14 +1652,14 @@ export default function Stocks() {
         >
           <div
             style={{
-              minWidth: 1540,
+              minWidth: 1630,
             }}
           >
             <div
               style={{
                 display: 'grid',
                 gridTemplateColumns:
-                  '150px 76px minmax(230px,2fr) 165px 150px 165px 160px 160px 145px 135px 120px 120px',
+                  '150px 76px 76px minmax(230px,2fr) 165px 150px 165px 160px 160px 145px 135px 120px 120px',
                 gap: 12,
                 padding:
                   '0 0 12px',
@@ -1669,6 +1670,8 @@ export default function Stocks() {
               <div>Référence</div>
 
               <div className="screenOnly">Photo</div>
+
+              <div className="screenOnly">QR</div>
 
               <button
                 style={thButton}
@@ -1803,7 +1806,7 @@ export default function Stocks() {
                     display:
                       'grid',
                     gridTemplateColumns:
-                      '150px 76px minmax(230px,2fr) 165px 150px 165px 160px 160px 145px 135px 120px 120px',
+                      '150px 76px 76px minmax(230px,2fr) 165px 150px 165px 160px 160px 145px 135px 120px 120px',
                     gap: 12,
                     padding:
                       '13px 0',
@@ -1868,6 +1871,46 @@ export default function Stocks() {
                       >
                         PHOTO
                       </div>
+                    )}
+                  </div>
+
+                  <div
+                    className="screenOnly"
+                    title={
+                      product.internalRef
+                        ? `QR produit ${product.internalRef}`
+                        : 'Référence interne requise'
+                    }
+                    style={{
+                      width: 64,
+                      height: 64,
+                      borderRadius: 10,
+                      background: '#fff',
+                      border: '1px solid #e5e7eb',
+                      display: 'grid',
+                      placeItems: 'center',
+                      padding: 4,
+                    }}
+                  >
+                    {product.internalRef ? (
+                      <QRCodeSVG
+                        value={product.internalRef}
+                        size={54}
+                        level="M"
+                        marginSize={0}
+                        title={`NukuStock ${product.internalRef}`}
+                      />
+                    ) : (
+                      <span
+                        style={{
+                          fontSize: 9,
+                          color: '#667085',
+                          textAlign: 'center',
+                          fontWeight: 700,
+                        }}
+                      >
+                        SANS REF
+                      </span>
                     )}
                   </div>
 

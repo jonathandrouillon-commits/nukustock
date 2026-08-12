@@ -7,6 +7,7 @@ import { Page, Card, Badge } from '@/components/ui'
 import { useProducts, useSuppliers, useMasterData } from '@/lib/store'
 import { Product, Supplier, MasterDataItem } from '@/lib/types'
 import { supabase } from '@/lib/supabase'
+import { QRCodeSVG } from 'qrcode.react'
 
 
 const PRODUCT_REF_COUNTER_KEY = 'nukustock_product_ref_counters_v1'
@@ -1418,12 +1419,12 @@ export default function Products() {
 
       <Card>
         <div style={{ overflowX: 'auto' }}>
-          <div style={{ minWidth: 1280 }}>
+          <div style={{ minWidth: 1370 }}>
             <div
               style={{
                 display: 'grid',
                 gridTemplateColumns:
-                  '120px minmax(220px,2fr) 120px 110px 185px 210px 80px 110px 100px',
+                  '120px 76px minmax(220px,2fr) 120px 110px 185px 210px 80px 110px 100px',
                 gap: 12,
                 alignItems: 'center',
                 fontWeight: 700,
@@ -1431,6 +1432,7 @@ export default function Products() {
               }}
             >
               <div>Référence</div>
+              <div>QR</div>
               <div>Produit</div>
               <div>Type</div>
               <div>Stock</div>
@@ -1494,7 +1496,7 @@ export default function Products() {
                   style={{
                     display: 'grid',
                     gridTemplateColumns:
-                      '120px minmax(220px,2fr) 120px 110px 185px 210px 80px 110px 100px',
+                      '120px 76px minmax(220px,2fr) 120px 110px 185px 210px 80px 110px 100px',
                     gap: 12,
                     alignItems: 'center',
                     padding: '14px 0',
@@ -1529,6 +1531,45 @@ export default function Products() {
                         }}
                       >
                         À générer
+                      </span>
+                    )}
+                  </div>
+
+                  <div
+                    title={
+                      p.internalRef
+                        ? `QR produit ${p.internalRef}`
+                        : 'Référence interne requise'
+                    }
+                    style={{
+                      width: 64,
+                      height: 64,
+                      borderRadius: 10,
+                      background: '#fff',
+                      border: '1px solid #e5e7eb',
+                      display: 'grid',
+                      placeItems: 'center',
+                      padding: 4,
+                    }}
+                  >
+                    {p.internalRef ? (
+                      <QRCodeSVG
+                        value={p.internalRef}
+                        size={54}
+                        level="M"
+                        marginSize={0}
+                        title={`NukuStock ${p.internalRef}`}
+                      />
+                    ) : (
+                      <span
+                        style={{
+                          fontSize: 9,
+                          color: '#667085',
+                          textAlign: 'center',
+                          fontWeight: 700,
+                        }}
+                      >
+                        SANS REF
                       </span>
                     )}
                   </div>
