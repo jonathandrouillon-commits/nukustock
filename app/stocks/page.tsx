@@ -2,13 +2,14 @@
 
 import { useMemo, useState, type CSSProperties } from 'react'
 import { Page, Card, Badge } from '@/components/ui'
-import { useProducts } from '@/lib/store'
+import { useMasterData, useProducts, useStockMovements } from '@/lib/store'
 import * as XLSX from 'xlsx'
 import { jsPDF } from 'jspdf'
 import { autoTable } from 'jspdf-autotable'
 import { QRCodeSVG } from 'qrcode.react'
 import QRCode from 'qrcode'
 import { ColumnVisibility, useColumnVisibility } from '@/components/column-visibility'
+import type { StockMovement } from '@/lib/types'
 
 type QuantityFilter =
   | 'Tous'
@@ -222,7 +223,12 @@ function getProductPhoto(product: any) {
 }
 
 export default function Stocks() {
-  const { items } = useProducts()
+  const { items, save: saveProducts } = useProducts()
+  const { items: masterData } = useMasterData()
+  const {
+    items: stockMovements,
+    save: saveStockMovements,
+  } = useStockMovements()
 
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] =
@@ -261,6 +267,23 @@ export default function Stocks() {
     useState<StockPrintColumnKey[]>(
       DEFAULT_STOCK_PRINT_COLUMNS
     )
+
+  const [quickEntryOpen, setQuickEntryOpen] =
+    useState(false)
+  const [quickProductId, setQuickProductId] =
+    useState('')
+  const [quickQuantity, setQuickQuantity] =
+    useState(1)
+  const [quickLocation, setQuickLocation] =
+    useState('')
+  const [quickLotNumber, setQuickLotNumber] =
+    useState('')
+  const [quickExpiry, setQuickExpiry] =
+    useState('')
+  const [quickNeedsRegularization, setQuickNeedsRegularization] =
+    useState(true)
+  const [quickNote, setQuickNote] =
+    useState('')
 
   const toggleStockPrintColumn = (
     key: StockPrintColumnKey
@@ -753,6 +776,149 @@ export default function Stocks() {
         "Moins d'un mois"
     ).length
 
+  const quickEntryLocations = useMemo(
+    () =>
+      masterData
+        .filter(
+          (item) =>
+            item.type === 'location' &&
+            item.active !== false
+        )
+        .map((item) => item.name)
+        .sort((a, b) =>
+          a.localeCompare(b, 'fr', {
+            numeric: true,
+            sensitivity: 'base',
+          })
+        ),
+    [masterData]
+  )
+
+  const resetQuickEntry = () => {
+    setQuickProductId('')
+    setQuickQuantity(1)
+    setQuickLocation('')
+    setQuickLotNumber('')
+    setQuickExpiry('')
+    setQuickNeedsRegularization(true)
+    setQuickNote('')
+  }
+
+  const saveQuickEntry = () => {
+    const product = items.find(
+      (item) => item.id === quickProductId
+    )
+
+    if (!product) {
+      window.alert('Choisis un produit.')
+      return
+    }
+
+    const quantity = Math.max(
+      0,
+      Number(quickQuantity) || 0
+    )
+
+    if (quantity <= 0) {
+      window.alert(
+        'La quantité doit être supérieure à 0.'
+      )
+      return
+    }
+
+    if (!quickLocation) {
+      window.alert('Choisis un lieu de stockage.')
+      return
+    }
+
+    const sameLotIndex = product.lots.findIndex(
+      (lot) =>
+        lot.location === quickLocation &&
+        (lot.lotNumber || '') ===
+          quickLotNumber.trim() &&
+        (lot.expiry || '') === quickExpiry
+    )
+
+    const nextLots = product.lots.map(
+      (lot) => ({ ...lot })
+    )
+
+    if (sameLotIndex >= 0) {
+      nextLots[sameLotIndex] = {
+        ...nextLots[sameLotIndex],
+        quantity:
+          Math.max(
+            0,
+            Number(
+              nextLots[sameLotIndex].quantity
+            ) || 0
+          ) + quantity,
+      }
+    } else {
+      nextLots.push({
+        id: crypto.randomUUID(),
+        lotNumber: quickLotNumber.trim(),
+        expiry: quickExpiry,
+        location: quickLocation,
+        quantity,
+      })
+    }
+
+    saveProducts(
+      items.map((item) =>
+        item.id === product.id
+          ? {
+              ...item,
+              lots: nextLots,
+            }
+          : item
+      )
+    )
+
+    const now = new Date().toISOString()
+
+    const movement: StockMovement = {
+      id: crypto.randomUUID(),
+      createdAt: now,
+      type: 'ENTREE_PRODUIT',
+      productId: product.id,
+      productName: product.name,
+      internalRef: product.internalRef,
+      quantity,
+      toLocation: quickLocation,
+      lotNumber:
+        quickLotNumber.trim() || undefined,
+      expiry: quickExpiry || undefined,
+      referenceType: 'product',
+      referenceId: `RAP-${Date.now()
+        .toString()
+        .slice(-8)}`,
+      note:
+        quickNote.trim() ||
+        'Entrée rapide de stock',
+      specialNote:
+        quickNote.trim() || undefined,
+      regularizationStatus:
+        quickNeedsRegularization
+          ? 'A_REGULARISER'
+          : 'NON_REQUIS',
+    }
+
+    saveStockMovements([
+      movement,
+      ...stockMovements,
+    ])
+
+    setQuickEntryOpen(false)
+    resetQuickEntry()
+
+    window.alert(
+      quickNeedsRegularization
+        ? `Entrée ajoutée : +${quantity} ${product.unit} de ${product.name} dans ${quickLocation}. Mouvement marqué À régulariser.`
+        : `Entrée ajoutée : +${quantity} ${product.unit} de ${product.name} dans ${quickLocation}.`
+    )
+  }
+
   const resetFilters = () => {
     setSearch('')
     setCategoryFilter('Toutes')
@@ -1223,6 +1389,17 @@ export default function Stocks() {
             onChange={stockDisplay.setVisible}
             essential={STOCK_SCREEN_ESSENTIAL}
           />
+
+          <button
+            className="button"
+            type="button"
+            onClick={() => {
+              resetQuickEntry()
+              setQuickEntryOpen(true)
+            }}
+          >
+            + Entrée rapide
+          </button>
 
           <button
             className="button secondary"
@@ -2157,6 +2334,354 @@ export default function Stocks() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+
+      {quickEntryOpen && (
+        <div
+          className="screenOnly"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1300,
+            background: 'rgba(15,23,42,.65)',
+            display: 'grid',
+            placeItems: 'center',
+            padding: 18,
+          }}
+          onMouseDown={(event) => {
+            if (
+              event.currentTarget ===
+              event.target
+            ) {
+              setQuickEntryOpen(false)
+            }
+          }}
+        >
+          <div
+            style={{
+              width: 'min(720px,100%)',
+              maxHeight: '92vh',
+              overflowY: 'auto',
+              background: '#fff',
+              color: '#101828',
+              borderRadius: 18,
+              padding: 24,
+              boxShadow:
+                '0 25px 80px rgba(0,0,0,.30)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent:
+                  'space-between',
+                gap: 14,
+                alignItems: 'flex-start',
+              }}
+            >
+              <div>
+                <h2 style={{ margin: 0 }}>
+                  Entrée rapide de stock
+                </h2>
+                <div
+                  style={{
+                    marginTop: 5,
+                    color: '#667085',
+                    fontSize: 12,
+                  }}
+                >
+                  Ajoute immédiatement le stock sans créer de commande fournisseur.
+                </div>
+              </div>
+
+              <button
+                className="button secondary small"
+                type="button"
+                onClick={() =>
+                  setQuickEntryOpen(false)
+                }
+              >
+                Fermer
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns:
+                  'repeat(2,minmax(0,1fr))',
+                gap: 14,
+                marginTop: 20,
+              }}
+            >
+              <div
+                style={{
+                  gridColumn: '1 / -1',
+                }}
+              >
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  Produit
+                </label>
+                <select
+                  className="input"
+                  style={{ width: '100%' }}
+                  value={quickProductId}
+                  onChange={(event) =>
+                    setQuickProductId(
+                      event.target.value
+                    )
+                  }
+                >
+                  <option value="">
+                    Choisir un produit
+                  </option>
+                  {[...items]
+                    .sort((a, b) =>
+                      a.name.localeCompare(
+                        b.name,
+                        'fr'
+                      )
+                    )
+                    .map((product) => (
+                      <option
+                        key={product.id}
+                        value={product.id}
+                      >
+                        {product.internalRef
+                          ? `${product.internalRef} · `
+                          : ''}
+                        {product.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  Quantité
+                </label>
+                <input
+                  className="input"
+                  style={{ width: '100%' }}
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={quickQuantity}
+                  onChange={(event) =>
+                    setQuickQuantity(
+                      Math.max(
+                        0,
+                        Number(
+                          event.target.value
+                        ) || 0
+                      )
+                    )
+                  }
+                />
+              </div>
+
+              <div>
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  Lieu de stockage
+                </label>
+                <select
+                  className="input"
+                  style={{ width: '100%' }}
+                  value={quickLocation}
+                  onChange={(event) =>
+                    setQuickLocation(
+                      event.target.value
+                    )
+                  }
+                >
+                  <option value="">
+                    Choisir un lieu
+                  </option>
+                  {quickEntryLocations.map(
+                    (location) => (
+                      <option
+                        key={location}
+                        value={location}
+                      >
+                        {location}
+                      </option>
+                    )
+                  )}
+                </select>
+              </div>
+
+              <div>
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  Lot (facultatif)
+                </label>
+                <input
+                  className="input"
+                  style={{ width: '100%' }}
+                  value={quickLotNumber}
+                  onChange={(event) =>
+                    setQuickLotNumber(
+                      event.target.value
+                    )
+                  }
+                  placeholder="Ex. LOT-2408"
+                />
+              </div>
+
+              <div>
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  DLUO / DLC (facultatif)
+                </label>
+                <input
+                  className="input"
+                  style={{ width: '100%' }}
+                  type="date"
+                  value={quickExpiry}
+                  onChange={(event) =>
+                    setQuickExpiry(
+                      event.target.value
+                    )
+                  }
+                />
+              </div>
+
+              <div
+                style={{
+                  gridColumn: '1 / -1',
+                }}
+              >
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  Note spéciale
+                </label>
+                <textarea
+                  className="input"
+                  style={{
+                    width: '100%',
+                    minHeight: 90,
+                    paddingTop: 10,
+                    resize: 'vertical',
+                  }}
+                  value={quickNote}
+                  onChange={(event) =>
+                    setQuickNote(
+                      event.target.value
+                    )
+                  }
+                  placeholder="Ex. Livraison urgente, facture à récupérer demain."
+                />
+              </div>
+
+              <label
+                style={{
+                  gridColumn: '1 / -1',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 10,
+                  padding: 13,
+                  borderRadius: 12,
+                  background: '#fff7e6',
+                  border:
+                    '1px solid #f4c56a',
+                  cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={
+                    quickNeedsRegularization
+                  }
+                  onChange={(event) =>
+                    setQuickNeedsRegularization(
+                      event.target.checked
+                    )
+                  }
+                  style={{ marginTop: 3 }}
+                />
+                <span>
+                  <strong>
+                    À régulariser
+                  </strong>
+                  <span
+                    style={{
+                      display: 'block',
+                      marginTop: 3,
+                      color: '#667085',
+                      fontSize: 11,
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    Le stock est ajouté tout de suite. Les documents, fournisseur, facture, BC et prix pourront être complétés plus tard dans Mouvements.
+                  </span>
+                </span>
+              </label>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                justifyContent:
+                  'flex-end',
+                gap: 10,
+                marginTop: 22,
+              }}
+            >
+              <button
+                className="button secondary"
+                type="button"
+                onClick={() =>
+                  setQuickEntryOpen(false)
+                }
+              >
+                Annuler
+              </button>
+
+              <button
+                className="button"
+                type="button"
+                onClick={saveQuickEntry}
+              >
+                Valider l&apos;entrée
+              </button>
+            </div>
+          </div>
+
         </div>
       )}
 

@@ -1,6 +1,7 @@
 'use client'
 
 import {
+  useEffect,
   useMemo,
   useState,
   type CSSProperties,
@@ -42,6 +43,96 @@ const receptionModes:
   'Avion',
   'Achat local',
 ]
+
+
+type TransportFlight = {
+  id: string
+  date: string
+  flightNumber: string
+  outboundDeparture: string
+  outboundArrival: string
+  returnDeparture: string
+  returnArrival: string
+}
+
+type TransportBoat = {
+  id: string
+  boatName: string
+  departureDate: string
+  departureTime: string
+  estimatedArrivalDate: string
+  estimatedArrivalTime: string
+  departurePlace: string
+  destination: string
+  status?: string
+}
+
+type OrderTransportLink = {
+  orderId: string
+  mode: 'Avion' | 'Bateau'
+  transportId: string
+  transportLabel: string
+  departureDate: string
+}
+
+const TRANSPORT_FLIGHTS_KEY =
+  'nukustock_transport_flights_v1'
+
+const TRANSPORT_BOATS_KEY =
+  'nukustock_transport_boats_v1'
+
+const ORDER_TRANSPORT_LINKS_KEY =
+  'nukustock_order_transport_links_v1'
+
+function formatShortDate(value: string) {
+  if (!value) return '—'
+
+  const date =
+    new Date(`${value}T12:00:00`)
+
+  if (
+    Number.isNaN(
+      date.getTime()
+    )
+  ) {
+    return value
+  }
+
+  return date.toLocaleDateString(
+    'fr-FR'
+  )
+}
+
+function flightTransportLabel(
+  flight: TransportFlight
+) {
+  return [
+    formatShortDate(
+      flight.date
+    ),
+    `Vol ${flight.flightNumber}`,
+    `PPT ${flight.outboundDeparture || '—'} → NKTP ${flight.outboundArrival || '—'}`,
+  ].join(' · ')
+}
+
+function boatTransportLabel(
+  boat: TransportBoat
+) {
+  return [
+    boat.boatName,
+    formatShortDate(
+      boat.departureDate
+    ),
+    `${boat.departurePlace || 'Papeete'} → ${boat.destination || 'Nukutepipi'}`,
+    boat.estimatedArrivalDate
+      ? `Arrivée prévue ${formatShortDate(
+          boat.estimatedArrivalDate
+        )}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
 
 const emptyOrder:
   SupplierOrder = {
@@ -171,6 +262,151 @@ export default function Orders() {
   const [error, setError] =
     useState('')
 
+
+  const [
+    availableFlights,
+    setAvailableFlights,
+  ] = useState<
+    TransportFlight[]
+  >([])
+
+  const [
+    availableBoats,
+    setAvailableBoats,
+  ] = useState<
+    TransportBoat[]
+  >([])
+
+  const [
+    orderTransportLinks,
+    setOrderTransportLinks,
+  ] = useState<
+    Record<
+      string,
+      OrderTransportLink
+    >
+  >({})
+
+  const [
+    selectedTransportId,
+    setSelectedTransportId,
+  ] = useState('')
+
+  useEffect(() => {
+    const loadTransportData =
+      () => {
+        try {
+          const rawFlights =
+            localStorage.getItem(
+              TRANSPORT_FLIGHTS_KEY
+            )
+
+          const rawBoats =
+            localStorage.getItem(
+              TRANSPORT_BOATS_KEY
+            )
+
+          const rawLinks =
+            localStorage.getItem(
+              ORDER_TRANSPORT_LINKS_KEY
+            )
+
+          setAvailableFlights(
+            rawFlights
+              ? JSON.parse(
+                  rawFlights
+                )
+              : []
+          )
+
+          setAvailableBoats(
+            rawBoats
+              ? JSON.parse(
+                  rawBoats
+                )
+              : []
+          )
+
+          setOrderTransportLinks(
+            rawLinks
+              ? JSON.parse(
+                  rawLinks
+                )
+              : {}
+          )
+        } catch {
+          setAvailableFlights(
+            []
+          )
+          setAvailableBoats(
+            []
+          )
+          setOrderTransportLinks(
+            {}
+          )
+        }
+      }
+
+    loadTransportData()
+
+    const onStorage = (
+      event: StorageEvent
+    ) => {
+      if (
+        event.key ===
+          TRANSPORT_FLIGHTS_KEY ||
+        event.key ===
+          TRANSPORT_BOATS_KEY ||
+        event.key ===
+          ORDER_TRANSPORT_LINKS_KEY
+      ) {
+        loadTransportData()
+      }
+    }
+
+    window.addEventListener(
+      'storage',
+      onStorage
+    )
+
+    return () => {
+      window.removeEventListener(
+        'storage',
+        onStorage
+      )
+    }
+  }, [])
+
+  const saveTransportLinks = (
+    next: Record<
+      string,
+      OrderTransportLink
+    >
+  ) => {
+    setOrderTransportLinks(
+      next
+    )
+
+    localStorage.setItem(
+      ORDER_TRANSPORT_LINKS_KEY,
+      JSON.stringify(next)
+    )
+  }
+
+  const selectedFlight =
+    availableFlights.find(
+      (flight) =>
+        flight.id ===
+        selectedTransportId
+    )
+
+  const selectedBoat =
+    availableBoats.find(
+      (boat) =>
+        boat.id ===
+        selectedTransportId
+    )
+
   const locations =
     useMemo(
       () =>
@@ -220,6 +456,9 @@ export default function Orders() {
                 order.invoiceNumber,
                 order.bl,
                 order.receptionLocation,
+                orderTransportLinks[
+                  order.id
+                ]?.transportLabel,
               ]
                 .filter(Boolean)
                 .join(' ')
@@ -253,6 +492,7 @@ export default function Orders() {
       items,
       q,
       statusFilter,
+      orderTransportLinks,
     ])
 
   const supplierProducts =
@@ -299,6 +539,7 @@ export default function Orders() {
   const openNew = () => {
     setError('')
     setMsg('')
+    setSelectedTransportId('')
 
     setForm({
       ...emptyOrder,
@@ -328,6 +569,12 @@ export default function Orders() {
 
     setError('')
     setMsg('')
+
+    setSelectedTransportId(
+      orderTransportLinks[
+        order.id
+      ]?.transportId || ''
+    )
 
     setForm({
       ...order,
@@ -461,6 +708,137 @@ export default function Orders() {
     })
   }
 
+  const changeTransportMode = (
+    mode:
+      SupplierOrder['receptionMode']
+  ) => {
+    setSelectedTransportId('')
+
+    setForm({
+      ...form,
+      receptionMode: mode,
+      departureDate:
+        mode === 'Achat local'
+          ? form.departureDate ||
+            ''
+          : '',
+    })
+  }
+
+  const selectTransport = (
+    transportId: string
+  ) => {
+    setSelectedTransportId(
+      transportId
+    )
+
+    if (
+      form.receptionMode ===
+      'Avion'
+    ) {
+      const flight =
+        availableFlights.find(
+          (item) =>
+            item.id ===
+            transportId
+        )
+
+      setForm({
+        ...form,
+        departureDate:
+          flight?.date || '',
+      })
+
+      return
+    }
+
+    if (
+      form.receptionMode ===
+      'Bateau'
+    ) {
+      const boat =
+        availableBoats.find(
+          (item) =>
+            item.id ===
+            transportId
+        )
+
+      setForm({
+        ...form,
+        departureDate:
+          boat?.departureDate ||
+          '',
+      })
+    }
+  }
+
+  const getTransportLinkForForm =
+    (
+      orderId: string
+    ):
+      | OrderTransportLink
+      | undefined => {
+      if (
+        form.receptionMode ===
+        'Avion'
+      ) {
+        const flight =
+          availableFlights.find(
+            (item) =>
+              item.id ===
+              selectedTransportId
+          )
+
+        if (!flight) {
+          return undefined
+        }
+
+        return {
+          orderId,
+          mode: 'Avion',
+          transportId:
+            flight.id,
+          transportLabel:
+            flightTransportLabel(
+              flight
+            ),
+          departureDate:
+            flight.date,
+        }
+      }
+
+      if (
+        form.receptionMode ===
+        'Bateau'
+      ) {
+        const boat =
+          availableBoats.find(
+            (item) =>
+              item.id ===
+              selectedTransportId
+          )
+
+        if (!boat) {
+          return undefined
+        }
+
+        return {
+          orderId,
+          mode: 'Bateau',
+          transportId:
+            boat.id,
+          transportLabel:
+            boatTransportLabel(
+              boat
+            ),
+          departureDate:
+            boat.departureDate,
+        }
+      }
+
+      return undefined
+    }
+
   const submit = () => {
     setError('')
     setMsg('')
@@ -475,6 +853,22 @@ export default function Orders() {
     if (!form.date) {
       setError(
         'Renseigne la date de commande.'
+      )
+      return
+    }
+
+    if (
+      (form.receptionMode ===
+        'Avion' ||
+        form.receptionMode ===
+          'Bateau') &&
+      !selectedTransportId
+    ) {
+      setError(
+        form.receptionMode ===
+          'Avion'
+          ? 'Choisis un vol dans la liste Transport.'
+          : 'Choisis un bateau dans la liste Transport.'
       )
       return
     }
@@ -538,6 +932,35 @@ export default function Orders() {
         ),
     }
 
+    const transportLink =
+      getTransportLinkForForm(
+        order.id
+      )
+
+    if (transportLink) {
+      saveTransportLinks({
+        ...orderTransportLinks,
+        [order.id]:
+          transportLink,
+      })
+    } else if (
+      orderTransportLinks[
+        order.id
+      ]
+    ) {
+      const nextLinks = {
+        ...orderTransportLinks,
+      }
+
+      delete nextLinks[
+        order.id
+      ]
+
+      saveTransportLinks(
+        nextLinks
+      )
+    }
+
     save(
       form.id
         ? items.map(
@@ -555,6 +978,7 @@ export default function Orders() {
 
     setOpen(false)
     setForm(emptyOrder)
+    setSelectedTransportId('')
 
     setMsg(
       form.id
@@ -1038,8 +1462,30 @@ export default function Orders() {
                     </td>
 
                     <td>
-                      {order.receptionMode ||
-                        '—'}
+                      <strong>
+                        {order.receptionMode ||
+                          '—'}
+                      </strong>
+
+                      {orderTransportLinks[
+                        order.id
+                      ] && (
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontSize: 10,
+                            lineHeight: 1.4,
+                            opacity: 0.72,
+                          }}
+                        >
+                          {
+                            orderTransportLinks[
+                              order.id
+                            ]
+                              .transportLabel
+                          }
+                        </div>
+                      )}
 
                       {order.bl && (
                         <div
@@ -1483,13 +1929,11 @@ export default function Orders() {
                   onChange={(
                     event
                   ) =>
-                    setForm({
-                      ...form,
-                      receptionMode:
-                        event
-                          .target
-                          .value as SupplierOrder['receptionMode'],
-                    })
+                    changeTransportMode(
+                      event
+                        .target
+                        .value as SupplierOrder['receptionMode']
+                    )
                   }
                 >
                   {receptionModes.map(
@@ -1509,6 +1953,155 @@ export default function Orders() {
                 </select>
               </div>
 
+              {(form.receptionMode ===
+                'Avion' ||
+                form.receptionMode ===
+                  'Bateau') && (
+                <div
+                  style={
+                    fieldStyle
+                  }
+                >
+                  <label
+                    style={
+                      labelStyle
+                    }
+                  >
+                    {form.receptionMode ===
+                    'Avion'
+                      ? 'Vol prévu *'
+                      : 'Bateau prévu *'}
+                  </label>
+
+                  <select
+                    className="input"
+                    value={
+                      selectedTransportId
+                    }
+                    onChange={(
+                      event
+                    ) =>
+                      selectTransport(
+                        event
+                          .target
+                          .value
+                      )
+                    }
+                  >
+                    <option value="">
+                      {form.receptionMode ===
+                      'Avion'
+                        ? 'Choisir un vol'
+                        : 'Choisir un bateau'}
+                    </option>
+
+                    {form.receptionMode ===
+                    'Avion'
+                      ? [...availableFlights]
+                          .sort(
+                            (
+                              a,
+                              b
+                            ) =>
+                              new Date(
+                                `${a.date}T${a.outboundDeparture || '00:00'}`
+                              ).getTime() -
+                              new Date(
+                                `${b.date}T${b.outboundDeparture || '00:00'}`
+                              ).getTime()
+                          )
+                          .map(
+                            (
+                              flight
+                            ) => (
+                              <option
+                                key={
+                                  flight.id
+                                }
+                                value={
+                                  flight.id
+                                }
+                              >
+                                {flightTransportLabel(
+                                  flight
+                                )}
+                              </option>
+                            )
+                          )
+                      : [...availableBoats]
+                          .filter(
+                            (
+                              boat
+                            ) =>
+                              boat.status !==
+                              'Annulé'
+                          )
+                          .sort(
+                            (
+                              a,
+                              b
+                            ) =>
+                              new Date(
+                                `${a.departureDate || '2100-01-01'}T${a.departureTime || '00:00'}`
+                              ).getTime() -
+                              new Date(
+                                `${b.departureDate || '2100-01-01'}T${b.departureTime || '00:00'}`
+                              ).getTime()
+                          )
+                          .map(
+                            (
+                              boat
+                            ) => (
+                              <option
+                                key={
+                                  boat.id
+                                }
+                                value={
+                                  boat.id
+                                }
+                              >
+                                {boatTransportLabel(
+                                  boat
+                                )}
+                              </option>
+                            )
+                          )}
+                  </select>
+
+                  {form.receptionMode ===
+                    'Avion' &&
+                    availableFlights.length ===
+                      0 && (
+                      <div
+                        style={{
+                          marginTop: 6,
+                          fontSize: 11,
+                          color:
+                            '#b54708',
+                        }}
+                      >
+                        Aucun vol disponible. Ajoute d&apos;abord un vol dans Transport.
+                      </div>
+                    )}
+
+                  {form.receptionMode ===
+                    'Bateau' &&
+                    availableBoats.length ===
+                      0 && (
+                      <div
+                        style={{
+                          marginTop: 6,
+                          fontSize: 11,
+                          color:
+                            '#b54708',
+                        }}
+                      >
+                        Aucun bateau disponible. Ajoute d&apos;abord un transport bateau.
+                      </div>
+                    )}
+                </div>
+              )}
+
               <div
                 style={
                   fieldStyle
@@ -1525,6 +2118,12 @@ export default function Orders() {
                 <input
                   className="input"
                   type="date"
+                  readOnly={
+                    form.receptionMode ===
+                      'Avion' ||
+                    form.receptionMode ===
+                      'Bateau'
+                  }
                   value={
                     form.departureDate ||
                     ''

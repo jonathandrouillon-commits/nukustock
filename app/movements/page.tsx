@@ -19,6 +19,7 @@ import {
 import type {
   StockMovement,
   StockMovementType,
+  StockRegularizationStatus,
 } from '@/lib/types'
 
 type MovementFilter =
@@ -100,10 +101,12 @@ function formatQuantity(
 export default function StockMovementsPage() {
   const {
     items: movements,
+    save: saveMovements,
   } = useStockMovements()
 
   const {
     items: products,
+    save: saveProducts,
   } = useProducts()
 
   const [
@@ -133,6 +136,31 @@ export default function StockMovementsPage() {
     dateTo,
     setDateTo,
   ] = useState('')
+
+  const [
+    regularizationFilter,
+    setRegularizationFilter,
+  ] = useState<
+    'Tous' | StockRegularizationStatus
+  >('Tous')
+
+  const [
+    regularizeMovementId,
+    setRegularizeMovementId,
+  ] = useState('')
+
+  const [regSupplier, setRegSupplier] =
+    useState('')
+  const [regQuote, setRegQuote] =
+    useState('')
+  const [regBc, setRegBc] =
+    useState('')
+  const [regInvoice, setRegInvoice] =
+    useState('')
+  const [regUnitPrice, setRegUnitPrice] =
+    useState('')
+  const [regNote, setRegNote] =
+    useState('')
 
   const locations =
     useMemo(() => {
@@ -243,7 +271,15 @@ export default function StockMovementsPage() {
               return false
             }
 
-
+            if (
+              regularizationFilter !==
+                'Tous' &&
+              (movement.regularizationStatus ||
+                'NON_REQUIS') !==
+                regularizationFilter
+            ) {
+              return false
+            }
 
             return true
           }
@@ -264,6 +300,7 @@ export default function StockMovementsPage() {
       locationFilter,
       dateFrom,
       dateTo,
+      regularizationFilter,
     ])
 
   const totalEntries =
@@ -307,6 +344,166 @@ export default function StockMovementsPage() {
     )
     setDateFrom('')
     setDateTo('')
+    setRegularizationFilter('Tous')
+  }
+
+  const movementToRegularize =
+    movements.find(
+      (movement) =>
+        movement.id ===
+        regularizeMovementId
+    )
+
+  const regularizationGroup =
+    useMemo(() => {
+      if (!movementToRegularize) {
+        return []
+      }
+
+      const reference =
+        movementToRegularize.referenceId
+
+      if (!reference) {
+        return [
+          movementToRegularize,
+        ]
+      }
+
+      return movements.filter(
+        (movement) =>
+          movement.referenceId ===
+            reference &&
+          movement.type ===
+            'ENTREE_PRODUIT'
+      )
+    }, [
+      movements,
+      movementToRegularize,
+    ])
+
+  const openRegularization = (
+    movement: StockMovement
+  ) => {
+    setRegularizeMovementId(movement.id)
+    setRegSupplier(
+      movement.supplierName || ''
+    )
+    setRegQuote(
+      movement.quoteNumber || ''
+    )
+    setRegBc(
+      movement.purchaseOrderNumber || ''
+    )
+    setRegInvoice(
+      movement.invoiceNumber || ''
+    )
+    setRegUnitPrice(
+      movement.unitPrice !== undefined
+        ? String(movement.unitPrice)
+        : ''
+    )
+    setRegNote(
+      movement.specialNote ||
+        movement.note ||
+        ''
+    )
+  }
+
+  const saveRegularization = () => {
+    if (!movementToRegularize) return
+
+    const parsedPrice =
+      regUnitPrice.trim() === ''
+        ? undefined
+        : Math.max(
+            0,
+            Number(regUnitPrice) || 0
+          )
+
+    const now =
+      new Date().toISOString()
+
+    const groupIds =
+      new Set(
+        regularizationGroup.map(
+          (movement) =>
+            movement.id
+        )
+      )
+
+    saveMovements(
+      movements.map((movement) =>
+        groupIds.has(
+          movement.id
+        )
+          ? {
+              ...movement,
+              regularizationStatus:
+                'REGULARISE',
+              regularizedAt: now,
+              supplierName:
+                regSupplier.trim() ||
+                undefined,
+              quoteNumber:
+                regQuote.trim() ||
+                undefined,
+              purchaseOrderNumber:
+                regBc.trim() ||
+                undefined,
+              invoiceNumber:
+                regInvoice.trim() ||
+                undefined,
+              unitPrice:
+                regularizationGroup.length ===
+                  1
+                  ? parsedPrice
+                  : movement.unitPrice,
+              specialNote:
+                regNote.trim() ||
+                undefined,
+              note:
+                regNote.trim() ||
+                movement.note,
+            }
+          : movement
+      )
+    )
+
+    if (
+      regularizationGroup.length ===
+        1 &&
+      parsedPrice !== undefined &&
+      parsedPrice >= 0
+    ) {
+      saveProducts(
+        products.map((product) =>
+          product.id ===
+          movementToRegularize.productId
+            ? {
+                ...product,
+                purchasePrice:
+                  parsedPrice,
+                priceUpdatedAt:
+                  now,
+                mainSupplier:
+                  regSupplier.trim() ||
+                  product.mainSupplier,
+              }
+            : product
+        )
+      )
+    }
+
+    setRegularizeMovementId('')
+
+    window.alert(
+      `${
+        movementToRegularize.referenceId ||
+        'Entrée'
+      } régularisée : ${
+        regularizationGroup.length
+      } ligne(s). Le stock n’a pas été ajouté une seconde fois.`
+    )
   }
 
   const exportCsv = () => {
@@ -323,6 +520,12 @@ export default function StockMovementsPage() {
         'DLUO/DLC',
         'Référence opération',
         'Utilisateur',
+        'Statut régularisation',
+        'Fournisseur',
+        'Devis',
+        'BC',
+        'Facture',
+        'Prix unitaire',
         'Note',
       ],
 
@@ -363,7 +566,26 @@ export default function StockMovementsPage() {
           movement.user ||
             '',
 
-          movement.note ||
+          movement.regularizationStatus ||
+            'NON_REQUIS',
+
+          movement.supplierName ||
+            '',
+
+          movement.quoteNumber ||
+            '',
+
+          movement.purchaseOrderNumber ||
+            '',
+
+          movement.invoiceNumber ||
+            '',
+
+          movement.unitPrice ??
+            '',
+
+          movement.specialNote ||
+            movement.note ||
             '',
         ]
       ),
@@ -435,13 +657,32 @@ export default function StockMovementsPage() {
       title="Mouvements de stock"
       subtitle="Journal central de toutes les entrées, sorties, transferts, réquisitions, réceptions et ajustements"
       action={
-        <button
-          className="button secondary"
-          type="button"
-          onClick={exportCsv}
+        <div
+          style={{
+            display: 'flex',
+            gap: 8,
+            flexWrap: 'wrap',
+          }}
         >
-          Exporter Excel / CSV
-        </button>
+          <Badge tone="warn">
+            {
+              movements.filter(
+                (movement) =>
+                  movement.regularizationStatus ===
+                  'A_REGULARISER'
+              ).length
+            }{' '}
+            à régulariser
+          </Badge>
+
+          <button
+            className="button secondary"
+            type="button"
+            onClick={exportCsv}
+          >
+            Exporter Excel / CSV
+          </button>
+        </div>
       }
     >
       <div className="mvStats">
@@ -529,6 +770,32 @@ export default function StockMovementsPage() {
                   {location}
                 </option>
               ))}
+            </select>
+          </div>
+          <div className="mvField">
+            <label>Régularisation</label>
+            <select
+              value={regularizationFilter}
+              onChange={(e) =>
+                setRegularizationFilter(
+                  e.target.value as
+                    | 'Tous'
+                    | StockRegularizationStatus
+                )
+              }
+            >
+              <option value="Tous">
+                Tous les statuts
+              </option>
+              <option value="A_REGULARISER">
+                À régulariser
+              </option>
+              <option value="REGULARISE">
+                Régularisés
+              </option>
+              <option value="NON_REQUIS">
+                Sans régularisation
+              </option>
             </select>
           </div>
         </div>
@@ -658,9 +925,58 @@ export default function StockMovementsPage() {
                   <div>
                     {movement.referenceId || '—'}
 
-                    {movement.note && (
+                    {movement.regularizationStatus ===
+                      'A_REGULARISER' && (
+                      <div
+                        style={{
+                          marginTop: 6,
+                          display: 'flex',
+                          gap: 6,
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        <Badge tone="warn">
+                          À régulariser
+                        </Badge>
+                        <button
+                          className="button secondary small"
+                          type="button"
+                          onClick={() =>
+                            openRegularization(
+                              movement
+                            )
+                          }
+                        >
+                          Régulariser
+                        </button>
+                      </div>
+                    )}
+
+                    {movement.regularizationStatus ===
+                      'REGULARISE' && (
+                      <div
+                        style={{
+                          marginTop: 6,
+                        }}
+                      >
+                        <Badge tone="good">
+                          Régularisé
+                        </Badge>
+                      </div>
+                    )}
+
+                    {(movement.specialNote ||
+                      movement.note) && (
                       <div className="mvSub">
-                        {movement.note}
+                        {movement.specialNote ||
+                          movement.note}
+                      </div>
+                    )}
+
+                    {movement.invoiceNumber && (
+                      <div className="mvSub">
+                        Facture :{' '}
+                        {movement.invoiceNumber}
                       </div>
                     )}
                   </div>
@@ -676,6 +992,336 @@ export default function StockMovementsPage() {
           </div>
         </div>
       </Card>
+
+
+      {movementToRegularize && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1300,
+            background:
+              'rgba(15,23,42,.65)',
+            display: 'grid',
+            placeItems: 'center',
+            padding: 18,
+          }}
+          onMouseDown={(event) => {
+            if (
+              event.currentTarget ===
+              event.target
+            ) {
+              setRegularizeMovementId('')
+            }
+          }}
+        >
+          <div
+            style={{
+              width: 'min(720px,100%)',
+              maxHeight: '92vh',
+              overflowY: 'auto',
+              background: '#fff',
+              color: '#101828',
+              borderRadius: 18,
+              padding: 24,
+              boxShadow:
+                '0 25px 80px rgba(0,0,0,.30)',
+            }}
+          >
+            <h2 style={{ margin: 0 }}>
+              Régulariser l&apos;opération
+            </h2>
+
+            <div
+              style={{
+                marginTop: 5,
+                color: '#667085',
+                fontSize: 12,
+              }}
+            >
+              <strong>
+                {movementToRegularize.referenceId ||
+                  'Entrée rapide'}
+              </strong>
+              {' · '}
+              {regularizationGroup.length}{' '}
+              produit(s)
+              {' · '}
+              {regularizationGroup
+                .reduce(
+                  (sum, movement) =>
+                    sum +
+                    movement.quantity,
+                  0
+                )
+                .toLocaleString('fr-FR')}{' '}
+              unité(s)
+            </div>
+
+            <div
+              style={{
+                marginTop: 14,
+                padding: 12,
+                borderRadius: 10,
+                background: '#ecfdf3',
+                border:
+                  '1px solid #abefc6',
+                fontSize: 12,
+                color: '#067647',
+              }}
+            >
+              Cette régularisation complète les documents du mouvement existant. Elle ne modifie pas la quantité de stock.
+            </div>
+
+            {regularizationGroup.length > 1 && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: 12,
+                  borderRadius: 10,
+                  border:
+                    '1px solid #e5e7eb',
+                  background: '#f8fafc',
+                }}
+              >
+                <strong
+                  style={{
+                    display: 'block',
+                    marginBottom: 8,
+                    fontSize: 12,
+                  }}
+                >
+                  Produits de l&apos;opération
+                </strong>
+
+                {regularizationGroup.map(
+                  (movement) => (
+                    <div
+                      key={movement.id}
+                      style={{
+                        display: 'flex',
+                        justifyContent:
+                          'space-between',
+                        gap: 12,
+                        padding:
+                          '6px 0',
+                        borderTop:
+                          '1px solid #eef1f5',
+                        fontSize: 11,
+                      }}
+                    >
+                      <span>
+                        {movement.productName}
+                        {' · '}
+                        {movement.toLocation ||
+                          'Lieu non renseigné'}
+                      </span>
+
+                      <strong>
+                        +{movement.quantity}
+                      </strong>
+                    </div>
+                  )
+                )}
+              </div>
+            )}
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns:
+                  'repeat(2,minmax(0,1fr))',
+                gap: 14,
+                marginTop: 18,
+              }}
+            >
+              <div
+                style={{
+                  gridColumn: '1 / -1',
+                }}
+              >
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  Fournisseur
+                </label>
+                <input
+                  className="input"
+                  style={{ width: '100%' }}
+                  value={regSupplier}
+                  onChange={(event) =>
+                    setRegSupplier(
+                      event.target.value
+                    )
+                  }
+                  placeholder="Nom du fournisseur"
+                />
+              </div>
+
+              <div>
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  N° devis
+                </label>
+                <input
+                  className="input"
+                  style={{ width: '100%' }}
+                  value={regQuote}
+                  onChange={(event) =>
+                    setRegQuote(
+                      event.target.value
+                    )
+                  }
+                />
+              </div>
+
+              <div>
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  N° BC
+                </label>
+                <input
+                  className="input"
+                  style={{ width: '100%' }}
+                  value={regBc}
+                  onChange={(event) =>
+                    setRegBc(
+                      event.target.value
+                    )
+                  }
+                />
+              </div>
+
+              <div>
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  N° facture
+                </label>
+                <input
+                  className="input"
+                  style={{ width: '100%' }}
+                  value={regInvoice}
+                  onChange={(event) =>
+                    setRegInvoice(
+                      event.target.value
+                    )
+                  }
+                />
+              </div>
+
+              <div>
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  Prix unitaire XPF
+                  {regularizationGroup.length > 1
+                    ? ' — uniquement pour une entrée à 1 produit'
+                    : ''}
+                </label>
+                <input
+                  className="input"
+                  style={{ width: '100%' }}
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  disabled={
+                    regularizationGroup.length > 1
+                  }
+                  value={regUnitPrice}
+                  onChange={(event) =>
+                    setRegUnitPrice(
+                      event.target.value
+                    )
+                  }
+                  placeholder="Facultatif"
+                />
+              </div>
+
+              <div
+                style={{
+                  gridColumn: '1 / -1',
+                }}
+              >
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  Note / documents
+                </label>
+                <textarea
+                  className="input"
+                  style={{
+                    width: '100%',
+                    minHeight: 95,
+                    paddingTop: 10,
+                    resize: 'vertical',
+                  }}
+                  value={regNote}
+                  onChange={(event) =>
+                    setRegNote(
+                      event.target.value
+                    )
+                  }
+                />
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                justifyContent:
+                  'flex-end',
+                gap: 10,
+                marginTop: 22,
+              }}
+            >
+              <button
+                className="button secondary"
+                type="button"
+                onClick={() =>
+                  setRegularizeMovementId('')
+                }
+              >
+                Annuler
+              </button>
+
+              <button
+                className="button"
+                type="button"
+                onClick={saveRegularization}
+              >
+                Marquer comme régularisé
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style jsx global>{`
         .mvStats {
@@ -712,7 +1358,7 @@ export default function StockMovementsPage() {
         .mvFilterGridTop {
           display: grid;
           grid-template-columns:
-            repeat(3, minmax(0, 1fr));
+            repeat(4, minmax(0, 1fr));
           gap: 14px;
           align-items: end;
         }

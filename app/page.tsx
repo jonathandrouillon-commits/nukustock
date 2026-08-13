@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { Page, Card, Badge } from '@/components/ui'
 import {
@@ -8,8 +8,74 @@ import {
   useOrders,
   useProducts,
   useRequests,
+  useStockMovements,
   useTransfers,
 } from '@/lib/store'
+
+
+type DashboardBlockKey =
+  | 'operationalSummary'
+  | 'stockByLocation'
+  | 'mainStats'
+  | 'alerts'
+  | 'quickEntries'
+  | 'recentMovements'
+  | 'latestInventory'
+  | 'topConsumption'
+  | 'orders'
+  | 'requests'
+
+type DashboardVisibility = Record<
+  DashboardBlockKey,
+  boolean
+>
+
+const DASHBOARD_VISIBILITY_KEY =
+  'nukustock_dashboard_visibility_v1'
+
+const DEFAULT_DASHBOARD_VISIBILITY:
+  DashboardVisibility = {
+  operationalSummary: true,
+  stockByLocation: true,
+  mainStats: true,
+  alerts: true,
+  quickEntries: true,
+  recentMovements: true,
+  latestInventory: true,
+  topConsumption: true,
+  orders: true,
+  requests: true,
+}
+
+const DASHBOARD_BLOCK_LABELS:
+  Record<DashboardBlockKey, string> = {
+  operationalSummary:
+    'Synthèse opérationnelle',
+  stockByLocation:
+    'Stock par lieu',
+  mainStats:
+    'Indicateurs principaux',
+  alerts:
+    'À traiter / Alertes',
+  quickEntries:
+    'Entrées rapides',
+  recentMovements:
+    'Mouvements récents',
+  latestInventory:
+    'Dernier inventaire',
+  topConsumption:
+    'Plus fortes consommations',
+  orders:
+    'Commandes fournisseurs',
+  requests:
+    'Réquisitions',
+}
+
+function movementSign(
+  quantity: number
+) {
+  return quantity > 0 ? '+' : ''
+}
 
 export default function Home() {
   const { items: products } = useProducts()
@@ -17,6 +83,65 @@ export default function Home() {
   const { items: requests } = useRequests()
   const { items: inventories } = useInventories()
   const { items: transfers } = useTransfers()
+  const { items: movements } = useStockMovements()
+
+  const [
+    dashboardVisibility,
+    setDashboardVisibility,
+  ] = useState<DashboardVisibility>(
+    DEFAULT_DASHBOARD_VISIBILITY
+  )
+
+  const [
+    displayOpen,
+    setDisplayOpen,
+  ] = useState(false)
+
+  useEffect(() => {
+    try {
+      const raw =
+        localStorage.getItem(
+          DASHBOARD_VISIBILITY_KEY
+        )
+
+      if (!raw) return
+
+      const parsed =
+        JSON.parse(raw)
+
+      setDashboardVisibility({
+        ...DEFAULT_DASHBOARD_VISIBILITY,
+        ...parsed,
+      })
+    } catch {
+      // Garde les réglages par défaut.
+    }
+  }, [])
+
+  const setBlockVisible = (
+    key: DashboardBlockKey,
+    visible: boolean
+  ) => {
+    setDashboardVisibility(
+      (current) => {
+        const next = {
+          ...current,
+          [key]: visible,
+        }
+
+        try {
+          localStorage.setItem(
+            DASHBOARD_VISIBILITY_KEY,
+            JSON.stringify(next)
+          )
+        } catch {
+          // Le Dashboard reste utilisable.
+        }
+
+        return next
+      }
+    )
+  }
 
   const stats = useMemo(() => {
     const today = new Date()
@@ -234,6 +359,200 @@ export default function Home() {
       )
   }, [products])
 
+
+  const quickEntryGroups =
+    useMemo(() => {
+      const groups =
+        new Map<
+          string,
+          {
+            reference: string
+            createdAt: string
+            movements: typeof movements
+          }
+        >()
+
+      movements
+        .filter(
+          (movement) =>
+            movement.type ===
+              'ENTREE_PRODUIT' &&
+            Boolean(
+              movement.referenceId?.startsWith(
+                'ER-'
+              )
+            )
+        )
+        .forEach((movement) => {
+          const reference =
+            movement.referenceId ||
+            'ER-SANS-REF'
+
+          const existing =
+            groups.get(reference)
+
+          if (existing) {
+            existing.movements.push(
+              movement
+            )
+
+            if (
+              new Date(
+                movement.createdAt
+              ).getTime() >
+              new Date(
+                existing.createdAt
+              ).getTime()
+            ) {
+              existing.createdAt =
+                movement.createdAt
+            }
+          } else {
+            groups.set(
+              reference,
+              {
+                reference,
+                createdAt:
+                  movement.createdAt,
+                movements: [
+                  movement,
+                ],
+              }
+            )
+          }
+        })
+
+      return [
+        ...groups.values(),
+      ].sort(
+        (a, b) =>
+          new Date(
+            b.createdAt
+          ).getTime() -
+          new Date(
+            a.createdAt
+          ).getTime()
+      )
+    }, [movements])
+
+  const pendingQuickEntries =
+    useMemo(
+      () =>
+        quickEntryGroups.filter(
+          (group) =>
+            group.movements.some(
+              (movement) =>
+                movement.regularizationStatus ===
+                'A_REGULARISER'
+            )
+        ),
+      [quickEntryGroups]
+    )
+
+  const recentQuickEntries =
+    useMemo(
+      () =>
+        quickEntryGroups.slice(
+          0,
+          6
+        ),
+      [quickEntryGroups]
+    )
+
+  const recentMovements =
+    useMemo(
+      () =>
+        [...movements]
+          .sort(
+            (a, b) =>
+              new Date(
+                b.createdAt
+              ).getTime() -
+              new Date(
+                a.createdAt
+              ).getTime()
+          )
+          .slice(0, 8),
+      [movements]
+    )
+
+  const alertItems =
+    useMemo(
+      () => [
+        {
+          label:
+            'Entrées rapides à régulariser',
+          value:
+            pendingQuickEntries.length,
+          href: '/movements',
+          tone:
+            pendingQuickEntries.length >
+            0
+              ? 'warn'
+              : 'good',
+        },
+        {
+          label:
+            'Produits sous stock minimum',
+          value:
+            stats.lowStock,
+          href: '/stocks',
+          tone:
+            stats.lowStock > 0
+              ? 'warn'
+              : 'good',
+        },
+        {
+          label:
+            'DLUO / DLC < 30 jours',
+          value:
+            stats.under30Days,
+          href: '/stocks',
+          tone:
+            stats.under30Days > 0
+              ? 'warn'
+              : 'good',
+        },
+        {
+          label:
+            'Lots périmés',
+          value:
+            stats.expired,
+          href: '/stocks',
+          tone:
+            stats.expired > 0
+              ? 'danger'
+              : 'good',
+        },
+        {
+          label:
+            'Commandes en cours',
+          value:
+            stats.pendingOrders,
+          href: '/orders',
+          tone:
+            stats.pendingOrders > 0
+              ? 'info'
+              : 'good',
+        },
+        {
+          label:
+            'Réquisitions en cours',
+          value:
+            stats.pendingRequests,
+          href: '/requests',
+          tone:
+            stats.pendingRequests > 0
+              ? 'info'
+              : 'good',
+        },
+      ],
+      [
+        pendingQuickEntries.length,
+        stats,
+      ]
+    )
+
   const deliveredRequests =
     requests.filter(
       (request) =>
@@ -260,9 +579,131 @@ export default function Home() {
     <Page
       title="Dashboard"
       subtitle="Vue d’ensemble de NukuStock"
+      action={
+        <div
+          style={{
+            position: 'relative',
+          }}
+        >
+          <button
+            className="button secondary"
+            type="button"
+            onClick={() =>
+              setDisplayOpen(
+                (current) =>
+                  !current
+              )
+            }
+          >
+            Affichage
+          </button>
+
+          {displayOpen && (
+            <div
+              style={{
+                position:
+                  'absolute',
+                top:
+                  'calc(100% + 8px)',
+                right: 0,
+                width: 300,
+                zIndex: 50,
+                padding: 14,
+                border:
+                  '1px solid #e5e7eb',
+                borderRadius: 14,
+                background: '#fff',
+                boxShadow:
+                  '0 18px 50px rgba(16,24,40,.16)',
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 900,
+                  marginBottom: 10,
+                }}
+              >
+                Blocs du Dashboard
+              </div>
+
+              {(
+                Object.keys(
+                  DASHBOARD_BLOCK_LABELS
+                ) as DashboardBlockKey[]
+              ).map((key) => (
+                <label
+                  key={key}
+                  style={{
+                    display: 'flex',
+                    alignItems:
+                      'center',
+                    gap: 9,
+                    padding:
+                      '7px 0',
+                    cursor:
+                      'pointer',
+                    fontSize: 12,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={
+                      dashboardVisibility[
+                        key
+                      ]
+                    }
+                    onChange={(
+                      event
+                    ) =>
+                      setBlockVisible(
+                        key,
+                        event.target
+                          .checked
+                      )
+                    }
+                  />
+
+                  <span>
+                    {
+                      DASHBOARD_BLOCK_LABELS[
+                        key
+                      ]
+                    }
+                  </span>
+                </label>
+              ))}
+
+              <button
+                className="button secondary small"
+                type="button"
+                onClick={() => {
+                  setDashboardVisibility(
+                    DEFAULT_DASHBOARD_VISIBILITY
+                  )
+
+                  localStorage.setItem(
+                    DASHBOARD_VISIBILITY_KEY,
+                    JSON.stringify(
+                      DEFAULT_DASHBOARD_VISIBILITY
+                    )
+                  )
+                }}
+                style={{
+                  marginTop: 8,
+                  width: '100%',
+                }}
+              >
+                Tout afficher
+              </button>
+            </div>
+          )}
+        </div>
+      }
     >
 
 
+      {dashboardVisibility.operationalSummary && (
       <Card>
         <div
           style={{
@@ -420,6 +861,7 @@ export default function Home() {
           </div>
         </div>
 
+        {dashboardVisibility.stockByLocation && (
         <div
           style={{
             marginTop: 18,
@@ -505,7 +947,9 @@ export default function Home() {
             </table>
           </div>
         </div>
+        )}
       </Card>
+      )}
 
       <div
         style={{
@@ -513,6 +957,7 @@ export default function Home() {
         }}
       />
 
+      {dashboardVisibility.mainStats && (
       <div
         style={{
           display: 'grid',
@@ -695,6 +1140,410 @@ export default function Home() {
           </div>
         </div>
       </div>
+      )}
+
+      {dashboardVisibility.alerts && (
+        <Card>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent:
+                'space-between',
+              alignItems:
+                'center',
+              gap: 12,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: '#667085',
+                  fontWeight: 800,
+                  letterSpacing:
+                    '.08em',
+                }}
+              >
+                À TRAITER
+              </div>
+
+              <h2
+                style={{
+                  margin:
+                    '4px 0 0',
+                }}
+              >
+                Alertes opérationnelles
+              </h2>
+            </div>
+
+            <Link
+              href="/movements"
+              className="button secondary small"
+            >
+              Voir les mouvements
+            </Link>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns:
+                'repeat(auto-fit,minmax(220px,1fr))',
+              gap: 10,
+              marginTop: 16,
+            }}
+          >
+            {alertItems.map(
+              (item) => (
+                <Link
+                  key={
+                    item.label
+                  }
+                  href={
+                    item.href
+                  }
+                  style={{
+                    display:
+                      'flex',
+                    justifyContent:
+                      'space-between',
+                    alignItems:
+                      'center',
+                    gap: 10,
+                    padding: 13,
+                    border:
+                      '1px solid #e5e7eb',
+                    borderRadius: 12,
+                    color:
+                      '#101828',
+                    textDecoration:
+                      'none',
+                    background:
+                      '#fff',
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {item.label}
+                  </span>
+
+                  <Badge
+                    tone={
+                      item.tone as
+                        | 'good'
+                        | 'warn'
+                        | 'danger'
+                        | 'info'
+                    }
+                  >
+                    {item.value}
+                  </Badge>
+                </Link>
+              )
+            )}
+          </div>
+        </Card>
+      )}
+
+      {(dashboardVisibility.quickEntries ||
+        dashboardVisibility.recentMovements) && (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns:
+              'repeat(auto-fit,minmax(360px,1fr))',
+            gap: 16,
+            marginTop: 16,
+          }}
+        >
+          {dashboardVisibility.quickEntries && (
+            <Card>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent:
+                    'space-between',
+                  alignItems:
+                    'center',
+                  gap: 10,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <div>
+                  <h2
+                    style={{
+                      margin: 0,
+                    }}
+                  >
+                    Entrées rapides
+                  </h2>
+                  <div
+                    style={{
+                      marginTop: 4,
+                      color:
+                        '#667085',
+                      fontSize: 11,
+                    }}
+                  >
+                    {
+                      pendingQuickEntries.length
+                    }{' '}
+                    à régulariser
+                  </div>
+                </div>
+
+                <Link
+                  href="/stock-entry"
+                  className="button secondary small"
+                >
+                  Nouvelle entrée
+                </Link>
+              </div>
+
+              <div
+                style={{
+                  marginTop: 14,
+                  display: 'grid',
+                  gap: 10,
+                }}
+              >
+                {recentQuickEntries.length >
+                0 ? (
+                  recentQuickEntries.map(
+                    (group) => {
+                      const total =
+                        group.movements.reduce(
+                          (
+                            sum,
+                            movement
+                          ) =>
+                            sum +
+                            movement.quantity,
+                          0
+                        )
+
+                      const pending =
+                        group.movements.some(
+                          (
+                            movement
+                          ) =>
+                            movement.regularizationStatus ===
+                            'A_REGULARISER'
+                        )
+
+                      return (
+                        <Link
+                          key={
+                            group.reference
+                          }
+                          href="/movements"
+                          style={{
+                            display:
+                              'flex',
+                            justifyContent:
+                              'space-between',
+                            alignItems:
+                              'center',
+                            gap: 12,
+                            paddingBottom:
+                              10,
+                            borderBottom:
+                              '1px solid #e5e7eb',
+                            color:
+                              '#101828',
+                            textDecoration:
+                              'none',
+                          }}
+                        >
+                          <div>
+                            <strong>
+                              {
+                                group.reference
+                              }
+                            </strong>
+                            <div
+                              style={{
+                                marginTop:
+                                  3,
+                                fontSize:
+                                  11,
+                                color:
+                                  '#667085',
+                              }}
+                            >
+                              {
+                                group
+                                  .movements
+                                  .length
+                              }{' '}
+                              produit(s) ·{' '}
+                              {total.toLocaleString(
+                                'fr-FR'
+                              )}{' '}
+                              unité(s)
+                            </div>
+                          </div>
+
+                          <Badge
+                            tone={
+                              pending
+                                ? 'warn'
+                                : 'good'
+                            }
+                          >
+                            {pending
+                              ? 'À régulariser'
+                              : 'Régularisé'}
+                          </Badge>
+                        </Link>
+                      )
+                    }
+                  )
+                ) : (
+                  <div className="muted">
+                    Aucune entrée rapide.
+                  </div>
+                )}
+              </div>
+            </Card>
+          )}
+
+          {dashboardVisibility.recentMovements && (
+            <Card>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent:
+                    'space-between',
+                  alignItems:
+                    'center',
+                  gap: 10,
+                }}
+              >
+                <h2
+                  style={{
+                    margin: 0,
+                  }}
+                >
+                  Mouvements récents
+                </h2>
+
+                <Link
+                  href="/movements"
+                  className="button secondary small"
+                >
+                  Tout voir
+                </Link>
+              </div>
+
+              <div
+                style={{
+                  marginTop: 14,
+                  display: 'grid',
+                  gap: 10,
+                }}
+              >
+                {recentMovements.length >
+                0 ? (
+                  recentMovements.map(
+                    (
+                      movement
+                    ) => (
+                      <div
+                        key={
+                          movement.id
+                        }
+                        style={{
+                          display:
+                            'grid',
+                          gridTemplateColumns:
+                            '60px minmax(0,1fr) auto',
+                          gap: 10,
+                          alignItems:
+                            'center',
+                          paddingBottom:
+                            10,
+                          borderBottom:
+                            '1px solid #e5e7eb',
+                        }}
+                      >
+                        <strong
+                          style={{
+                            fontSize:
+                              13,
+                          }}
+                        >
+                          {movementSign(
+                            movement.quantity
+                          )}
+                          {movement.quantity.toLocaleString(
+                            'fr-FR'
+                          )}
+                        </strong>
+
+                        <div>
+                          <div
+                            style={{
+                              fontWeight:
+                                700,
+                              fontSize:
+                                12,
+                            }}
+                          >
+                            {
+                              movement.productName
+                            }
+                          </div>
+                          <div
+                            style={{
+                              marginTop:
+                                2,
+                              color:
+                                '#667085',
+                              fontSize:
+                                10,
+                            }}
+                          >
+                            {movement.toLocation ||
+                              movement.fromLocation ||
+                              '—'}
+                            {movement.referenceId
+                              ? ` · ${movement.referenceId}`
+                              : ''}
+                          </div>
+                        </div>
+
+                        <Badge
+                          tone={
+                            movement.quantity >=
+                            0
+                              ? 'good'
+                              : 'warn'
+                          }
+                        >
+                          {
+                            movement.type
+                          }
+                        </Badge>
+                      </div>
+                    )
+                  )
+                ) : (
+                  <div className="muted">
+                    Aucun mouvement enregistré.
+                  </div>
+                )}
+              </div>
+            </Card>
+          )}
+        </div>
+      )}
 
       <div
         style={{
@@ -704,6 +1553,7 @@ export default function Home() {
           gap: 16,
         }}
       >
+        {dashboardVisibility.latestInventory && (
         <Card>
           <div
             style={{
@@ -871,7 +1721,9 @@ export default function Home() {
             </div>
           </div>
         </Card>
+        )}
 
+        {dashboardVisibility.topConsumption && (
         <Card>
           <h2 style={{ margin: 0 }}>
             Plus fortes consommations
@@ -935,6 +1787,7 @@ export default function Home() {
             )}
           </div>
         </Card>
+        )}
       </div>
 
       <div
@@ -946,6 +1799,7 @@ export default function Home() {
           marginTop: 16,
         }}
       >
+        {dashboardVisibility.orders && (
         <Card>
           <div
             style={{
@@ -1035,7 +1889,9 @@ export default function Home() {
             )}
           </div>
         </Card>
+        )}
 
+        {dashboardVisibility.requests && (
         <Card>
           <div
             style={{
@@ -1132,6 +1988,7 @@ export default function Home() {
             )}
           </div>
         </Card>
+        )}
       </div>
     </Page>
   )

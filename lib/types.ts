@@ -59,14 +59,9 @@ export type InternalRequest = {
 
   createdAt: string
 
-  // Les deux champs restent optionnels pour compatibilité.
-  // La page Réquisitions pourra choisir le lieu de départ et le lieu livré.
   sourceLocation?: string
   destinationLocation?: string
-
   deliveredAt?: string
-
-  // Permet d'éviter qu'une même réquisition soit déduite deux fois.
   stockAppliedAt?: string
 
   items: {
@@ -74,26 +69,18 @@ export type InternalRequest = {
     productName: string
     requested: number
     approved: number
-
-    // Lieu choisi au moment du traitement de la réquisition.
-    // Permet d'avoir une source différente pour chaque produit.
     sourceLocation?: string
   }[]
 }
 
 export type Supplier = {
   id: string
-
-  // Référence interne permanente : FOU-001, FOU-002...
   internalRef?: string
-
   name: string
-
   contact: string
   phone: string
   payment: string
   notes: string
-
   contactPerson?: string
   email?: string
   address?: string
@@ -114,29 +101,21 @@ export type SupplierOrder = {
   supplierId: string
   supplierName: string
   date: string
-
   quoteNumber?: string
   purchaseOrderNumber?: string
   invoiceNumber?: string
-
   bl: string
   receptionMode?: 'Bateau' | 'Avion' | 'Achat local'
   departureDate?: string
-
   status:
     | 'En traitement'
     | 'Validé'
     | 'En attente'
     | 'Clôturé'
     | 'Traité'
-
   lines: SupplierOrderLine[]
-
-  // Données de réception reliées au stock.
   receptionLocation?: string
   receivedAt?: string
-
-  // Empêche une seconde entrée de stock sur la même commande.
   stockAppliedAt?: string
 }
 
@@ -149,8 +128,6 @@ export type Transfer = {
   qty: number
   date: string
   user: string
-
-  // Le transfert est enregistré dans l'historique des mouvements.
   stockAppliedAt?: string
 }
 
@@ -165,20 +142,15 @@ export type InventoryRecord = {
   id: string
   type: string
   inventoryScope?: InventoryScope
-
   location: string
   locations?: string[]
   date: string
   name?: string
-
   stayStartDate?: string
   stayEndDate?: string
   guestCount?: number
   durationDays?: number
-
-  // Empêche de clôturer deux fois le même inventaire dans le stock.
   stockAppliedAt?: string
-
   lines: {
     productId: string
     productName: string
@@ -199,6 +171,11 @@ export type StockMovementType =
   | 'AJUSTEMENT_INVENTAIRE'
   | 'CORRECTION_MANUELLE'
 
+export type StockRegularizationStatus =
+  | 'NON_REQUIS'
+  | 'A_REGULARISER'
+  | 'REGULARISE'
+
 export type StockMovement = {
   id: string
   createdAt: string
@@ -207,7 +184,6 @@ export type StockMovement = {
   productId: string
   productName: string
   internalRef?: string
-
   quantity: number
 
   fromLocation?: string
@@ -224,9 +200,18 @@ export type StockMovement = {
     | 'inventory'
 
   referenceId?: string
-
   note?: string
   user?: string
+
+  // Entrées rapides / régularisation administrative.
+  regularizationStatus?: StockRegularizationStatus
+  regularizedAt?: string
+  supplierName?: string
+  quoteNumber?: string
+  purchaseOrderNumber?: string
+  invoiceNumber?: string
+  unitPrice?: number
+  specialNote?: string
 }
 
 export type StockEngineResult = {
@@ -248,14 +233,7 @@ export type MasterDataType =
 
 export type MasterDataItem = {
   id: string
-
-  // Référence interne permanente selon le référentiel :
-  // LIE-001 = lieu
-  // ZON-001 = zone
-  // CAT-001 = catégorie
-  // SCA-001 = sous-catégorie
   internalRef?: string
-
   type: MasterDataType
   name: string
   parentId?: string

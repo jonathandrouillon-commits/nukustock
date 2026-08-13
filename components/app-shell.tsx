@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import {
   useEffect,
   useMemo,
@@ -9,6 +9,13 @@ import {
   type ReactNode,
 } from 'react'
 import { UserMenu } from '@/components/user-menu'
+import {
+  useInventories,
+  useOrders,
+  useProducts,
+  useRequests,
+  useStockMovements,
+} from '@/lib/store'
 
 type ViewMode =
   | 'auto'
@@ -35,6 +42,7 @@ const navItems: NavItem[] = [
   { href: '/products', label: 'Produits', icon: '▣' },
   { href: '/product-images', label: 'Photos produits', icon: '▧' },
   { href: '/stocks', label: 'Stocks', icon: '▤' },
+  { href: '/stock-entry', label: 'Entrée rapide', icon: '＋' },
   { href: '/locations', label: 'Lieux de stockage', icon: '⌖' },
   { href: '/movements', label: 'Mouvements', icon: '↕' },
   { href: '/requests', label: 'Réquisitions', icon: '☷' },
@@ -42,6 +50,7 @@ const navItems: NavItem[] = [
   { href: '/transfers', label: 'Transferts', icon: '⇄' },
   { href: '/inventory', label: 'Inventaires', icon: '☑' },
   { href: '/suppliers', label: 'Fournisseurs', icon: '◇' },
+  { href: '/transport', label: 'Transport', icon: '✈' },
   { href: '/labels', label: 'Étiquettes', icon: '▦' },
   { href: '/setup', label: 'SET UP', icon: '◫' },
   { href: '/settings', label: 'Réglages', icon: '⚙' },
@@ -62,6 +71,7 @@ const navGroups: NavGroup[] = [
     icon: '▤',
     items: [
       { href: '/stocks', label: 'Stocks', icon: '▤' },
+      { href: '/stock-entry', label: 'Entrée rapide', icon: '＋' },
       { href: '/movements', label: 'Mouvements', icon: '↕' },
       { href: '/transfers', label: 'Transferts', icon: '⇄' },
       { href: '/inventory', label: 'Inventaires', icon: '☑' },
@@ -75,6 +85,7 @@ const navGroups: NavGroup[] = [
       { href: '/requests', label: 'Réquisitions', icon: '☷' },
       { href: '/orders', label: 'Commandes', icon: '▧' },
       { href: '/suppliers', label: 'Fournisseurs', icon: '◇' },
+      { href: '/transport', label: 'Transport', icon: '✈' },
     ],
   },
 ]
@@ -120,12 +131,48 @@ function getAutoResolved():
   return 'pc'
 }
 
+
+type GlobalSearchResult = {
+  id: string
+  title: string
+  subtitle: string
+  href: string
+  type:
+    | 'Produit'
+    | 'Lieu'
+    | 'Commande'
+    | 'Réquisition'
+    | 'Inventaire'
+    | 'Mouvement'
+    | 'Entrée rapide'
+    | 'Module'
+}
+
+function normalizeSearch(value: unknown) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+}
+
 export function AppShell({
   children,
 }: {
   children: ReactNode
 }) {
   const pathname = usePathname()
+  const router = useRouter()
+
+  const { items: products } = useProducts()
+  const { items: orders } = useOrders()
+  const { items: requests } = useRequests()
+  const { items: inventories } = useInventories()
+  const { items: movements } = useStockMovements()
+
+  const [globalSearch, setGlobalSearch] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
+
 
   const [
     viewMode,
@@ -234,6 +281,7 @@ export function AppShell({
     setSelectorOpen(false)
     setTabletMenuOpen(false)
     setMobileMenuOpen(false)
+    setSearchOpen(false)
   }, [pathname])
 
   const chooseView = (
@@ -257,6 +305,210 @@ export function AppShell({
     tablet: 'Tablette',
     pc: 'PC',
   }[viewMode]
+
+
+  const globalSearchResults = useMemo<GlobalSearchResult[]>(() => {
+    const query = normalizeSearch(globalSearch)
+
+    if (query.length < 2) return []
+
+    const results: GlobalSearchResult[] = []
+
+    const matches = (...values: unknown[]) =>
+      values.some((value) =>
+        normalizeSearch(value).includes(query)
+      )
+
+    navItems.forEach((item) => {
+      if (matches(item.label, item.href)) {
+        results.push({
+          id: `module-${item.href}`,
+          title: item.label,
+          subtitle: 'Module NukuStock',
+          href: item.href,
+          type: 'Module',
+        })
+      }
+    })
+
+    products.forEach((product) => {
+      if (
+        matches(
+          product.name,
+          product.internalRef,
+          product.supplierRef,
+          product.category,
+          product.subcategory,
+          product.mainSupplier
+        )
+      ) {
+        results.push({
+          id: `product-${product.id}`,
+          title: product.name,
+          subtitle: [
+            product.internalRef,
+            product.category,
+            product.subcategory,
+          ]
+            .filter(Boolean)
+            .join(' · '),
+          href: `/products?search=${encodeURIComponent(product.name)}`,
+          type: 'Produit',
+        })
+      }
+    })
+
+    const locations = new Set<string>()
+    products.forEach((product) => {
+      product.lots?.forEach((lot) => {
+        if (lot.location) locations.add(lot.location)
+      })
+    })
+
+    Array.from(locations).forEach((location) => {
+      if (matches(location)) {
+        results.push({
+          id: `location-${location}`,
+          title: location,
+          subtitle: 'Lieu de stockage',
+          href: `/stocks?location=${encodeURIComponent(location)}`,
+          type: 'Lieu',
+        })
+      }
+    })
+
+    orders.forEach((order) => {
+      if (
+        matches(
+          order.id,
+          order.supplierName,
+          order.quoteNumber,
+          order.purchaseOrderNumber,
+          order.invoiceNumber,
+          order.bl,
+          order.status
+        )
+      ) {
+        results.push({
+          id: `order-${order.id}`,
+          title:
+            order.purchaseOrderNumber ||
+            order.quoteNumber ||
+            order.invoiceNumber ||
+            order.id,
+          subtitle: `${order.supplierName || 'Commande fournisseur'} · ${order.status}`,
+          href: '/orders',
+          type: 'Commande',
+        })
+      }
+    })
+
+    requests.forEach((request) => {
+      if (
+        matches(
+          request.id,
+          request.service,
+          request.status,
+          request.sourceLocation,
+          request.destinationLocation
+        )
+      ) {
+        results.push({
+          id: `request-${request.id}`,
+          title: request.id,
+          subtitle: `${request.service} · ${request.status}`,
+          href: '/requests',
+          type: 'Réquisition',
+        })
+      }
+    })
+
+    inventories.forEach((inventory) => {
+      if (
+        matches(
+          inventory.id,
+          inventory.name,
+          inventory.type,
+          inventory.inventoryScope,
+          inventory.location,
+          ...(inventory.locations || [])
+        )
+      ) {
+        results.push({
+          id: `inventory-${inventory.id}`,
+          title: inventory.name || inventory.id,
+          subtitle: `${inventory.type} · ${inventory.location || inventory.locations?.join(', ') || 'Tous lieux'}`,
+          href: '/inventory',
+          type: 'Inventaire',
+        })
+      }
+    })
+
+    movements.forEach((movement) => {
+      if (
+        matches(
+          movement.id,
+          movement.referenceId,
+          movement.productName,
+          movement.internalRef,
+          movement.fromLocation,
+          movement.toLocation,
+          movement.note,
+          movement.supplierName,
+          movement.quoteNumber,
+          movement.purchaseOrderNumber,
+          movement.invoiceNumber
+        )
+      ) {
+        const isQuickEntry =
+          movement.type === 'ENTREE_PRODUIT' &&
+          Boolean(movement.referenceId?.startsWith('ER-'))
+
+        results.push({
+          id: `movement-${movement.id}`,
+          title:
+            isQuickEntry && movement.referenceId
+              ? movement.referenceId
+              : movement.productName,
+          subtitle: [
+            movement.productName,
+            movement.fromLocation,
+            movement.toLocation,
+          ]
+            .filter(Boolean)
+            .join(' · '),
+          href: '/movements',
+          type: isQuickEntry ? 'Entrée rapide' : 'Mouvement',
+        })
+      }
+    })
+
+    const unique = new Map<string, GlobalSearchResult>()
+
+    results.forEach((result) => {
+      const key =
+        result.type === 'Entrée rapide'
+          ? `${result.type}-${result.title}`
+          : result.id
+
+      if (!unique.has(key)) unique.set(key, result)
+    })
+
+    return Array.from(unique.values()).slice(0, 12)
+  }, [
+    globalSearch,
+    products,
+    orders,
+    requests,
+    inventories,
+    movements,
+  ])
+
+  const openSearchResult = (result: GlobalSearchResult) => {
+    setSearchOpen(false)
+    setGlobalSearch('')
+    router.push(result.href)
+  }
 
   return (
     <div className={rootClass}>
@@ -413,6 +665,93 @@ export function AppShell({
                 Gestion des stocks
               </strong>
             </div>
+          </div>
+
+          <div className="nskGlobalSearch">
+            <span
+              className="nskGlobalSearchIcon"
+              aria-hidden="true"
+            >
+              ⌕
+            </span>
+
+            <input
+              value={globalSearch}
+              onChange={(event) => {
+                setGlobalSearch(event.target.value)
+                setSearchOpen(true)
+              }}
+              onFocus={() => setSearchOpen(true)}
+              onKeyDown={(event) => {
+                if (
+                  event.key === 'Enter' &&
+                  globalSearchResults[0]
+                ) {
+                  openSearchResult(globalSearchResults[0])
+                }
+
+                if (event.key === 'Escape') {
+                  setSearchOpen(false)
+                }
+              }}
+              placeholder="Rechercher produit, lieu, ER, commande..."
+              aria-label="Recherche globale NukuStock"
+            />
+
+            {globalSearch && (
+              <button
+                type="button"
+                className="nskGlobalSearchClear"
+                aria-label="Effacer la recherche"
+                onClick={() => {
+                  setGlobalSearch('')
+                  setSearchOpen(false)
+                }}
+              >
+                ×
+              </button>
+            )}
+
+            {searchOpen && globalSearch.trim().length >= 2 && (
+              <div className="nskGlobalSearchResults">
+                {globalSearchResults.length > 0 ? (
+                  globalSearchResults.map((result) => (
+                    <button
+                      type="button"
+                      key={result.id}
+                      onMouseDown={(event) =>
+                        event.preventDefault()
+                      }
+                      onClick={() =>
+                        openSearchResult(result)
+                      }
+                    >
+                      <span className="nskSearchType">
+                        {result.type}
+                      </span>
+
+                      <span className="nskSearchText">
+                        <strong>{result.title}</strong>
+                        <small>
+                          {result.subtitle || 'Ouvrir'}
+                        </small>
+                      </span>
+
+                      <span
+                        className="nskSearchArrow"
+                        aria-hidden="true"
+                      >
+                        →
+                      </span>
+                    </button>
+                  ))
+                ) : (
+                  <div className="nskSearchEmpty">
+                    Aucun résultat pour « {globalSearch} »
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="nskTopbarRight">
@@ -855,6 +1194,140 @@ export function AppShell({
           gap: 12px;
         }
 
+        .nskGlobalSearch {
+          position: relative;
+          width: min(430px, 36vw);
+          min-width: 220px;
+        }
+
+        .nskGlobalSearch input {
+          width: 100%;
+          height: 44px;
+          padding: 0 42px 0 38px;
+          border: 1px solid #dfe3ea;
+          border-radius: 12px;
+          outline: none;
+          background: #fff;
+          color: #101828;
+          font-size: 12px;
+          font-weight: 600;
+        }
+
+        .nskGlobalSearch input:focus {
+          border-color: #98a2b3;
+          box-shadow: 0 0 0 3px rgba(152,162,179,.12);
+        }
+
+        .nskGlobalSearchIcon {
+          position: absolute;
+          left: 13px;
+          top: 50%;
+          z-index: 2;
+          transform: translateY(-50%);
+          color: #667085;
+          font-size: 18px;
+          pointer-events: none;
+        }
+
+        .nskGlobalSearchClear {
+          position: absolute;
+          right: 9px;
+          top: 50%;
+          z-index: 3;
+          width: 28px;
+          height: 28px;
+          transform: translateY(-50%);
+          border: 0;
+          border-radius: 8px;
+          background: #f2f4f7;
+          color: #667085;
+          cursor: pointer;
+          font-size: 18px;
+        }
+
+        .nskGlobalSearchResults {
+          position: absolute;
+          top: calc(100% + 8px);
+          left: 0;
+          right: 0;
+          z-index: 300;
+          max-height: min(520px, 70vh);
+          overflow-y: auto;
+          padding: 7px;
+          border: 1px solid #dfe3ea;
+          border-radius: 14px;
+          background: #fff;
+          box-shadow: 0 20px 55px rgba(15,23,42,.18);
+        }
+
+        .nskGlobalSearchResults > button {
+          width: 100%;
+          min-height: 58px;
+          padding: 8px 10px;
+          border: 0;
+          border-radius: 10px;
+          display: grid;
+          grid-template-columns: 92px minmax(0,1fr) 20px;
+          align-items: center;
+          gap: 9px;
+          background: transparent;
+          color: #101828;
+          text-align: left;
+          cursor: pointer;
+        }
+
+        .nskGlobalSearchResults > button:hover {
+          background: #f4f6f9;
+        }
+
+        .nskSearchType {
+          padding: 5px 7px;
+          border-radius: 8px;
+          background: #eef2f6;
+          color: #475467;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          text-align: center;
+          font-size: 9px;
+          font-weight: 900;
+          text-transform: uppercase;
+        }
+
+        .nskSearchText {
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+        }
+
+        .nskSearchText strong {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          font-size: 12px;
+        }
+
+        .nskSearchText small {
+          margin-top: 3px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          color: #667085;
+          font-size: 10px;
+        }
+
+        .nskSearchArrow {
+          color: #98a2b3;
+          font-size: 15px;
+        }
+
+        .nskSearchEmpty {
+          padding: 18px 12px;
+          color: #667085;
+          text-align: center;
+          font-size: 11px;
+        }
+
         .nskTopbarTitle {
           display: flex;
           flex-direction: column;
@@ -1041,6 +1514,11 @@ export function AppShell({
           place-items: center;
         }
 
+        .view-tablet .nskGlobalSearch {
+          width: min(360px, 42vw);
+          min-width: 190px;
+        }
+
         .view-tablet .nskTabletOverlay {
           display: block;
           position: fixed;
@@ -1099,6 +1577,66 @@ export function AppShell({
 
         .view-phone .nskTopbarRight {
           gap: 5px;
+        }
+
+        .view-phone .nskGlobalSearch {
+          position: static;
+          width: auto;
+          min-width: 0;
+        }
+
+        .view-phone .nskGlobalSearch input {
+          width: 42px;
+          height: 38px;
+          padding: 0;
+          color: transparent;
+          cursor: pointer;
+        }
+
+        .view-phone .nskGlobalSearch input::placeholder {
+          color: transparent;
+        }
+
+        .view-phone .nskGlobalSearchIcon {
+          left: auto;
+          right: 0;
+          width: 42px;
+          text-align: center;
+        }
+
+        .view-phone .nskGlobalSearch:focus-within {
+          position: fixed;
+          inset: 8px 8px auto 8px;
+          z-index: 400;
+          width: auto;
+        }
+
+        .view-phone .nskGlobalSearch:focus-within input {
+          width: 100%;
+          height: 46px;
+          padding: 0 42px 0 38px;
+          color: #101828;
+          cursor: text;
+          box-shadow: 0 12px 35px rgba(15,23,42,.18);
+        }
+
+        .view-phone .nskGlobalSearch:focus-within input::placeholder {
+          color: #98a2b3;
+        }
+
+        .view-phone .nskGlobalSearch:focus-within .nskGlobalSearchIcon {
+          left: 13px;
+          right: auto;
+          width: auto;
+        }
+
+        .view-phone .nskGlobalSearchResults {
+          top: calc(100% + 7px);
+          max-height: calc(100dvh - 80px);
+        }
+
+        .view-phone .nskGlobalSearchResults > button {
+          grid-template-columns: 76px minmax(0,1fr) 16px;
         }
 
         .view-phone .nskViewSelectorButton {

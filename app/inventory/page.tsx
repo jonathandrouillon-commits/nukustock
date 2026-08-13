@@ -6,11 +6,23 @@ import { useInventories, useMasterData, useProducts } from '@/lib/store'
 import QRCode from 'qrcode'
 import { QRCodeSVG } from 'qrcode.react'
 import { ColumnVisibility, useColumnVisibility } from '@/components/column-visibility'
+import jsQR from 'jsqr'
+
+type InventoryPurpose =
+  | 'Stock initial'
+  | 'Contrôle'
+  | 'Séjour'
+
+type InventoryEntryMode =
+  | 'Saisie classique'
+  | 'Scan QR'
 
 type ActiveInventory = {
   id: string
   name: string
   type: string
+  purpose: InventoryPurpose
+  entryMode: InventoryEntryMode
   date: string
   stayStartDate: string
   stayEndDate: string
@@ -71,6 +83,7 @@ const DEFAULT_INVENTORY_PRINT_COLUMNS: InventoryPrintColumnKey[] = [
 
 const INVENTORY_SCREEN_COLUMNS = [
   { key: 'reference', label: 'Référence' },
+  { key: 'photo', label: 'Photo' },
   { key: 'qrProduct', label: 'QR Produit', qr: true },
   { key: 'product', label: 'Produit' },
   { key: 'category', label: 'Catégorie' },
@@ -89,6 +102,7 @@ const INVENTORY_SCREEN_COLUMNS = [
 
 const INVENTORY_SCREEN_ESSENTIAL = [
   'reference',
+  'photo',
   'qrProduct',
   'product',
   'location',
@@ -214,8 +228,15 @@ const isProductInScope = (
   )
 }
 
+function formatQty(value: number) {
+  return Number((Number(value) || 0).toFixed(2)).toLocaleString('fr-FR', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })
+}
+
 export default function Inventory() {
-  const { items: products } = useProducts()
+  const { items: products, save: saveProducts } = useProducts()
   const { items: history, save: saveHistory } = useInventories()
   const { items: masterData } = useMasterData()
 
@@ -246,6 +267,11 @@ export default function Inventory() {
   const [createOpen, setCreateOpen] = useState(false)
   const [newName, setNewName] = useState('')
   const [newType, setNewType] = useState("Début d’exploitation")
+  const [newPurpose, setNewPurpose] =
+    useState<InventoryPurpose>('Stock initial')
+
+  const [newEntryMode, setNewEntryMode] =
+    useState<InventoryEntryMode>('Saisie classique')
   const [newScope, setNewScope] =
     useState<InventoryScope>('Tous les inventaires')
   const [newDate, setNewDate] = useState(
@@ -266,6 +292,15 @@ export default function Inventory() {
     useState<Record<string, boolean>>({})
 
   const [msg, setMsg] = useState('')
+
+  const [closeOpen, setCloseOpen] = useState(false)
+  const [applyCountToStock, setApplyCountToStock] = useState(false)
+
+  const [scanLocation, setScanLocation] = useState('')
+  const [scanProductId, setScanProductId] = useState('')
+  const [scanQuantity, setScanQuantity] = useState(0)
+  const [scanMessage, setScanMessage] = useState('')
+  const [scanBusy, setScanBusy] = useState(false)
 
   const inventoryDisplay = useColumnVisibility(
     'nukustock_display_inventory_v1',
@@ -477,28 +512,40 @@ export default function Inventory() {
   ])
 
   const createInventory = () => {
-    if (!stayStartDate || !stayEndDate) {
+    if (
+      newPurpose === 'Séjour' &&
+      (!stayStartDate || !stayEndDate)
+    ) {
       alert('Renseigne les dates de début et de fin du séjour.')
       return
     }
 
     if (
+      newPurpose === 'Séjour' &&
       new Date(`${stayEndDate}T12:00:00`).getTime() <
-      new Date(`${stayStartDate}T12:00:00`).getTime()
+        new Date(`${stayStartDate}T12:00:00`).getTime()
     ) {
       alert('La date de fin du séjour doit être postérieure ou égale à la date de début.')
       return
     }
 
-    if (guestCount <= 0) {
+    if (newPurpose === 'Séjour' && guestCount <= 0) {
       alert("Le nombre d'invités doit être supérieur à 0.")
       return
     }
 
-    const durationDays = calculateStayDays(
-      stayStartDate,
-      stayEndDate
-    )
+    const effectiveStayStart =
+      newPurpose === 'Séjour' ? stayStartDate : newDate
+    const effectiveStayEnd =
+      newPurpose === 'Séjour' ? stayEndDate : newDate
+
+    const durationDays =
+      newPurpose === 'Séjour'
+        ? calculateStayDays(
+            effectiveStayStart,
+            effectiveStayEnd
+          )
+        : 1
 
     const id = `INV-${Date.now()
       .toString()
@@ -508,19 +555,26 @@ export default function Inventory() {
       id,
       name:
         newName.trim() ||
-        `${newScope} - ${newType} - Inventaire global`,
+        `${newScope} - ${newPurpose} - ${newType}`,
       type: newType,
+      purpose: newPurpose,
+      entryMode: newEntryMode,
       inventoryScope: newScope,
       date: newDate,
-      stayStartDate,
-      stayEndDate,
-      guestCount,
+      stayStartDate: effectiveStayStart,
+      stayEndDate: effectiveStayEnd,
+      guestCount:
+        newPurpose === 'Séjour' ? guestCount : 1,
       durationDays,
       createdAt: new Date().toISOString(),
     }
 
     setActiveInventory(inventory)
     setCounted({})
+    setScanLocation('')
+    setScanProductId('')
+    setScanQuantity(0)
+    setScanMessage('')
 
     const defaultExpanded: Record<string, boolean> = {}
 
@@ -547,10 +601,136 @@ export default function Inventory() {
     setActiveInventory(null)
     setCounted({})
     setExpandedLocations({})
+    setScanLocation('')
+    setScanProductId('')
+    setScanQuantity(0)
+    setScanMessage('')
     setMsg('Inventaire en cours annulé.')
   }
 
-  const closeInventory = () => {
+  const adjustLocationQuantity = (
+    product: any,
+    location: string,
+    targetQty: number,
+    inventoryId: string
+  ) => {
+    const safeTarget = Math.max(0, Number(targetQty) || 0)
+
+    const locationLots = product.lots
+      .map((lot: any, index: number) => ({ lot, index }))
+      .filter(({ lot }: any) => lot.location === location)
+
+    const currentQty = locationLots.reduce(
+      (sum: number, { lot }: any) =>
+        sum + Math.max(0, Number(lot.quantity) || 0),
+      0
+    )
+
+    if (currentQty === safeTarget) {
+      return product
+    }
+
+    const nextLots = product.lots.map((lot: any) => ({ ...lot }))
+
+    if (locationLots.length === 0) {
+      if (safeTarget <= 0) return product
+
+      nextLots.push({
+        id: crypto.randomUUID(),
+        lotNumber: `INV-${inventoryId}`,
+        expiry: '',
+        location,
+        quantity: safeTarget,
+      })
+
+      return {
+        ...product,
+        lots: nextLots,
+      }
+    }
+
+    if (safeTarget > currentQty) {
+      const difference = safeTarget - currentQty
+
+      const preferred = [...locationLots].sort((a: any, b: any) => {
+        const aExpiry = a.lot.expiry || '9999-12-31'
+        const bExpiry = b.lot.expiry || '9999-12-31'
+        return aExpiry.localeCompare(bExpiry)
+      })[0]
+
+      nextLots[preferred.index] = {
+        ...nextLots[preferred.index],
+        quantity:
+          Math.max(
+            0,
+            Number(nextLots[preferred.index].quantity) || 0
+          ) + difference,
+      }
+
+      return {
+        ...product,
+        lots: nextLots,
+      }
+    }
+
+    let toRemove = currentQty - safeTarget
+
+    const ordered = [...locationLots].sort((a: any, b: any) => {
+      const aExpiry = a.lot.expiry || '9999-12-31'
+      const bExpiry = b.lot.expiry || '9999-12-31'
+      return aExpiry.localeCompare(bExpiry)
+    })
+
+    ordered.forEach(({ index }: any) => {
+      if (toRemove <= 0) return
+
+      const available = Math.max(
+        0,
+        Number(nextLots[index].quantity) || 0
+      )
+      const reduction = Math.min(available, toRemove)
+
+      nextLots[index] = {
+        ...nextLots[index],
+        quantity: available - reduction,
+      }
+
+      toRemove -= reduction
+    })
+
+    return {
+      ...product,
+      lots: nextLots,
+    }
+  }
+
+  const applyInventoryToStock = () => {
+    if (!activeInventory) return
+
+    let nextProducts = products.map((product) => ({
+      ...product,
+      lots: product.lots.map((lot) => ({ ...lot })),
+    }))
+
+    locationsWithStock.forEach((group) => {
+      group.rows.forEach((row) => {
+        nextProducts = nextProducts.map((product) =>
+          product.id === row.product.id
+            ? adjustLocationQuantity(
+                product,
+                group.location,
+                row.realQty,
+                activeInventory.id
+              )
+            : product
+        )
+      })
+    })
+
+    saveProducts(nextProducts)
+  }
+
+  const finalizeInventory = () => {
     if (!activeInventory) return
 
     const lines = locationsWithStock.flatMap((group) =>
@@ -565,11 +745,15 @@ export default function Inventory() {
       }))
     )
 
+    if (applyCountToStock) {
+      applyInventoryToStock()
+    }
+
     saveHistory([
       {
         id: activeInventory.id,
         name: activeInventory.name,
-        type: activeInventory.type,
+        type: `${activeInventory.purpose} · ${activeInventory.type}`,
         inventoryScope: activeInventory.inventoryScope,
         location: 'GLOBAL',
         locations: locationsWithStock.map(
@@ -588,12 +772,29 @@ export default function Inventory() {
     ])
 
     setMsg(
-      `Inventaire global ${activeInventory.id} clôturé et enregistré.`
+      applyCountToStock
+        ? `Inventaire ${activeInventory.id} clôturé. Le comptage réel est maintenant appliqué au stock.`
+        : `Inventaire ${activeInventory.id} clôturé et enregistré sans modification du stock.`
     )
 
+    setCloseOpen(false)
+    setApplyCountToStock(false)
     setActiveInventory(null)
     setCounted({})
     setExpandedLocations({})
+    setScanLocation('')
+    setScanProductId('')
+    setScanQuantity(0)
+    setScanMessage('')
+  }
+
+  const closeInventory = () => {
+    if (!activeInventory) return
+
+    setApplyCountToStock(
+      activeInventory.purpose === 'Stock initial'
+    )
+    setCloseOpen(true)
   }
 
   const reopenHistoricalInventory = (
@@ -624,6 +825,8 @@ export default function Inventory() {
         .slice(-6)}`,
       name: `Recomptage ${inventory.id}`,
       type: inventory.type,
+      purpose: 'Contrôle',
+      entryMode: 'Saisie classique',
       inventoryScope:
         (inventory.inventoryScope as InventoryScope | undefined) ||
         'Tous les inventaires',
@@ -911,6 +1114,8 @@ export default function Inventory() {
             </div>
             <div class="meta">
               ${activeInventory.id} ·
+              ${activeInventory.purpose} ·
+              ${activeInventory.entryMode} ·
               ${activeInventory.inventoryScope} ·
               ${activeInventory.type} ·
               ${new Date(
@@ -931,8 +1136,8 @@ export default function Inventory() {
           </div>
 
           <div class="summary">
-            <div><strong>Théorique :</strong> ${globalTheoretical}</div>
-            <div><strong>Réel :</strong> ${globalReal}</div>
+            <div><strong>Théorique :</strong> ${formatQty(globalTheoretical)}</div>
+            <div><strong>Réel :</strong> ${formatQty(globalReal)}</div>
             <div><strong>Consommation :</strong> ${globalDiff}</div>
             <div><strong>Valeur :</strong> ${globalValue.toLocaleString('fr-FR')} XPF</div>
           </div>
@@ -951,6 +1156,273 @@ export default function Inventory() {
 
     printWindow.document.close()
     setPrintColumnsOpen(false)
+  }
+
+
+  const parseNukuStockQr = (rawValue: string) => {
+    const raw = rawValue.trim()
+
+    if (!raw) {
+      return null
+    }
+
+    const parts = raw.split('|')
+
+    if (
+      parts.length >= 3 &&
+      parts[0].toUpperCase() === 'NUKUSTOCK'
+    ) {
+      return {
+        type: parts[1].toUpperCase(),
+        value: parts.slice(2).join('|').trim(),
+      }
+    }
+
+    // Compatibilité avec les premiers QR Produit contenant uniquement
+    // la référence interne.
+    const product = products.find(
+      (item) =>
+        item.internalRef?.trim().toLowerCase() ===
+        raw.toLowerCase()
+    )
+
+    if (product) {
+      return {
+        type: 'PRODUCT',
+        value: raw,
+      }
+    }
+
+    return null
+  }
+
+  const applyScannedQrValue = (rawValue: string) => {
+    if (!activeInventory) return
+
+    const parsed = parseNukuStockQr(rawValue)
+
+    if (!parsed) {
+      setScanMessage(
+        'QR non reconnu. Utilise un QR NukuStock de lieu ou de produit.'
+      )
+      return
+    }
+
+    if (parsed.type === 'LOCATION') {
+      const matchedLocation = locations.find(
+        (location) =>
+          location.trim().toLowerCase() ===
+          parsed.value.toLowerCase()
+      )
+
+      if (!matchedLocation) {
+        setScanMessage(
+          `Lieu introuvable dans NukuStock : ${parsed.value}`
+        )
+        return
+      }
+
+      setScanLocation(matchedLocation)
+      setScanProductId('')
+      setScanQuantity(0)
+      setScanMessage(
+        `Lieu actif : ${matchedLocation}. Scanne maintenant un produit.`
+      )
+
+      setExpandedLocations((current) => ({
+        ...current,
+        [matchedLocation]: true,
+      }))
+
+      return
+    }
+
+    if (parsed.type === 'PRODUCT') {
+      if (!scanLocation) {
+        setScanMessage(
+          'Scanne d’abord le QR du lieu de stockage.'
+        )
+        return
+      }
+
+      const product = products.find(
+        (item) =>
+          item.internalRef?.trim().toLowerCase() ===
+            parsed.value.toLowerCase() ||
+          item.id === parsed.value
+      )
+
+      if (!product) {
+        setScanMessage(
+          `Produit introuvable : ${parsed.value}`
+        )
+        return
+      }
+
+      if (!isProductInScope(product, activeInventory.inventoryScope)) {
+        setScanMessage(
+          `${product.name} n’appartient pas au périmètre ${activeInventory.inventoryScope}.`
+        )
+        return
+      }
+
+      const existingKey = keyFor(
+        scanLocation,
+        product.id
+      )
+      const existingTheoretical = theoretical(
+        product.id,
+        scanLocation
+      )
+      const existingCount =
+        counted[existingKey] ?? existingTheoretical
+
+      setScanProductId(product.id)
+      setScanQuantity(existingCount)
+      setScanMessage(
+        `${product.name} sélectionné dans ${scanLocation}. Saisis la quantité réelle.`
+      )
+
+      return
+    }
+
+    setScanMessage(
+      `Ce QR (${parsed.type}) n’est pas utilisé pour le comptage. Scanne un QR Lieu ou Produit.`
+    )
+  }
+
+  const decodeQrPhoto = async (file?: File) => {
+    if (!file || !activeInventory) return
+
+    setScanBusy(true)
+    setScanMessage('Lecture du QR en cours…')
+
+    try {
+      const bitmap = await createImageBitmap(file)
+      const maxDimension = 1800
+      const ratio = Math.min(
+        1,
+        maxDimension /
+          Math.max(bitmap.width, bitmap.height)
+      )
+      const width = Math.max(
+        1,
+        Math.round(bitmap.width * ratio)
+      )
+      const height = Math.max(
+        1,
+        Math.round(bitmap.height * ratio)
+      )
+
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+
+      const context = canvas.getContext('2d')
+
+      if (!context) {
+        throw new Error(
+          'Canvas indisponible pour lire le QR.'
+        )
+      }
+
+      context.drawImage(
+        bitmap,
+        0,
+        0,
+        width,
+        height
+      )
+
+      const imageData = context.getImageData(
+        0,
+        0,
+        width,
+        height
+      )
+
+      const result = jsQR(
+        imageData.data,
+        imageData.width,
+        imageData.height,
+        {
+          inversionAttempts:
+            'attemptBoth',
+        }
+      )
+
+      bitmap.close()
+
+      if (!result?.data) {
+        setScanMessage(
+          'Aucun QR détecté sur la photo. Rapproche-toi du QR et reprends la photo.'
+        )
+        return
+      }
+
+      applyScannedQrValue(result.data)
+    } catch (error: any) {
+      setScanMessage(
+        `Impossible de lire cette photo : ${
+          error?.message || 'erreur inconnue'
+        }`
+      )
+    } finally {
+      setScanBusy(false)
+    }
+  }
+
+  const validateScannedProduct = () => {
+    if (!activeInventory) return
+
+    if (!scanLocation) {
+      setScanMessage(
+        'Scanne d’abord un lieu de stockage.'
+      )
+      return
+    }
+
+    if (!scanProductId) {
+      setScanMessage(
+        'Scanne d’abord un produit.'
+      )
+      return
+    }
+
+    const product = products.find(
+      (item) => item.id === scanProductId
+    )
+
+    if (!product) {
+      setScanMessage('Produit introuvable.')
+      return
+    }
+
+    const quantity = Math.max(
+      0,
+      Number(scanQuantity) || 0
+    )
+
+    setCounted((current) => ({
+      ...current,
+      [keyFor(
+        scanLocation,
+        scanProductId
+      )]: quantity,
+    }))
+
+    setExpandedLocations((current) => ({
+      ...current,
+      [scanLocation]: true,
+    }))
+
+    setScanMessage(
+      `${product.name} : ${formatQty(
+        quantity
+      )} ${product.unit || ''} enregistré dans ${scanLocation}. Scanne le produit suivant.`
+    )
+    setScanProductId('')
+    setScanQuantity(0)
   }
 
   const labelStyle: CSSProperties = {
@@ -1011,6 +1483,8 @@ export default function Inventory() {
               setNewType(
                 "Début d’exploitation"
               )
+              setNewPurpose('Stock initial')
+              setNewEntryMode('Saisie classique')
               setNewScope('Tous les inventaires')
               const today = new Date()
                 .toISOString()
@@ -1126,6 +1600,8 @@ export default function Inventory() {
                   }}
                 >
                   {activeInventory.id} ·{' '}
+                  {activeInventory.purpose} ·{' '}
+                  {activeInventory.entryMode} ·{' '}
                   {activeInventory.inventoryScope} ·{' '}
                   {activeInventory.type} ·{' '}
                   {new Date(
@@ -1259,7 +1735,7 @@ export default function Inventory() {
                     fontWeight: 800,
                   }}
                 >
-                  {globalTheoretical}
+                  {formatQty(globalTheoretical)}
                 </div>
               </div>
 
@@ -1284,7 +1760,7 @@ export default function Inventory() {
                     fontWeight: 800,
                   }}
                 >
-                  {globalReal}
+                  {formatQty(globalReal)}
                 </div>
               </div>
 
@@ -1382,6 +1858,247 @@ export default function Inventory() {
               </div>
             </div>
           </Card>
+
+          {activeInventory.entryMode === 'Scan QR' && (
+            <Card>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent:
+                    'space-between',
+                  alignItems: 'flex-start',
+                  gap: 16,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: '#667085',
+                      fontWeight: 800,
+                      textTransform: 'uppercase',
+                      letterSpacing: '.06em',
+                    }}
+                  >
+                    Comptage par QR
+                  </div>
+
+                  <h2
+                    style={{
+                      margin: '4px 0 0',
+                    }}
+                  >
+                    {scanLocation
+                      ? `Lieu actif : ${scanLocation}`
+                      : 'Commence par scanner un lieu'}
+                  </h2>
+                </div>
+
+                <button
+                  className="button secondary small"
+                  type="button"
+                  onClick={() => {
+                    setScanLocation('')
+                    setScanProductId('')
+                    setScanQuantity(0)
+                    setScanMessage(
+                      'Lieu réinitialisé. Scanne un nouveau QR de lieu.'
+                    )
+                  }}
+                >
+                  Changer de lieu
+                </button>
+              </div>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns:
+                    'repeat(auto-fit,minmax(220px,1fr))',
+                  gap: 14,
+                  marginTop: 18,
+                }}
+              >
+                <label
+                  style={{
+                    minHeight: 120,
+                    padding: 18,
+                    border:
+                      '2px dashed #cbd5e1',
+                    borderRadius: 14,
+                    display: 'grid',
+                    placeItems: 'center',
+                    textAlign: 'center',
+                    cursor: scanBusy
+                      ? 'wait'
+                      : 'pointer',
+                    background: '#f8fafc',
+                  }}
+                >
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    disabled={scanBusy}
+                    style={{ display: 'none' }}
+                    onChange={async (event) => {
+                      const file =
+                        event.target.files?.[0]
+                      await decodeQrPhoto(file)
+                      event.currentTarget.value = ''
+                    }}
+                  />
+
+                  <span>
+                    <strong
+                      style={{
+                        display: 'block',
+                        fontSize: 15,
+                      }}
+                    >
+                      {scanBusy
+                        ? 'Lecture…'
+                        : 'Prendre en photo un QR'}
+                    </strong>
+
+                    <span
+                      style={{
+                        display: 'block',
+                        marginTop: 6,
+                        color: '#667085',
+                        fontSize: 12,
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      QR Lieu d&apos;abord, puis QR Produit.
+                    </span>
+                  </span>
+                </label>
+
+                <div
+                  style={{
+                    padding: 16,
+                    borderRadius: 14,
+                    border:
+                      '1px solid #e5e7eb',
+                    background: '#fff',
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: '#667085',
+                      fontWeight: 800,
+                    }}
+                  >
+                    PRODUIT SCANNÉ
+                  </div>
+
+                  {scanProductId ? (
+                    <>
+                      <div
+                        style={{
+                          marginTop: 7,
+                          fontSize: 16,
+                          fontWeight: 800,
+                        }}
+                      >
+                        {
+                          products.find(
+                            (item) =>
+                              item.id ===
+                              scanProductId
+                          )?.name
+                        }
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop: 12,
+                        }}
+                      >
+                        <label
+                          style={{
+                            display: 'block',
+                            marginBottom: 6,
+                            fontSize: 12,
+                            fontWeight: 700,
+                          }}
+                        >
+                          Quantité réelle
+                        </label>
+
+                        <input
+                          className="input"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={scanQuantity}
+                          onChange={(event) =>
+                            setScanQuantity(
+                              Math.max(
+                                0,
+                                Number(
+                                  event.target.value
+                                ) || 0
+                              )
+                            )
+                          }
+                          style={{
+                            width: '100%',
+                          }}
+                        />
+                      </div>
+
+                      <button
+                        className="button"
+                        type="button"
+                        onClick={
+                          validateScannedProduct
+                        }
+                        style={{
+                          width: '100%',
+                          marginTop: 12,
+                        }}
+                      >
+                        Valider ce produit
+                      </button>
+                    </>
+                  ) : (
+                    <div
+                      style={{
+                        marginTop: 8,
+                        color: '#98a2b3',
+                        fontSize: 12,
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      Aucun produit sélectionné. Après avoir scanné un lieu, photographie le QR du produit à compter.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {scanMessage && (
+                <div
+                  style={{
+                    marginTop: 14,
+                    padding: 12,
+                    borderRadius: 10,
+                    background:
+                      'rgba(59,130,246,.08)',
+                    border:
+                      '1px solid rgba(59,130,246,.18)',
+                    fontSize: 12,
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {scanMessage}
+                </div>
+              )}
+            </Card>
+          )}
 
           <div
             style={{
@@ -1543,6 +2260,7 @@ export default function Inventory() {
                           <thead>
                             <tr>
                               {inventoryDisplay.isVisible('reference') && <th>Référence</th>}
+                              {inventoryDisplay.isVisible('photo') && <th>Photo</th>}
                               {inventoryDisplay.isVisible('qrProduct') && <th>QR Produit</th>}
                               {inventoryDisplay.isVisible('product') && <th>Produit</th>}
                               {inventoryDisplay.isVisible('category') && <th>Catégorie</th>}
@@ -1585,6 +2303,47 @@ export default function Inventory() {
                                   <tr key={key}>
                                     {inventoryDisplay.isVisible('reference') && (
                                       <td><strong>{product.internalRef || '—'}</strong></td>
+                                    )}
+                                    {inventoryDisplay.isVisible('photo') && (
+                                      <td>
+                                        <div
+                                          style={{
+                                            width: 58,
+                                            height: 58,
+                                            borderRadius: 9,
+                                            background: '#fff',
+                                            border: '1px solid #e5e7eb',
+                                            display: 'grid',
+                                            placeItems: 'center',
+                                            overflow: 'hidden',
+                                            padding: 4,
+                                          }}
+                                        >
+                                          {product.photo ? (
+                                            <img
+                                              src={product.photo}
+                                              alt={product.name || 'Produit'}
+                                              loading="lazy"
+                                              style={{
+                                                width: '100%',
+                                                height: '100%',
+                                                objectFit: 'contain',
+                                                display: 'block',
+                                              }}
+                                            />
+                                          ) : (
+                                            <span
+                                              style={{
+                                                fontSize: 8,
+                                                color: '#98a2b3',
+                                                fontWeight: 800,
+                                              }}
+                                            >
+                                              PHOTO
+                                            </span>
+                                          )}
+                                        </div>
+                                      </td>
                                     )}
                                     {inventoryDisplay.isVisible('qrProduct') && (
                                       <td>
@@ -1647,7 +2406,7 @@ export default function Inventory() {
                                       </td>
                                     )}
                                     {inventoryDisplay.isVisible('theoretical') && (
-                                      <td>{theoreticalQty}</td>
+                                      <td>{formatQty(theoreticalQty)}</td>
                                     )}
                                     {inventoryDisplay.isVisible('real') && (
                                       <td>
@@ -1672,7 +2431,7 @@ export default function Inventory() {
                                     {inventoryDisplay.isVisible('consumption') && (
                                       <td>
                                         <Badge tone={diff === 0 ? 'good' : 'danger'}>
-                                          {diff > 0 ? '+' : ''}{diff}
+                                          {diff > 0 ? '+' : ''}{formatQty(diff)}
                                         </Badge>
                                       </td>
                                     )}
@@ -2106,6 +2865,153 @@ export default function Inventory() {
       )}
 
 
+
+      {closeOpen && activeInventory && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1200,
+            background: 'rgba(15,23,42,.68)',
+            display: 'grid',
+            placeItems: 'center',
+            padding: 18,
+          }}
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) {
+              setCloseOpen(false)
+            }
+          }}
+        >
+          <div
+            style={{
+              width: 'min(620px, 100%)',
+              background: '#111827',
+              color: '#fff',
+              borderRadius: 18,
+              padding: 24,
+              boxShadow:
+                '0 25px 80px rgba(0,0,0,.45)',
+            }}
+          >
+            <h2 style={{ margin: 0 }}>
+              Clôturer l&apos;inventaire
+            </h2>
+
+            <div
+              style={{
+                marginTop: 6,
+                color: '#aab4c3',
+                fontSize: 13,
+                lineHeight: 1.5,
+              }}
+            >
+              {activeInventory.id} · {activeInventory.purpose}
+            </div>
+
+            <div
+              style={{
+                marginTop: 18,
+                padding: 14,
+                borderRadius: 12,
+                background: 'rgba(255,255,255,.05)',
+                border:
+                  '1px solid rgba(255,255,255,.10)',
+              }}
+            >
+              <label
+                style={{
+                  display: 'flex',
+                  gap: 12,
+                  alignItems: 'flex-start',
+                  cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={applyCountToStock}
+                  onChange={(event) =>
+                    setApplyCountToStock(
+                      event.target.checked
+                    )
+                  }
+                  style={{ marginTop: 3 }}
+                />
+
+                <span>
+                  <strong
+                    style={{
+                      display: 'block',
+                      fontSize: 14,
+                    }}
+                  >
+                    Utiliser le comptage réel comme nouveau stock
+                  </strong>
+
+                  <span
+                    style={{
+                      display: 'block',
+                      marginTop: 5,
+                      color: '#aab4c3',
+                      fontSize: 12,
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    Si cette option est cochée, les quantités comptées remplaceront les quantités théoriques par lieu. Si elle est décochée, l&apos;inventaire sera uniquement enregistré dans l&apos;historique.
+                  </span>
+                </span>
+              </label>
+            </div>
+
+            {applyCountToStock && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: 12,
+                  borderRadius: 10,
+                  background: 'rgba(245,158,11,.12)',
+                  border: '1px solid rgba(245,158,11,.30)',
+                  color: '#fde68a',
+                  fontSize: 12,
+                  lineHeight: 1.45,
+                }}
+              >
+                Attention : cette action modifiera réellement le stock de NukuStock après validation.
+              </div>
+            )}
+
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: 10,
+                marginTop: 22,
+              }}
+            >
+              <button
+                className="button secondary"
+                type="button"
+                onClick={() =>
+                  setCloseOpen(false)
+                }
+              >
+                Annuler
+              </button>
+
+              <button
+                className="button"
+                type="button"
+                onClick={finalizeInventory}
+              >
+                {applyCountToStock
+                  ? 'Valider et mettre le stock à jour'
+                  : 'Clôturer sans modifier le stock'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {printColumnsOpen && activeInventory && (
         <div
           style={{
@@ -2363,6 +3269,117 @@ export default function Inventory() {
                   }
                   placeholder="Ex. Inventaire ouverture août"
                 />
+              </div>
+
+              <div
+                style={{
+                  gridColumn: '1 / -1',
+                }}
+              >
+                <label style={labelStyle}>
+                  Utilisation de l&apos;inventaire
+                </label>
+
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns:
+                      'repeat(auto-fit,minmax(160px,1fr))',
+                    gap: 10,
+                  }}
+                >
+                  {(
+                    [
+                      'Stock initial',
+                      'Contrôle',
+                      'Séjour',
+                    ] as InventoryPurpose[]
+                  ).map((purpose) => (
+                    <button
+                      key={purpose}
+                      type="button"
+                      className={
+                        newPurpose === purpose
+                          ? 'button'
+                          : 'button secondary'
+                      }
+                      onClick={() =>
+                        setNewPurpose(purpose)
+                      }
+                    >
+                      {purpose}
+                    </button>
+                  ))}
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 8,
+                    fontSize: 11,
+                    opacity: 0.68,
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {newPurpose === 'Stock initial'
+                    ? 'Le comptage peut devenir le stock réel de référence à la clôture.'
+                    : newPurpose === 'Contrôle'
+                    ? 'Mesure les écarts sans modifier le stock, sauf si tu choisis de les appliquer à la clôture.'
+                    : 'Calcule les consommations et ratios du séjour. Le comptage final peut être appliqué au stock à la clôture.'}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  gridColumn: '1 / -1',
+                }}
+              >
+                <label style={labelStyle}>
+                  Mode de saisie
+                </label>
+
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns:
+                      'repeat(2,minmax(0,1fr))',
+                    gap: 10,
+                  }}
+                >
+                  {(
+                    [
+                      'Saisie classique',
+                      'Scan QR',
+                    ] as InventoryEntryMode[]
+                  ).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={
+                        newEntryMode === mode
+                          ? 'button'
+                          : 'button secondary'
+                      }
+                      onClick={() =>
+                        setNewEntryMode(mode)
+                      }
+                    >
+                      {mode}
+                    </button>
+                  ))}
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 8,
+                    fontSize: 11,
+                    opacity: 0.68,
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {newEntryMode === 'Scan QR'
+                    ? 'Tu photographies d’abord le QR du lieu, puis le QR du produit. NukuStock affecte automatiquement le comptage au bon lieu.'
+                    : 'Le comptage reste organisé dans les tableaux classiques par lieu de stockage.'}
+                </div>
               </div>
 
               <div>

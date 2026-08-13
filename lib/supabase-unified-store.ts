@@ -371,63 +371,131 @@ async function syncMasterData(items: MasterDataItem[]) {
     error: remoteCategoryError,
   } = await supabase
     .from('product_categories')
-    .select('id')
+    .select('id, name, internal_ref')
 
   if (remoteCategoryError) {
     throw remoteCategoryError
   }
 
+  // Index des catégories déjà présentes dans Supabase.
+  // La comparaison se fait par nom normalisé pour éviter
+  // de recréer une catégorie déjà existante avec un autre ID.
+  const remoteCategoryByName =
+    new Map(
+      (remoteCategories || []).map(
+        (row: any) => [
+          String(row.name || '')
+            .trim()
+            .toLowerCase(),
+          row,
+        ]
+      )
+    )
+
+  // Correspondance entre l'ID local et l'ID réel Supabase.
+  // Elle est utilisée ensuite pour rattacher correctement
+  // les sous-catégories à leur catégorie.
+  const resolvedCategoryIdByLocalId =
+    new Map<string, string>()
+
   if (categories.length) {
-    const { error } = await supabase
-      .from('product_categories')
-      .upsert(
-        categories.map(
-          (item, index) => ({
-            id: item.id,
-            internal_ref: item.internalRef || null,
-            name: item.name.trim(),
+    const payload =
+      categories.map(
+        (item, index) => {
+          const normalizedName =
+            item.name
+              .trim()
+              .toLowerCase()
+
+          const existing: any =
+            remoteCategoryByName.get(
+              normalizedName
+            )
+
+          const resolvedId =
+            existing?.id ||
+            item.id
+
+          resolvedCategoryIdByLocalId.set(
+            item.id,
+            resolvedId
+          )
+
+          return {
+            id: resolvedId,
+            internal_ref:
+              item.internalRef ||
+              existing?.internal_ref ||
+              null,
+            name:
+              item.name.trim(),
             active:
               item.active !== false,
-            sort_order: index + 1,
+            sort_order:
+              index + 1,
             updated_at:
-              new Date().toISOString(),
-          })
-        ),
-        {
-          onConflict: 'id',
+              new Date()
+                .toISOString(),
+          }
         }
       )
 
-    if (error) throw error
+    const { error } =
+      await supabase
+        .from(
+          'product_categories'
+        )
+        .upsert(
+          payload,
+          {
+            onConflict: 'id',
+          }
+        )
+
+    if (error) {
+      throw error
+    }
   }
 
   const categoryIds =
     new Set(
       categories.map(
-        (item) => item.id
+        (item) =>
+          resolvedCategoryIdByLocalId.get(
+            item.id
+          ) ||
+          item.id
       )
     )
 
   const removedCategoryIds =
     (remoteCategories || [])
-      .map((row: any) => row.id)
+      .map(
+        (row: any) =>
+          row.id
+      )
       .filter(
         (id: string) =>
           !categoryIds.has(id)
       )
 
-  if (removedCategoryIds.length) {
-    // Le FK ON DELETE CASCADE supprime automatiquement
-    // les sous-catégories de ces catégories.
-    const { error } = await supabase
-      .from('product_categories')
-      .delete()
-      .in(
-        'id',
-        removedCategoryIds
-      )
+  if (
+    removedCategoryIds.length
+  ) {
+    const { error } =
+      await supabase
+        .from(
+          'product_categories'
+        )
+        .delete()
+        .in(
+          'id',
+          removedCategoryIds
+        )
 
-    if (error) throw error
+    if (error) {
+      throw error
+    }
   }
 
   // =========================================================
@@ -468,6 +536,9 @@ async function syncMasterData(items: MasterDataItem[]) {
           internal_ref:
             item.internalRef || null,
           category_id:
+            resolvedCategoryIdByLocalId.get(
+              item.parentId || ''
+            ) ||
             item.parentId,
           name:
             item.name.trim(),
