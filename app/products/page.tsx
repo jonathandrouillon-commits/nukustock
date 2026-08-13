@@ -8,9 +8,40 @@ import { useProducts, useSuppliers, useMasterData } from '@/lib/store'
 import { Product, Supplier, MasterDataItem } from '@/lib/types'
 import { supabase } from '@/lib/supabase'
 import { QRCodeSVG } from 'qrcode.react'
+import { ColumnVisibility, useColumnVisibility } from '@/components/column-visibility'
 
 
 const PRODUCT_REF_COUNTER_KEY = 'nukustock_product_ref_counters_v1'
+
+const PRODUCT_SCREEN_COLUMNS = [
+  { key: 'reference', label: 'Référence' },
+  { key: 'qrProduct', label: 'QR Produit', qr: true },
+  { key: 'product', label: 'Produit / Photo' },
+  { key: 'category', label: 'Catégorie' },
+  { key: 'qrCategory', label: 'QR Catégorie', qr: true },
+  { key: 'subcategory', label: 'Sous-catégorie' },
+  { key: 'qrSubcategory', label: 'QR Sous-catégorie', qr: true },
+  { key: 'type', label: 'Type' },
+  { key: 'stock', label: 'Stock' },
+  { key: 'expiry', label: 'DLUO / DLC' },
+  { key: 'locations', label: 'Lieux de stockage' },
+  { key: 'mini', label: 'Mini' },
+  { key: 'price', label: 'Prix' },
+  { key: 'actions', label: 'Actions' },
+]
+
+const PRODUCT_SCREEN_ESSENTIAL = [
+  'reference',
+  'qrProduct',
+  'product',
+  'category',
+  'subcategory',
+  'stock',
+  'expiry',
+  'locations',
+  'price',
+  'actions',
+]
 
 function cleanRefPart(value: string) {
   const cleaned = value
@@ -312,6 +343,11 @@ export default function Products() {
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState<Product>(emptyProduct)
   const [designationFocused, setDesignationFocused] = useState(false)
+
+  const productDisplay = useColumnVisibility(
+    'nukustock_display_products_v1',
+    PRODUCT_SCREEN_ESSENTIAL
+  )
 
   const [globalQuantity, setGlobalQuantity] = useState(0)
 
@@ -1375,6 +1411,13 @@ export default function Products() {
             flexWrap: 'wrap',
           }}
         >
+          <ColumnVisibility
+            columns={PRODUCT_SCREEN_COLUMNS}
+            visible={productDisplay.visible}
+            onChange={productDisplay.setVisible}
+            essential={PRODUCT_SCREEN_ESSENTIAL}
+          />
+
           <button
             className="button secondary"
             type="button"
@@ -1419,417 +1462,266 @@ export default function Products() {
 
       <Card>
         <div style={{ overflowX: 'auto' }}>
-          <div style={{ minWidth: 1370 }}>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns:
-                  '120px 76px minmax(220px,2fr) 120px 110px 185px 210px 80px 110px 100px',
-                gap: 12,
-                alignItems: 'center',
-                fontWeight: 700,
-                paddingBottom: 12,
-              }}
-            >
-              <div>Référence</div>
-              <div>QR</div>
-              <div>Produit</div>
-              <div>Type</div>
-              <div>Stock</div>
-              <div>DLUO / DLC</div>
-              <div>Lieux de stockage</div>
-              <div>Mini</div>
-              <div>Prix</div>
-              <div></div>
-            </div>
+          {(() => {
+            const cols = [
+              productDisplay.isVisible('reference') && '120px',
+              productDisplay.isVisible('qrProduct') && '76px',
+              productDisplay.isVisible('product') && 'minmax(230px,2fr)',
+              productDisplay.isVisible('category') && '145px',
+              productDisplay.isVisible('qrCategory') && '76px',
+              productDisplay.isVisible('subcategory') && '155px',
+              productDisplay.isVisible('qrSubcategory') && '76px',
+              productDisplay.isVisible('type') && '120px',
+              productDisplay.isVisible('stock') && '110px',
+              productDisplay.isVisible('expiry') && '185px',
+              productDisplay.isVisible('locations') && '210px',
+              productDisplay.isVisible('mini') && '80px',
+              productDisplay.isVisible('price') && '110px',
+              productDisplay.isVisible('actions') && '100px',
+            ].filter(Boolean).join(' ')
 
-            {shown.map((p) => {
-              const qty = p.lots.reduce(
-                (total, lot) => total + lot.quantity,
-                0
-              )
-
-              const expiryMap = new Map<string, number>()
-
-              p.lots.forEach((lot) => {
-                if (!lot.expiry) return
-
-                expiryMap.set(
-                  lot.expiry,
-                  (expiryMap.get(lot.expiry) || 0) + lot.quantity
-                )
-              })
-
-              const sortedExpiries = [...expiryMap.entries()].sort(
-                ([dateA], [dateB]) =>
-                  new Date(`${dateA}T00:00:00`).getTime() -
-                  new Date(`${dateB}T00:00:00`).getTime()
-              )
-
-              const visibleExpiries = sortedExpiries.slice(0, 3)
-              const remainingExpiryCount =
-                sortedExpiries.length - visibleExpiries.length
-
-              const locationMap = new Map<string, number>()
-
-              p.lots.forEach((lot) => {
-                if (!lot.location || lot.quantity <= 0) return
-
-                locationMap.set(
-                  lot.location,
-                  (locationMap.get(lot.location) || 0) + lot.quantity
-                )
-              })
-
-              const sortedLocations = [...locationMap.entries()].sort(
-                ([locationA], [locationB]) =>
-                  locationA.localeCompare(locationB, 'fr')
-              )
-
-              const visibleLocations = sortedLocations.slice(0, 4)
-              const remainingLocationCount =
-                sortedLocations.length - visibleLocations.length
-
-              return (
+            return (
+              <div style={{ minWidth: Math.max(900, productDisplay.visible.length * 105) }}>
                 <div
-                  key={p.id}
                   style={{
                     display: 'grid',
-                    gridTemplateColumns:
-                      '120px 76px minmax(220px,2fr) 120px 110px 185px 210px 80px 110px 100px',
+                    gridTemplateColumns: cols,
                     gap: 12,
                     alignItems: 'center',
-                    padding: '14px 0',
-                    borderTop: '1px solid rgba(255,255,255,.08)',
+                    fontWeight: 700,
+                    paddingBottom: 12,
                   }}
                 >
-                  <div>
-                    {p.internalRef ? (
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          minHeight: 28,
-                          padding: '4px 8px',
-                          borderRadius: 8,
-                          background: 'rgba(59,130,246,.12)',
-                          border: '1px solid rgba(59,130,246,.28)',
-                          fontSize: 11,
-                          fontWeight: 900,
-                          letterSpacing: '.04em',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {p.internalRef}
-                      </span>
-                    ) : (
-                      <span
-                        style={{
-                          fontSize: 10,
-                          color: '#f59e0b',
-                          fontWeight: 800,
-                        }}
-                      >
-                        À générer
-                      </span>
-                    )}
-                  </div>
+                  {productDisplay.isVisible('reference') && <div>Référence</div>}
+                  {productDisplay.isVisible('qrProduct') && <div>QR Produit</div>}
+                  {productDisplay.isVisible('product') && <div>Produit</div>}
+                  {productDisplay.isVisible('category') && <div>Catégorie</div>}
+                  {productDisplay.isVisible('qrCategory') && <div>QR Cat.</div>}
+                  {productDisplay.isVisible('subcategory') && <div>Sous-catégorie</div>}
+                  {productDisplay.isVisible('qrSubcategory') && <div>QR Sous-cat.</div>}
+                  {productDisplay.isVisible('type') && <div>Type</div>}
+                  {productDisplay.isVisible('stock') && <div>Stock</div>}
+                  {productDisplay.isVisible('expiry') && <div>DLUO / DLC</div>}
+                  {productDisplay.isVisible('locations') && <div>Lieux de stockage</div>}
+                  {productDisplay.isVisible('mini') && <div>Mini</div>}
+                  {productDisplay.isVisible('price') && <div>Prix</div>}
+                  {productDisplay.isVisible('actions') && <div></div>}
+                </div>
 
-                  <div
-                    title={
-                      p.internalRef
-                        ? `QR produit ${p.internalRef}`
-                        : 'Référence interne requise'
-                    }
-                    style={{
-                      width: 64,
-                      height: 64,
-                      borderRadius: 10,
-                      background: '#fff',
-                      border: '1px solid #e5e7eb',
-                      display: 'grid',
-                      placeItems: 'center',
-                      padding: 4,
-                    }}
-                  >
-                    {p.internalRef ? (
-                      <QRCodeSVG
-                        value={p.internalRef}
-                        size={54}
-                        level="M"
-                        marginSize={0}
-                        title={`NukuStock ${p.internalRef}`}
-                      />
-                    ) : (
-                      <span
-                        style={{
-                          fontSize: 9,
-                          color: '#667085',
-                          textAlign: 'center',
-                          fontWeight: 700,
-                        }}
-                      >
-                        SANS REF
-                      </span>
-                    )}
-                  </div>
+                {shown.map((p) => {
+                  const qty = p.lots.reduce((total, lot) => total + lot.quantity, 0)
+                  const expiryMap = new Map<string, number>()
+                  p.lots.forEach((lot) => {
+                    if (!lot.expiry) return
+                    expiryMap.set(lot.expiry, (expiryMap.get(lot.expiry) || 0) + lot.quantity)
+                  })
+                  const sortedExpiries = [...expiryMap.entries()].sort(
+                    ([dateA], [dateB]) =>
+                      new Date(`${dateA}T00:00:00`).getTime() -
+                      new Date(`${dateB}T00:00:00`).getTime()
+                  )
+                  const visibleExpiries = sortedExpiries.slice(0, 3)
+                  const remainingExpiryCount = sortedExpiries.length - visibleExpiries.length
 
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      minWidth: 0,
-                    }}
-                  >
+                  const locationMap = new Map<string, number>()
+                  p.lots.forEach((lot) => {
+                    if (!lot.location || lot.quantity <= 0) return
+                    locationMap.set(
+                      lot.location,
+                      (locationMap.get(lot.location) || 0) + lot.quantity
+                    )
+                  })
+                  const sortedLocations = [...locationMap.entries()].sort(
+                    ([a], [b]) => a.localeCompare(b, 'fr')
+                  )
+                  const visibleLocations = sortedLocations.slice(0, 4)
+                  const remainingLocationCount = sortedLocations.length - visibleLocations.length
+
+                  const qrBox = (value: string) => (
                     <div
                       style={{
-                        width: 44,
-                        height: 44,
+                        width: 64,
+                        height: 64,
                         borderRadius: 10,
-                        overflow: 'hidden',
-                        background: 'rgba(255,255,255,.05)',
-                        border: '1px solid rgba(255,255,255,.08)',
-                        flexShrink: 0,
+                        background: '#fff',
+                        border: '1px solid #e5e7eb',
                         display: 'grid',
                         placeItems: 'center',
+                        padding: 4,
                       }}
                     >
-                      {p.photo ? (
-                        <img
-                          src={p.photo}
-                          alt={p.name}
-                          style={{
-                            width: '100%',
-                            height: '100%',
-                            objectFit: 'cover',
-                          }}
-                        />
-                      ) : (
-                        <span
-                          style={{
-                            fontSize: 8,
-                            opacity: 0.45,
-                            textAlign: 'center',
-                          }}
-                        >
-                          PHOTO
-                        </span>
-                      )}
+                      <QRCodeSVG value={value} size={54} level="M" marginSize={0} />
                     </div>
+                  )
 
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 700 }}>{p.name}</div>
+                  return (
+                    <div
+                      key={p.id}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: cols,
+                        gap: 12,
+                        alignItems: 'center',
+                        padding: '14px 0',
+                        borderTop: '1px solid rgba(255,255,255,.08)',
+                      }}
+                    >
+                      {productDisplay.isVisible('reference') && (
+                        <div>
+                          {p.internalRef ? (
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                minHeight: 28,
+                                padding: '4px 8px',
+                                borderRadius: 8,
+                                background: 'rgba(59,130,246,.12)',
+                                border: '1px solid rgba(59,130,246,.28)',
+                                fontSize: 11,
+                                fontWeight: 900,
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {p.internalRef}
+                            </span>
+                          ) : 'À générer'}
+                        </div>
+                      )}
 
-                      <div
-                        style={{
-                          opacity: 0.7,
-                          fontSize: 13,
-                          marginTop: 3,
-                        }}
-                      >
-                        {p.packaging || 'Sans conditionnement'}
-                      </div>
+                      {productDisplay.isVisible('qrProduct') &&
+                        qrBox(`NUKUSTOCK|PRODUCT|${p.internalRef || p.id}`)}
 
-                      {(p.category || p.subcategory) && (
-                        <div
-                          style={{
-                            opacity: 0.65,
-                            fontSize: 12,
-                            marginTop: 3,
-                          }}
-                        >
-                          {p.category}
-                          {p.subcategory ? ` / ${p.subcategory}` : ''}
+                      {productDisplay.isVisible('product') && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                          <div
+                            style={{
+                              width: 72,
+                              height: 72,
+                              borderRadius: 10,
+                              overflow: 'hidden',
+                              background: 'rgba(255,255,255,.05)',
+                              border: '1px solid rgba(255,255,255,.08)',
+                              flexShrink: 0,
+                              display: 'grid',
+                              placeItems: 'center',
+                            }}
+                          >
+                            {p.photo ? (
+                              <img
+                                src={p.photo}
+                                alt={p.name}
+                                style={{
+                                  width: '100%',
+                                  height: '100%',
+                                  objectFit: 'contain',
+                                  padding: 4,
+                                }}
+                              />
+                            ) : <span style={{ fontSize: 8, opacity: 0.45 }}>PHOTO</span>}
+                          </div>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontWeight: 700 }}>{p.name}</div>
+                            <div style={{ opacity: 0.7, fontSize: 13, marginTop: 3 }}>
+                              {p.packaging || 'Sans conditionnement'}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {productDisplay.isVisible('category') && <div>{p.category || '—'}</div>}
+                      {productDisplay.isVisible('qrCategory') &&
+                        qrBox(`NUKUSTOCK|CATEGORY|${p.category || 'Sans catégorie'}`)}
+                      {productDisplay.isVisible('subcategory') && <div>{p.subcategory || '—'}</div>}
+                      {productDisplay.isVisible('qrSubcategory') &&
+                        qrBox(`NUKUSTOCK|SUBCATEGORY|${p.subcategory || 'Sans sous-catégorie'}`)}
+
+                      {productDisplay.isVisible('type') && (
+                        <div>
+                          <Badge tone={p.productType === 'fabriqué' ? 'info' : 'neutral'}>
+                            {p.productType}
+                          </Badge>
+                        </div>
+                      )}
+
+                      {productDisplay.isVisible('stock') && (
+                        <div>
+                          <Badge tone={qty < p.minStock ? 'danger' : 'good'}>
+                            {qty} {p.unit}
+                          </Badge>
+                        </div>
+                      )}
+
+                      {productDisplay.isVisible('expiry') && (
+                        <div>
+                          {visibleExpiries.length === 0 ? (
+                            <span style={{ fontSize: 12, opacity: 0.5 }}>Aucune date</span>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                              {visibleExpiries.map(([expiry, expiryQty]) => (
+                                <div key={expiry} style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
+                                  <Badge tone={getPriorityTone(expiry)}>
+                                    {new Date(`${expiry}T00:00:00`).toLocaleDateString('fr-FR')}
+                                  </Badge>
+                                  <span style={{ fontSize: 11, opacity: 0.65 }}>
+                                    {expiryQty} {p.unit}
+                                  </span>
+                                </div>
+                              ))}
+                              {remainingExpiryCount > 0 && (
+                                <span style={{ fontSize: 11, opacity: 0.65 }}>
+                                  + {remainingExpiryCount} autre{remainingExpiryCount > 1 ? 's' : ''}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {productDisplay.isVisible('locations') && (
+                        <div>
+                          {visibleLocations.length === 0 ? (
+                            <span style={{ fontSize: 12, opacity: 0.5 }}>Aucun stock</span>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                              {visibleLocations.map(([location, locationQty]) => (
+                                <div key={location} style={{ display: 'flex', gap: 6 }}>
+                                  <strong style={{ fontSize: 12 }}>{location}</strong>
+                                  <span style={{ fontSize: 11, opacity: 0.65 }}>
+                                    {locationQty} {p.unit}
+                                  </span>
+                                </div>
+                              ))}
+                              {remainingLocationCount > 0 && (
+                                <span style={{ fontSize: 11, opacity: 0.65 }}>
+                                  + {remainingLocationCount} autre{remainingLocationCount > 1 ? 's' : ''}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {productDisplay.isVisible('mini') && <div>{p.minStock}</div>}
+                      {productDisplay.isVisible('price') && (
+                        <div>{Number(p.purchasePrice || 0).toLocaleString('fr-FR')} XPF</div>
+                      )}
+                      {productDisplay.isVisible('actions') && (
+                        <div>
+                          <button
+                            className="button secondary small"
+                            type="button"
+                            onClick={() => openEditProduct(p)}
+                          >
+                            Modifier
+                          </button>
                         </div>
                       )}
                     </div>
-                  </div>
-
-                  <div>
-                    <Badge
-                      tone={
-                        p.productType === 'fabriqué' ? 'info' : 'neutral'
-                      }
-                    >
-                      {p.productType}
-                    </Badge>
-                  </div>
-
-                  <div>
-                    <Badge tone={qty < p.minStock ? 'danger' : 'good'}>
-                      {qty} {p.unit}
-                    </Badge>
-                  </div>
-
-                  <div>
-                    {visibleExpiries.length === 0 ? (
-                      <span style={{ fontSize: 12, opacity: 0.5 }}>
-                        Aucune date
-                      </span>
-                    ) : (
-                      <div
-                        style={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 6,
-                          alignItems: 'flex-start',
-                        }}
-                      >
-                        {visibleExpiries.map(([expiry, expiryQty]) => (
-                          <div
-                            key={expiry}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 7,
-                              flexWrap: 'wrap',
-                            }}
-                          >
-                            <Badge tone={getPriorityTone(expiry)}>
-                              {new Date(
-                                `${expiry}T00:00:00`
-                              ).toLocaleDateString('fr-FR')}
-                            </Badge>
-
-                            <span
-                              style={{
-                                fontSize: 11,
-                                opacity: 0.65,
-                              }}
-                            >
-                              {expiryQty} {p.unit}
-                            </span>
-                          </div>
-                        ))}
-
-                        {remainingExpiryCount > 0 && (
-                          <span
-                            style={{
-                              fontSize: 11,
-                              fontWeight: 700,
-                              opacity: 0.65,
-                            }}
-                          >
-                            + {remainingExpiryCount} autre
-                            {remainingExpiryCount > 1 ? 's' : ''}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  <div>
-                    {visibleLocations.length === 0 ? (
-                      <span style={{ fontSize: 12, opacity: 0.5 }}>
-                        Aucun stock
-                      </span>
-                    ) : (
-                      <div
-                        style={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 5,
-                          alignItems: 'flex-start',
-                        }}
-                      >
-                        {visibleLocations.map(([location, locationQty]) => (
-                          <div
-                            key={location}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 6,
-                              flexWrap: 'wrap',
-                            }}
-                          >
-                            <span
-                              style={{
-                                fontSize: 12,
-                                fontWeight: 700,
-                              }}
-                            >
-                              {location}
-                            </span>
-
-                            <span
-                              style={{
-                                fontSize: 11,
-                                opacity: 0.65,
-                              }}
-                            >
-                              {locationQty} {p.unit}
-                            </span>
-                          </div>
-                        ))}
-
-                        {remainingLocationCount > 0 && (
-                          <span
-                            style={{
-                              fontSize: 11,
-                              fontWeight: 700,
-                              opacity: 0.65,
-                            }}
-                          >
-                            + {remainingLocationCount} autre
-                            {remainingLocationCount > 1 ? 's' : ''}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  <div>{p.minStock}</div>
-
-                  <div>
-                    {p.purchasePrice.toLocaleString('fr-FR')} XPF
-                  </div>
-
-                  <div
-                    style={{
-                      display: 'flex',
-                      gap: 8,
-                      alignItems: 'center',
-                      flexWrap: 'wrap',
-                    }}
-                  >
-                    <button
-                      className="button secondary small"
-                      onClick={() => openEditProduct(p)}
-                    >
-                      Modifier
-                    </button>
-
-                    <button
-                      className="button secondary small"
-                      onClick={() => duplicateProduct(p)}
-                    >
-                      Dupliquer
-                    </button>
-
-                    <button
-                      className="button secondary small"
-                      style={{
-                        color: '#b42318',
-                        borderColor: '#fda29b',
-                      }}
-                      onClick={() =>
-                        deleteProduct(p.id, p.name)
-                      }
-                    >
-                      Supprimer
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
-
-            {shown.length === 0 && (
-              <div style={{ padding: 24, opacity: 0.7 }}>
-                Aucun produit trouvé.
+                  )
+                })}
               </div>
-            )}
-          </div>
+            )
+          })()}
         </div>
       </Card>
 

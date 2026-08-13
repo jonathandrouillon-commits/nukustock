@@ -4,6 +4,8 @@ import { useMemo, useState, type CSSProperties } from 'react'
 import { Page, Card, Badge } from '@/components/ui'
 import { useInventories, useMasterData, useProducts } from '@/lib/store'
 import QRCode from 'qrcode'
+import { QRCodeSVG } from 'qrcode.react'
+import { ColumnVisibility, useColumnVisibility } from '@/components/column-visibility'
 
 type ActiveInventory = {
   id: string
@@ -65,6 +67,34 @@ const DEFAULT_INVENTORY_PRINT_COLUMNS: InventoryPrintColumnKey[] = [
   'real',
   'consumption',
   'unit',
+]
+
+const INVENTORY_SCREEN_COLUMNS = [
+  { key: 'reference', label: 'Référence' },
+  { key: 'qrProduct', label: 'QR Produit', qr: true },
+  { key: 'product', label: 'Produit' },
+  { key: 'category', label: 'Catégorie' },
+  { key: 'qrCategory', label: 'QR Catégorie', qr: true },
+  { key: 'subcategory', label: 'Sous-catégorie' },
+  { key: 'qrSubcategory', label: 'QR Sous-catégorie', qr: true },
+  { key: 'location', label: 'Lieu' },
+  { key: 'qrLocation', label: 'QR Lieu', qr: true },
+  { key: 'theoretical', label: 'Théorique' },
+  { key: 'real', label: 'Réel' },
+  { key: 'consumption', label: 'Consommation' },
+  { key: 'unit', label: 'Unité' },
+  { key: 'price', label: 'Prix unitaire' },
+  { key: 'value', label: 'Valeur consommée' },
+]
+
+const INVENTORY_SCREEN_ESSENTIAL = [
+  'reference',
+  'qrProduct',
+  'product',
+  'location',
+  'theoretical',
+  'real',
+  'consumption',
 ]
 
 const inventoryTypes = [
@@ -236,6 +266,11 @@ export default function Inventory() {
     useState<Record<string, boolean>>({})
 
   const [msg, setMsg] = useState('')
+
+  const inventoryDisplay = useColumnVisibility(
+    'nukustock_display_inventory_v1',
+    INVENTORY_SCREEN_ESSENTIAL
+  )
 
   const [printColumnsOpen, setPrintColumnsOpen] =
     useState(false)
@@ -939,6 +974,12 @@ export default function Inventory() {
               flexWrap: 'wrap',
             }}
           >
+            <ColumnVisibility
+              columns={INVENTORY_SCREEN_COLUMNS}
+              visible={inventoryDisplay.visible}
+              onChange={inventoryDisplay.setVisible}
+              essential={INVENTORY_SCREEN_ESSENTIAL}
+            />
             <button
               className="button secondary"
               type="button"
@@ -956,6 +997,13 @@ export default function Inventory() {
             </button>
           </div>
         ) : (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <ColumnVisibility
+              columns={INVENTORY_SCREEN_COLUMNS}
+              visible={inventoryDisplay.visible}
+              onChange={inventoryDisplay.setVisible}
+              essential={INVENTORY_SCREEN_ESSENTIAL}
+            />
           <button
             className="button"
             onClick={() => {
@@ -977,6 +1025,7 @@ export default function Inventory() {
           >
             + Créer un inventaire
           </button>
+          </div>
         )
       }
     >
@@ -1493,21 +1542,21 @@ export default function Inventory() {
                         <table>
                           <thead>
                             <tr>
-                              <th>
-                                Produit
-                              </th>
-                              <th>
-                                Théorique
-                              </th>
-                              <th>
-                                Réel
-                              </th>
-                              <th>
-                                Consommation
-                              </th>
-                              <th>
-                                Valeur consommée
-                              </th>
+                              {inventoryDisplay.isVisible('reference') && <th>Référence</th>}
+                              {inventoryDisplay.isVisible('qrProduct') && <th>QR Produit</th>}
+                              {inventoryDisplay.isVisible('product') && <th>Produit</th>}
+                              {inventoryDisplay.isVisible('category') && <th>Catégorie</th>}
+                              {inventoryDisplay.isVisible('qrCategory') && <th>QR Cat.</th>}
+                              {inventoryDisplay.isVisible('subcategory') && <th>Sous-catégorie</th>}
+                              {inventoryDisplay.isVisible('qrSubcategory') && <th>QR Sous-cat.</th>}
+                              {inventoryDisplay.isVisible('location') && <th>Lieu</th>}
+                              {inventoryDisplay.isVisible('qrLocation') && <th>QR Lieu</th>}
+                              {inventoryDisplay.isVisible('theoretical') && <th>Théorique</th>}
+                              {inventoryDisplay.isVisible('real') && <th>Réel</th>}
+                              {inventoryDisplay.isVisible('consumption') && <th>Consommation</th>}
+                              {inventoryDisplay.isVisible('unit') && <th>Unité</th>}
+                              {inventoryDisplay.isVisible('price') && <th>Prix</th>}
+                              {inventoryDisplay.isVisible('value') && <th>Valeur consommée</th>}
                             </tr>
                           </thead>
 
@@ -1520,106 +1569,130 @@ export default function Inventory() {
                                 realQty,
                                 diff,
                                 value,
-                              }) => (
-                                <tr
-                                  key={key}
-                                >
-                                  <td>
-                                    <div
-                                      style={{
-                                        fontWeight: 700,
-                                      }}
-                                    >
-                                      {
-                                        product.name
-                                      }
-                                    </div>
+                              }) => {
+                                const qrStyle = {
+                                  width: 52,
+                                  height: 52,
+                                  padding: 3,
+                                  borderRadius: 8,
+                                  background: '#fff',
+                                  display: 'grid',
+                                  placeItems: 'center',
+                                  border: '1px solid #e5e7eb',
+                                } as CSSProperties
 
-                                    <div
-                                      style={{
-                                        color: '#667085',
-                                        fontSize: 11,
-                                        marginTop: 3,
-                                      }}
-                                    >
-                                      {
-                                        product.internalRef
-                                      }
-                                    </div>
-                                  </td>
-
-                                  <td>
-                                    {
-                                      theoreticalQty
-                                    }{' '}
-                                    {
-                                      product.unit
-                                    }
-                                  </td>
-
-                                  <td>
-                                    <input
-                                      className="input"
-                                      style={{
-                                        minWidth: 90,
-                                        width: 120,
-                                      }}
-                                      type="number"
-                                      min="0"
-                                      value={
-                                        realQty
-                                      }
-                                      onChange={(
-                                        event
-                                      ) =>
-                                        setCounted(
-                                          {
-                                            ...counted,
-                                            [key]:
-                                              Math.max(
+                                return (
+                                  <tr key={key}>
+                                    {inventoryDisplay.isVisible('reference') && (
+                                      <td><strong>{product.internalRef || '—'}</strong></td>
+                                    )}
+                                    {inventoryDisplay.isVisible('qrProduct') && (
+                                      <td>
+                                        <div style={qrStyle}>
+                                          <QRCodeSVG
+                                            value={`NUKUSTOCK|PRODUCT|${product.internalRef || product.id}`}
+                                            size={44}
+                                            level="M"
+                                            marginSize={0}
+                                          />
+                                        </div>
+                                      </td>
+                                    )}
+                                    {inventoryDisplay.isVisible('product') && (
+                                      <td><strong>{product.name}</strong></td>
+                                    )}
+                                    {inventoryDisplay.isVisible('category') && (
+                                      <td>{product.category || '—'}</td>
+                                    )}
+                                    {inventoryDisplay.isVisible('qrCategory') && (
+                                      <td>
+                                        <div style={qrStyle}>
+                                          <QRCodeSVG
+                                            value={`NUKUSTOCK|CATEGORY|${product.category || 'Sans catégorie'}`}
+                                            size={44}
+                                            level="M"
+                                            marginSize={0}
+                                          />
+                                        </div>
+                                      </td>
+                                    )}
+                                    {inventoryDisplay.isVisible('subcategory') && (
+                                      <td>{product.subcategory || '—'}</td>
+                                    )}
+                                    {inventoryDisplay.isVisible('qrSubcategory') && (
+                                      <td>
+                                        <div style={qrStyle}>
+                                          <QRCodeSVG
+                                            value={`NUKUSTOCK|SUBCATEGORY|${product.subcategory || 'Sans sous-catégorie'}`}
+                                            size={44}
+                                            level="M"
+                                            marginSize={0}
+                                          />
+                                        </div>
+                                      </td>
+                                    )}
+                                    {inventoryDisplay.isVisible('location') && (
+                                      <td>{group.location}</td>
+                                    )}
+                                    {inventoryDisplay.isVisible('qrLocation') && (
+                                      <td>
+                                        <div style={qrStyle}>
+                                          <QRCodeSVG
+                                            value={`NUKUSTOCK|LOCATION|${group.location}`}
+                                            size={44}
+                                            level="M"
+                                            marginSize={0}
+                                          />
+                                        </div>
+                                      </td>
+                                    )}
+                                    {inventoryDisplay.isVisible('theoretical') && (
+                                      <td>{theoreticalQty}</td>
+                                    )}
+                                    {inventoryDisplay.isVisible('real') && (
+                                      <td>
+                                        <input
+                                          className="input"
+                                          style={{ minWidth: 90, width: 120 }}
+                                          type="number"
+                                          min="0"
+                                          value={realQty}
+                                          onChange={(event) =>
+                                            setCounted({
+                                              ...counted,
+                                              [key]: Math.max(
                                                 0,
-                                                Number(
-                                                  event
-                                                    .target
-                                                    .value
-                                                ) ||
-                                                  0
+                                                Number(event.target.value) || 0
                                               ),
+                                            })
                                           }
-                                        )
-                                      }
-                                    />
-                                  </td>
-
-                                  <td>
-                                    <Badge
-                                      tone={
-                                        diff ===
-                                        0
-                                          ? 'good'
-                                          : 'danger'
-                                      }
-                                    >
-                                      {diff >
-                                      0
-                                        ? '+'
-                                        : ''}
-                                      {diff}
-                                    </Badge>
-                                  </td>
-
-                                  <td>
-                                    {value >
-                                    0
-                                      ? '+'
-                                      : ''}
-                                    {value.toLocaleString(
-                                      'fr-FR'
-                                    )}{' '}
-                                    XPF
-                                  </td>
-                                </tr>
-                              )
+                                        />
+                                      </td>
+                                    )}
+                                    {inventoryDisplay.isVisible('consumption') && (
+                                      <td>
+                                        <Badge tone={diff === 0 ? 'good' : 'danger'}>
+                                          {diff > 0 ? '+' : ''}{diff}
+                                        </Badge>
+                                      </td>
+                                    )}
+                                    {inventoryDisplay.isVisible('unit') && (
+                                      <td>{product.unit || '—'}</td>
+                                    )}
+                                    {inventoryDisplay.isVisible('price') && (
+                                      <td>
+                                        {Math.max(0, Number(product.purchasePrice) || 0).toLocaleString('fr-FR')} XPF
+                                      </td>
+                                    )}
+                                    {inventoryDisplay.isVisible('value') && (
+                                      <td>
+                                        {value > 0 ? '+' : ''}
+                                        {value.toLocaleString('fr-FR')} XPF
+                                      </td>
+                                    )}
+                                  </tr>
+                                )
+                              }
                             )}
                           </tbody>
                         </table>
