@@ -3,6 +3,7 @@
 import { useMemo, useState, type CSSProperties } from 'react'
 import { Page, Card, Badge } from '@/components/ui'
 import { useInventories, useMasterData, useProducts } from '@/lib/store'
+import QRCode from 'qrcode'
 
 type ActiveInventory = {
   id: string
@@ -16,6 +17,55 @@ type ActiveInventory = {
   inventoryScope: InventoryScope
   createdAt: string
 }
+
+
+type InventoryPrintColumnKey =
+  | 'qrProduct'
+  | 'qrCategory'
+  | 'qrSubcategory'
+  | 'qrLocation'
+  | 'reference'
+  | 'category'
+  | 'subcategory'
+  | 'product'
+  | 'location'
+  | 'theoretical'
+  | 'real'
+  | 'consumption'
+  | 'unit'
+  | 'price'
+  | 'value'
+
+const INVENTORY_PRINT_COLUMNS: {
+  key: InventoryPrintColumnKey
+  label: string
+}[] = [
+  { key: 'qrProduct', label: 'QR Produit' },
+  { key: 'qrCategory', label: 'QR Catégorie' },
+  { key: 'qrSubcategory', label: 'QR Sous-catégorie' },
+  { key: 'qrLocation', label: 'QR Lieu' },
+  { key: 'reference', label: 'Référence' },
+  { key: 'category', label: 'Catégorie' },
+  { key: 'subcategory', label: 'Sous-catégorie' },
+  { key: 'product', label: 'Produit' },
+  { key: 'location', label: 'Lieu' },
+  { key: 'theoretical', label: 'Théorique' },
+  { key: 'real', label: 'Réel' },
+  { key: 'consumption', label: 'Consommation' },
+  { key: 'unit', label: 'Unité' },
+  { key: 'price', label: 'Prix unitaire' },
+  { key: 'value', label: 'Valeur consommée' },
+]
+
+const DEFAULT_INVENTORY_PRINT_COLUMNS: InventoryPrintColumnKey[] = [
+  'reference',
+  'product',
+  'location',
+  'theoretical',
+  'real',
+  'consumption',
+  'unit',
+]
 
 const inventoryTypes = [
   "Début d’exploitation",
@@ -186,6 +236,24 @@ export default function Inventory() {
     useState<Record<string, boolean>>({})
 
   const [msg, setMsg] = useState('')
+
+  const [printColumnsOpen, setPrintColumnsOpen] =
+    useState(false)
+
+  const [inventoryPrintColumns, setInventoryPrintColumns] =
+    useState<InventoryPrintColumnKey[]>(
+      DEFAULT_INVENTORY_PRINT_COLUMNS
+    )
+
+  const toggleInventoryPrintColumn = (
+    key: InventoryPrintColumnKey
+  ) => {
+    setInventoryPrintColumns((current) =>
+      current.includes(key)
+        ? current.filter((item) => item !== key)
+        : [...current, key]
+    )
+  }
 
   const currentScope: InventoryScope =
     activeInventory?.inventoryScope || newScope
@@ -609,6 +677,247 @@ export default function Inventory() {
     setExpandedLocations({})
   }
 
+  const printInventory = async () => {
+    if (!activeInventory) return
+
+    if (inventoryPrintColumns.length === 0) {
+      window.alert(
+        'Sélectionne au moins une colonne à imprimer.'
+      )
+      return
+    }
+
+    const selectedDefinitions =
+      INVENTORY_PRINT_COLUMNS.filter((column) =>
+        inventoryPrintColumns.includes(column.key)
+      )
+
+    const headers = selectedDefinitions
+      .map((column) => `<th>${column.label}</th>`)
+      .join('')
+
+    const getValue = (
+      key: InventoryPrintColumnKey,
+      group: (typeof locationsWithStock)[number],
+      row: (typeof locationsWithStock)[number]['rows'][number]
+    ) => {
+      switch (key) {
+        case 'qrProduct':
+          return `NUKUSTOCK|PRODUCT|${row.product.internalRef || row.product.id}`
+        case 'qrCategory':
+          return `NUKUSTOCK|CATEGORY|${row.product.category || 'Sans catégorie'}`
+        case 'qrSubcategory':
+          return `NUKUSTOCK|SUBCATEGORY|${row.product.subcategory || 'Sans sous-catégorie'}`
+        case 'qrLocation':
+          return `NUKUSTOCK|LOCATION|${group.location}`
+        case 'reference':
+          return row.product.internalRef || ''
+        case 'product':
+          return row.product.name || ''
+        case 'category':
+          return row.product.category || ''
+        case 'subcategory':
+          return row.product.subcategory || ''
+        case 'location':
+          return group.location
+        case 'theoretical':
+          return row.theoreticalQty.toLocaleString('fr-FR')
+        case 'real':
+          return row.realQty.toLocaleString('fr-FR')
+        case 'consumption':
+          return row.diff.toLocaleString('fr-FR')
+        case 'unit':
+          return row.product.unit || ''
+        case 'price':
+          return Math.max(
+            0,
+            Number(row.product.purchasePrice) || 0
+          ).toLocaleString('fr-FR')
+        case 'value':
+          return row.value.toLocaleString('fr-FR')
+        default:
+          return ''
+      }
+    }
+
+    const sections = await Promise.all(
+      locationsWithStock.map(async (group) => {
+        const rows = await Promise.all(
+          group.rows.map(async (row) => {
+            const cells = await Promise.all(
+              selectedDefinitions.map(async (column) => {
+                const value = getValue(
+                  column.key,
+                  group,
+                  row
+                )
+
+                if (column.key.startsWith('qr')) {
+                  const qr = await QRCode.toDataURL(value, {
+                    width: 90,
+                    margin: 1,
+                    errorCorrectionLevel: 'M',
+                  })
+                  return `<td class="qrCell"><img src="${qr}" alt="${column.label}" /><div>${value.split('|').pop() || ''}</div></td>`
+                }
+
+                return `<td>${value}</td>`
+              })
+            )
+
+            return `<tr>${cells.join('')}</tr>`
+          })
+        ).then((items) => items.join(''))
+
+        return `
+          <section class="location-section">
+            <h2>${group.location}</h2>
+            <table>
+              <thead><tr>${headers}</tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </section>
+        `
+      })
+    ).then((items) => items.join(''))
+
+    const printWindow = window.open(
+      '',
+      '_blank',
+      'width=1200,height=900'
+    )
+
+    if (!printWindow) {
+      window.alert(
+        "Impossible d'ouvrir la fenêtre d'impression."
+      )
+      return
+    }
+
+    printWindow.document.write(`
+      <!doctype html>
+      <html lang="fr">
+        <head>
+          <meta charset="utf-8" />
+          <title>NukuStock - Inventaire ${activeInventory.id}</title>
+          <style>
+            @page {
+              size: A4 landscape;
+              margin: 10mm;
+            }
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              font-family: Arial, Helvetica, sans-serif;
+              color: #111;
+              background: #fff;
+            }
+            .header { margin-bottom: 7mm; }
+            .brand { font-size: 18px; font-weight: 800; }
+            .title {
+              margin-top: 3px;
+              font-size: 13px;
+              font-weight: 700;
+            }
+            .meta {
+              margin-top: 5px;
+              font-size: 9px;
+              line-height: 1.5;
+            }
+            .summary {
+              display: grid;
+              grid-template-columns: repeat(4, 1fr);
+              gap: 5mm;
+              margin: 5mm 0 7mm;
+              font-size: 9px;
+            }
+            .summary div {
+              border: 1px solid #bbb;
+              padding: 3mm;
+            }
+            .location-section {
+              margin: 0 0 8mm;
+              break-inside: avoid-page;
+            }
+            h2 {
+              margin: 0 0 3mm;
+              padding-bottom: 2mm;
+              border-bottom: 1px solid #111;
+              font-size: 12px;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              table-layout: auto;
+              font-size: 7px;
+            }
+            th, td {
+              border: 1px solid #999;
+              padding: 3px 4px;
+              vertical-align: middle;
+              overflow-wrap: anywhere;
+            }
+            th {
+              background: #f2f2f2;
+              font-weight: 700;
+              white-space: nowrap;
+            }
+            tr { break-inside: avoid; }
+            .qrCell { text-align: center; min-width: 24mm; }
+            .qrCell img { width: 20mm; height: 20mm; display: block; margin: 0 auto 1mm; }
+            .qrCell div { font-size: 5.5px; font-weight: 700; overflow-wrap: anywhere; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="brand">NUKUTEPIPI - NukuStock</div>
+            <div class="title">
+              Inventaire ${activeInventory.name}
+            </div>
+            <div class="meta">
+              ${activeInventory.id} ·
+              ${activeInventory.inventoryScope} ·
+              ${activeInventory.type} ·
+              ${new Date(
+                `${activeInventory.date}T12:00:00`
+              ).toLocaleDateString('fr-FR')}
+              <br />
+              Séjour du
+              ${new Date(
+                `${activeInventory.stayStartDate}T12:00:00`
+              ).toLocaleDateString('fr-FR')}
+              au
+              ${new Date(
+                `${activeInventory.stayEndDate}T12:00:00`
+              ).toLocaleDateString('fr-FR')}
+              · ${activeInventory.durationDays} jour(s)
+              · ${activeInventory.guestCount} invité(s)
+            </div>
+          </div>
+
+          <div class="summary">
+            <div><strong>Théorique :</strong> ${globalTheoretical}</div>
+            <div><strong>Réel :</strong> ${globalReal}</div>
+            <div><strong>Consommation :</strong> ${globalDiff}</div>
+            <div><strong>Valeur :</strong> ${globalValue.toLocaleString('fr-FR')} XPF</div>
+          </div>
+
+          ${sections}
+
+          <script>
+            window.onload = () => {
+              window.print()
+              window.onafterprint = () => window.close()
+            }
+          </script>
+        </body>
+      </html>
+    `)
+
+    printWindow.document.close()
+    setPrintColumnsOpen(false)
+  }
+
   const labelStyle: CSSProperties = {
     display: 'block',
     fontSize: 13,
@@ -623,12 +932,29 @@ export default function Inventory() {
       subtitle="Tous les inventaires ou par famille : Beverage, Food, Matériel & Verrerie"
       action={
         activeInventory ? (
-          <button
-            className="button"
-            onClick={closeInventory}
+          <div
+            style={{
+              display: 'flex',
+              gap: 8,
+              flexWrap: 'wrap',
+            }}
           >
-            Clôturer l&apos;inventaire
-          </button>
+            <button
+              className="button secondary"
+              type="button"
+              onClick={() =>
+                setPrintColumnsOpen(true)
+              }
+            >
+              Imprimer l&apos;inventaire
+            </button>
+            <button
+              className="button"
+              onClick={closeInventory}
+            >
+              Clôturer l&apos;inventaire
+            </button>
+          </div>
         ) : (
           <button
             className="button"
@@ -1704,6 +2030,166 @@ export default function Inventory() {
             </table>
           </div>
         </Card>
+      )}
+
+
+      {printColumnsOpen && activeInventory && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1100,
+            background: 'rgba(15,23,42,.64)',
+            display: 'grid',
+            placeItems: 'center',
+            padding: 18,
+          }}
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) {
+              setPrintColumnsOpen(false)
+            }
+          }}
+        >
+          <div
+            style={{
+              width: 'min(620px, 100%)',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              background: '#111827',
+              color: '#fff',
+              borderRadius: 18,
+              padding: 22,
+              boxShadow:
+                '0 25px 80px rgba(0,0,0,.45)',
+            }}
+          >
+            <h2 style={{ margin: 0 }}>
+              Colonnes à imprimer
+            </h2>
+            <p
+              style={{
+                margin: '6px 0 18px',
+                color: '#aab4c3',
+                fontSize: 13,
+              }}
+            >
+              Choisis les informations à faire apparaître dans l&apos;inventaire imprimé.
+            </p>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns:
+                  'repeat(auto-fit,minmax(180px,1fr))',
+                gap: 9,
+              }}
+            >
+              {INVENTORY_PRINT_COLUMNS.map(
+                (column) => (
+                  <label
+                    key={column.key}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 9,
+                      padding: '10px 12px',
+                      border:
+                        '1px solid rgba(255,255,255,.12)',
+                      background:
+                        'rgba(255,255,255,.04)',
+                      borderRadius: 11,
+                      cursor: 'pointer',
+                      fontSize: 13,
+                      fontWeight: 700,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={inventoryPrintColumns.includes(
+                        column.key
+                      )}
+                      onChange={() =>
+                        toggleInventoryPrintColumn(
+                          column.key
+                        )
+                      }
+                    />
+                    {column.label}
+                  </label>
+                )
+              )}
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+                flexWrap: 'wrap',
+                marginTop: 16,
+              }}
+            >
+              <button
+                className="button secondary small"
+                type="button"
+                onClick={() =>
+                  setInventoryPrintColumns(
+                    INVENTORY_PRINT_COLUMNS.map(
+                      (column) => column.key
+                    )
+                  )
+                }
+              >
+                Tout sélectionner
+              </button>
+              <button
+                className="button secondary small"
+                type="button"
+                onClick={() =>
+                  setInventoryPrintColumns(
+                    DEFAULT_INVENTORY_PRINT_COLUMNS
+                  )
+                }
+              >
+                Réinitialiser
+              </button>
+              <button
+                className="button secondary small"
+                type="button"
+                onClick={() =>
+                  setInventoryPrintColumns([])
+                }
+              >
+                Tout décocher
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: 9,
+                marginTop: 22,
+              }}
+            >
+              <button
+                className="button secondary"
+                type="button"
+                onClick={() =>
+                  setPrintColumnsOpen(false)
+                }
+              >
+                Annuler
+              </button>
+              <button
+                className="button"
+                type="button"
+                onClick={printInventory}
+              >
+                Imprimer
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {createOpen && (

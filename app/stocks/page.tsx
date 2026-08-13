@@ -7,6 +7,7 @@ import * as XLSX from 'xlsx'
 import { jsPDF } from 'jspdf'
 import { autoTable } from 'jspdf-autotable'
 import { QRCodeSVG } from 'qrcode.react'
+import QRCode from 'qrcode'
 
 type QuantityFilter =
   | 'Tous'
@@ -53,6 +54,55 @@ type StockRow = {
   value: number
   expiryPriority: string
 }
+
+type StockPrintColumnKey =
+  | 'qrProduct'
+  | 'qrCategory'
+  | 'qrSubcategory'
+  | 'qrLocation'
+  | 'reference'
+  | 'product'
+  | 'category'
+  | 'subcategory'
+  | 'supplier'
+  | 'location'
+  | 'lot'
+  | 'expiry'
+  | 'quantity'
+  | 'unit'
+  | 'price'
+  | 'value'
+
+const STOCK_PRINT_COLUMNS: {
+  key: StockPrintColumnKey
+  label: string
+}[] = [
+  { key: 'qrProduct', label: 'QR Produit' },
+  { key: 'qrCategory', label: 'QR Catégorie' },
+  { key: 'qrSubcategory', label: 'QR Sous-catégorie' },
+  { key: 'qrLocation', label: 'QR Lieu' },
+  { key: 'reference', label: 'Référence' },
+  { key: 'product', label: 'Produit' },
+  { key: 'category', label: 'Catégorie' },
+  { key: 'subcategory', label: 'Sous-catégorie' },
+  { key: 'supplier', label: 'Fournisseur' },
+  { key: 'location', label: 'Lieu' },
+  { key: 'lot', label: 'Lot' },
+  { key: 'expiry', label: 'DLUO / DLC' },
+  { key: 'quantity', label: 'Quantité disponible' },
+  { key: 'unit', label: 'Unité' },
+  { key: 'price', label: 'Prix unitaire' },
+  { key: 'value', label: 'Valeur' },
+]
+
+const DEFAULT_STOCK_PRINT_COLUMNS: StockPrintColumnKey[] = [
+  'reference',
+  'product',
+  'location',
+  'expiry',
+  'quantity',
+  'unit',
+]
 
 function normalizeZoneText(value: string) {
   return value
@@ -166,6 +216,24 @@ export default function Stocks() {
 
   const [sortDirection, setSortDirection] =
     useState<SortDirection>('asc')
+
+  const [printColumnsOpen, setPrintColumnsOpen] =
+    useState(false)
+
+  const [stockPrintColumns, setStockPrintColumns] =
+    useState<StockPrintColumnKey[]>(
+      DEFAULT_STOCK_PRINT_COLUMNS
+    )
+
+  const toggleStockPrintColumn = (
+    key: StockPrintColumnKey
+  ) => {
+    setStockPrintColumns((current) =>
+      current.includes(key)
+        ? current.filter((item) => item !== key)
+        : [...current, key]
+    )
+  }
 
   const getExpiryPriority = (
     expiryDate: string
@@ -886,44 +954,99 @@ export default function Stocks() {
     )
   }
 
-  const printStock = () => {
-    const rows = filteredRows
-      .map(
-        ({
-          product,
-          lot,
-          quantity,
-          value,
-        }) => {
-          const expiryText = lot.expiry
-            ? new Date(
-                `${lot.expiry}T00:00:00`
-              ).toLocaleDateString('fr-FR')
-            : 'Sans DLUO'
+  const getStockPrintValue = (
+    key: StockPrintColumnKey,
+    row: StockRow
+  ) => {
+    const { product, lot, quantity, value } = row
 
-          const price = Math.max(
-            0,
-            Number(product.purchasePrice) || 0
-          ).toLocaleString('fr-FR')
+    switch (key) {
+      case 'qrProduct':
+        return `NUKUSTOCK|PRODUCT|${product.internalRef || product.id}`
+      case 'qrCategory':
+        return `NUKUSTOCK|CATEGORY|${product.category || 'Sans catégorie'}`
+      case 'qrSubcategory':
+        return `NUKUSTOCK|SUBCATEGORY|${product.subcategory || 'Sans sous-catégorie'}`
+      case 'qrLocation':
+        return `NUKUSTOCK|LOCATION|${lot.location || 'Non affecté'}`
+      case 'reference':
+        return product.internalRef || ''
+      case 'product':
+        return product.name || ''
+      case 'category':
+        return product.category || ''
+      case 'subcategory':
+        return product.subcategory || ''
+      case 'supplier':
+        return product.mainSupplier || ''
+      case 'location':
+        return lot.location || 'Non affecté'
+      case 'lot':
+        return lot.lotNumber || ''
+      case 'expiry':
+        return lot.expiry
+          ? new Date(
+              `${lot.expiry}T00:00:00`
+            ).toLocaleDateString('fr-FR')
+          : 'Sans DLUO'
+      case 'quantity':
+        return quantity.toLocaleString('fr-FR')
+      case 'unit':
+        return product.unit || ''
+      case 'price':
+        return Math.max(
+          0,
+          Number(product.purchasePrice) || 0
+        ).toLocaleString('fr-FR')
+      case 'value':
+        return value.toLocaleString('fr-FR')
+      default:
+        return ''
+    }
+  }
 
-          const total = value.toLocaleString('fr-FR')
-
-          return `
-            <tr>
-              <td>${product.internalRef || ''}</td>
-              <td>${product.name || ''}</td>
-              <td>${product.category || ''}</td>
-              <td>${product.subcategory || ''}</td>
-              <td>${lot.location || 'Non affecté'}</td>
-              <td>${expiryText}</td>
-              <td>${quantity} ${product.unit || ''}</td>
-              <td>${price}</td>
-              <td>${total}</td>
-            </tr>
-          `
-        }
+  const printStock = async () => {
+    if (stockPrintColumns.length === 0) {
+      window.alert(
+        'Sélectionne au moins une colonne à imprimer.'
       )
+      return
+    }
+
+    const selectedDefinitions =
+      STOCK_PRINT_COLUMNS.filter((column) =>
+        stockPrintColumns.includes(column.key)
+      )
+
+    const headers = selectedDefinitions
+      .map((column) => `<th>${column.label}</th>`)
       .join('')
+
+    const rows = await Promise.all(
+      filteredRows.map((row) => {
+        return Promise.all(
+          selectedDefinitions.map(async (column) => {
+            const value = getStockPrintValue(
+              column.key,
+              row
+            )
+
+            if (column.key.startsWith('qr')) {
+              const qr = await QRCode.toDataURL(value, {
+                width: 90,
+                margin: 1,
+                errorCorrectionLevel: 'M',
+              })
+              return `<td class="qrCell"><img src="${qr}" alt="${column.label}" /><div>${value.split('|').pop() || ''}</div></td>`
+            }
+
+            return `<td>${value}</td>`
+          })
+        ).then(
+          (cells) => `<tr>${cells.join('')}</tr>`
+        )
+      })
+    ).then((items) => items.join(''))
 
     const printWindow = window.open(
       '',
@@ -944,44 +1067,26 @@ export default function Stocks() {
         <head>
           <meta charset="utf-8" />
           <title>NukuStock - Stock disponible</title>
-
           <style>
             @page {
               size: A4 landscape;
               margin: 10mm;
             }
-
-            * {
-              box-sizing: border-box;
-            }
-
+            * { box-sizing: border-box; }
             body {
               margin: 0;
               font-family: Arial, Helvetica, sans-serif;
               color: #111;
               background: #fff;
             }
-
-            .header {
-              margin-bottom: 8mm;
-            }
-
-            .brand {
-              font-size: 18px;
-              font-weight: 800;
-            }
-
+            .header { margin-bottom: 8mm; }
+            .brand { font-size: 18px; font-weight: 800; }
             .title {
               margin-top: 3px;
               font-size: 13px;
               font-weight: 700;
             }
-
-            .meta {
-              margin-top: 5px;
-              font-size: 9px;
-            }
-
+            .meta { margin-top: 5px; font-size: 9px; }
             .zone {
               margin-top: 6px;
               padding: 5px 0;
@@ -991,123 +1096,44 @@ export default function Stocks() {
               font-size: 11px;
               font-weight: 800;
             }
-
             table {
               width: 100%;
               border-collapse: collapse;
-              table-layout: fixed;
+              table-layout: auto;
               font-size: 7px;
             }
-
-            th,
-            td {
+            th, td {
               border: 1px solid #999;
               padding: 3px 4px;
               vertical-align: middle;
               overflow-wrap: anywhere;
             }
-
             th {
               background: #f2f2f2;
               font-weight: 700;
+              white-space: nowrap;
             }
-
-            th:nth-child(1),
-            td:nth-child(1) {
-              width: 11%;
-            }
-
-            th:nth-child(2),
-            td:nth-child(2) {
-              width: 20%;
-            }
-
-            th:nth-child(3),
-            td:nth-child(3) {
-              width: 11%;
-            }
-
-            th:nth-child(4),
-            td:nth-child(4) {
-              width: 12%;
-            }
-
-            th:nth-child(5),
-            td:nth-child(5) {
-              width: 12%;
-            }
-
-            th:nth-child(6),
-            td:nth-child(6) {
-              width: 10%;
-            }
-
-            th:nth-child(7),
-            td:nth-child(7) {
-              width: 9%;
-            }
-
-            th:nth-child(8),
-            td:nth-child(8) {
-              width: 7%;
-            }
-
-            th:nth-child(9),
-            td:nth-child(9) {
-              width: 8%;
-            }
-
-            tr {
-              break-inside: avoid;
-            }
+            tr { break-inside: avoid; }
+            .qrCell { text-align: center; min-width: 24mm; }
+            .qrCell img { width: 20mm; height: 20mm; display: block; margin: 0 auto 1mm; }
+            .qrCell div { font-size: 5.5px; font-weight: 700; overflow-wrap: anywhere; }
           </style>
         </head>
-
         <body>
           <div class="header">
-            <div class="brand">
-              NUKUTEPIPI - NukuStock
-            </div>
-
-            <div class="title">
-              État du stock disponible
-            </div>
-
+            <div class="brand">NUKUTEPIPI - NukuStock</div>
+            <div class="title">État du stock disponible</div>
             <div class="meta">
-              Édité le ${new Date().toLocaleDateString(
-                'fr-FR'
-              )} -
+              Édité le ${new Date().toLocaleDateString('fr-FR')} -
               ${filteredProductIds.size} référence(s) -
-              ${totalQty.toLocaleString(
-                'fr-FR'
-              )} unité(s)
+              ${totalQty.toLocaleString('fr-FR')} unité(s)
             </div>
-
-            <div class="zone">
-              ZONE : ${zoneFilter}
-            </div>
+            <div class="zone">ZONE : ${zoneFilter}</div>
           </div>
-
           <table>
-            <thead>
-              <tr>
-                <th>Référence</th>
-                <th>Produit</th>
-                <th>Catégorie</th>
-                <th>Sous-cat.</th>
-                <th>Lieu</th>
-                <th>DLUO/DLC</th>
-                <th>Disponible</th>
-                <th>Prix XPF</th>
-                <th>Valeur XPF</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              ${rows}
-            </tbody>
+            <thead><tr>${headers}</tr></thead>
+            <tbody>${rows}</tbody>
           </table>
-
           <script>
             window.onload = () => {
               window.print()
@@ -1119,6 +1145,7 @@ export default function Stocks() {
     `)
 
     printWindow.document.close()
+    setPrintColumnsOpen(false)
   }
 
   const statBox: CSSProperties = {
@@ -1172,7 +1199,9 @@ export default function Stocks() {
           <button
             className="button"
             type="button"
-            onClick={printStock}
+            onClick={() =>
+              setPrintColumnsOpen(true)
+            }
           >
             Imprimer le stock
           </button>
@@ -2064,6 +2093,160 @@ export default function Stocks() {
           }
         }
       `}</style>
+
+      {printColumnsOpen && (
+        <div
+          className="screenOnly"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            background: 'rgba(15,23,42,.58)',
+            display: 'grid',
+            placeItems: 'center',
+            padding: 18,
+          }}
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) {
+              setPrintColumnsOpen(false)
+            }
+          }}
+        >
+          <div
+            style={{
+              width: 'min(620px, 100%)',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              background: '#fff',
+              borderRadius: 18,
+              padding: 22,
+              boxShadow: '0 24px 70px rgba(15,23,42,.25)',
+            }}
+          >
+            <h2 style={{ margin: 0 }}>
+              Colonnes à imprimer
+            </h2>
+            <p
+              style={{
+                margin: '6px 0 18px',
+                color: '#667085',
+                fontSize: 13,
+              }}
+            >
+              Coche uniquement les informations que tu veux voir sur l&apos;impression du stock.
+            </p>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns:
+                  'repeat(auto-fit,minmax(180px,1fr))',
+                gap: 9,
+              }}
+            >
+              {STOCK_PRINT_COLUMNS.map((column) => (
+                <label
+                  key={column.key}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 9,
+                    padding: '10px 12px',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: 11,
+                    cursor: 'pointer',
+                    fontSize: 13,
+                    fontWeight: 700,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={stockPrintColumns.includes(
+                      column.key
+                    )}
+                    onChange={() =>
+                      toggleStockPrintColumn(
+                        column.key
+                      )
+                    }
+                  />
+                  {column.label}
+                </label>
+              ))}
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+                flexWrap: 'wrap',
+                marginTop: 16,
+              }}
+            >
+              <button
+                className="button secondary small"
+                type="button"
+                onClick={() =>
+                  setStockPrintColumns(
+                    STOCK_PRINT_COLUMNS.map(
+                      (column) => column.key
+                    )
+                  )
+                }
+              >
+                Tout sélectionner
+              </button>
+              <button
+                className="button secondary small"
+                type="button"
+                onClick={() =>
+                  setStockPrintColumns(
+                    DEFAULT_STOCK_PRINT_COLUMNS
+                  )
+                }
+              >
+                Réinitialiser
+              </button>
+              <button
+                className="button secondary small"
+                type="button"
+                onClick={() =>
+                  setStockPrintColumns([])
+                }
+              >
+                Tout décocher
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: 9,
+                marginTop: 22,
+              }}
+            >
+              <button
+                className="button secondary"
+                type="button"
+                onClick={() =>
+                  setPrintColumnsOpen(false)
+                }
+              >
+                Annuler
+              </button>
+              <button
+                className="button"
+                type="button"
+                onClick={printStock}
+              >
+                Imprimer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </Page>
   )
 }
