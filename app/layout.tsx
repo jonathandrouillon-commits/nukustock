@@ -9,39 +9,49 @@ import './globals.css'
 
 import AuthGate from '@/components/auth-gate'
 
-function isRequisitionHost(host: string) {
+function normalizeHost(host: string) {
   return host
     .toLowerCase()
-    .split(':')[0] ===
-    'requisitionnuku.fenuaprobartender.com'
+    .split(',')[0]
+    .trim()
+    .split(':')[0]
 }
 
 export async function generateMetadata(): Promise<Metadata> {
   const headersList = await headers()
-  const host =
-    headersList.get('host') || ''
 
-  const requisitionMode =
-    isRequisitionHost(host)
+  const host = normalizeHost(
+    headersList.get('x-forwarded-host') ||
+    headersList.get('host') ||
+    ''
+  )
+
+  const isRequisition =
+    host ===
+    'requisitionnuku.fenuaprobartender.com'
 
   return {
-    title: requisitionMode
+    title: isRequisition
       ? 'Réquisitions Nuku'
-      : 'NukuStock',
+      : 'NukuStock Back Office',
 
-    description: requisitionMode
+    applicationName: isRequisition
+      ? 'Réquisitions'
+      : 'NukuStock Back Office',
+
+    description: isRequisition
       ? 'Réquisitions internes Nukutepipi'
       : 'Gestion des stocks et approvisionnements de Nukutepipi',
 
-    manifest: requisitionMode
-      ? '/manifest.webmanifest'
+    manifest: isRequisition
+      ? '/manifest-requisition.webmanifest'
       : '/manifest-nukustock.webmanifest',
 
     appleWebApp: {
       capable: true,
-      title: requisitionMode
+      title: isRequisition
         ? 'Réquisitions'
-        : 'NukuStock',
+        : 'NukuStock Back Office',
       statusBarStyle: 'default',
     },
   }
