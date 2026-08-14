@@ -932,7 +932,72 @@ export default function RequisitionPage() {
   }
 
   return (
-    <main style={styles.page}>
+    <>
+      <style>{`
+        @media (max-width: 640px) {
+          .requisition-modal {
+            width: 100% !important;
+            min-height: 100dvh !important;
+            margin: 0 !important;
+            border-radius: 0 !important;
+          }
+
+          .requisition-form-body {
+            padding: 16px !important;
+          }
+
+          .requisition-top-fields {
+            grid-template-columns: 1fr !important;
+            gap: 0 !important;
+          }
+
+          .requisition-lines-header {
+            align-items: stretch !important;
+            flex-direction: column !important;
+          }
+
+          .requisition-add-product {
+            width: 100% !important;
+          }
+
+          .requisition-table-header {
+            display: none !important;
+          }
+
+          .requisition-product-row {
+            grid-template-columns: 1fr !important;
+            gap: 14px !important;
+            padding: 16px !important;
+          }
+
+          .requisition-product-cell {
+            align-items: flex-start !important;
+          }
+
+          .requisition-action-cell {
+            justify-content: stretch !important;
+          }
+
+          .requisition-remove-button {
+            width: 100% !important;
+          }
+
+          .requisition-modal-actions {
+            grid-template-columns: 1fr !important;
+            padding: 12px 16px calc(12px + env(safe-area-inset-bottom)) !important;
+          }
+
+          .requisition-form-title {
+            font-size: 26px !important;
+          }
+
+          .requisition-products-section,
+          .requisition-form-section {
+            padding: 16px !important;
+          }
+        }
+      `}</style>
+      <main style={styles.page}>
       <header style={styles.header}>
         <div>
           <div style={styles.eyebrow}>
@@ -1138,8 +1203,8 @@ export default function RequisitionPage() {
 
       {formOpen && (
         <div style={styles.modalBackdrop}>
-          <div style={styles.modal}>
-            <div style={styles.formBody}>
+          <div className="requisition-modal" style={styles.modal}>
+            <div className="requisition-form-body" style={styles.formBody}>
               <div style={styles.breadcrumb}>
                 Réquisitions
                 <span>›</span>
@@ -1149,7 +1214,7 @@ export default function RequisitionPage() {
               </div>
 
               <div style={styles.formTitleBlock}>
-                <h2 style={styles.formTitle}>
+                <h2 className="requisition-form-title" style={styles.formTitle}>
                   {editingId
                     ? 'Modifier la réquisition'
                     : 'Nouvelle réquisition'}
@@ -1160,8 +1225,8 @@ export default function RequisitionPage() {
                 </div>
               </div>
 
-              <section style={styles.formSection}>
-                <div style={styles.topFieldsGrid}>
+              <section className="requisition-form-section" style={styles.formSection}>
+                <div className="requisition-top-fields" style={styles.topFieldsGrid}>
                   <label style={styles.field}>
                     <span>
                       Département
@@ -1277,8 +1342,8 @@ export default function RequisitionPage() {
                 </label>
               </section>
 
-              <section style={styles.productsSection}>
-                <div style={styles.linesHeader}>
+              <section className="requisition-products-section" style={styles.productsSection}>
+                <div className="requisition-lines-header" style={styles.linesHeader}>
                   <h3 style={styles.productsTitle}>
                     Produits requis
                   </h3>
@@ -1286,6 +1351,7 @@ export default function RequisitionPage() {
                   <button
                     type="button"
                     onClick={addLine}
+                    className="requisition-add-product"
                     style={styles.addProductButton}
                   >
                     + Ajouter un produit
@@ -1293,7 +1359,7 @@ export default function RequisitionPage() {
                 </div>
 
                 <div style={styles.productsTable}>
-                  <div style={styles.tableHeader}>
+                  <div className="requisition-table-header" style={styles.tableHeader}>
                     <div>Produit</div>
                     <div>Quantité demandée</div>
                     <div style={{ textAlign: 'right' }}>
@@ -1329,9 +1395,10 @@ export default function RequisitionPage() {
                       return (
                         <div
                           key={line.id}
+                          className="requisition-product-row"
                           style={styles.productTableRow}
                         >
-                          <div style={styles.productCell}>
+                          <div className="requisition-product-cell" style={styles.productCell}>
                             <div style={styles.productImageWrap}>
                               {selectedProduct?.photo_url ? (
                                 <img
@@ -1422,7 +1489,7 @@ export default function RequisitionPage() {
                             </div>
                           </div>
 
-                          <div style={styles.actionCell}>
+                          <div className="requisition-action-cell" style={styles.actionCell}>
                             <button
                               type="button"
                               onClick={() =>
@@ -1433,8 +1500,10 @@ export default function RequisitionPage() {
                               disabled={
                                 lines.length <= 1
                               }
+                              className="requisition-remove-button"
                               style={{
                                 ...styles.removeButton,
+                                width: undefined,
                                 opacity:
                                   lines.length <= 1
                                     ? 0.45
@@ -1456,7 +1525,7 @@ export default function RequisitionPage() {
               </section>
             </div>
 
-            <div style={styles.modalActions}>
+            <div className="requisition-modal-actions" style={styles.modalActions}>
               <button
                 type="button"
                 onClick={() =>
@@ -1483,7 +1552,8 @@ export default function RequisitionPage() {
           </div>
         </div>
       )}
-    </main>
+      </main>
+    </>
   )
 }
 
