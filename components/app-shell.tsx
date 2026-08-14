@@ -51,6 +51,7 @@ const navItems: NavItem[] = [
   { href: '/inventory', label: 'Inventaires', icon: '☑' },
   { href: '/suppliers', label: 'Fournisseurs', icon: '◇' },
   { href: '/transport', label: 'Transport', icon: '✈' },
+  { href: '/planning-bar', label: 'Planning Bar', icon: '▦' },
   { href: '/labels', label: 'Étiquettes', icon: '▦' },
   { href: '/setup', label: 'SET UP', icon: '◫' },
   { href: '/settings', label: 'Réglages', icon: '⚙' },
@@ -607,6 +608,14 @@ export function AppShell({
               </div>
             )
           })}
+
+          <Link
+            href="/planning-bar"
+            className={isActive(pathname, '/planning-bar') ? 'active' : ''}
+          >
+            <span className="nskSidebarIcon" aria-hidden="true">▦</span>
+            <span>Planning Bar</span>
+          </Link>
 
           <Link
             href="/setup"

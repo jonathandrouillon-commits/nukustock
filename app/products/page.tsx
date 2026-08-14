@@ -21,6 +21,7 @@ const PRODUCT_SCREEN_COLUMNS = [
   { key: 'qrCategory', label: 'QR Catégorie', qr: true },
   { key: 'subcategory', label: 'Sous-catégorie' },
   { key: 'qrSubcategory', label: 'QR Sous-catégorie', qr: true },
+  { key: 'supplier', label: 'Fournisseur' },
   { key: 'type', label: 'Type' },
   { key: 'stock', label: 'Stock' },
   { key: 'expiry', label: 'DLUO / DLC' },
@@ -265,6 +266,143 @@ function generateMissingInternalRefs(
     changed,
   }
 }
+const SUPPLIER_REFERENCE_UPDATES: Record<string, string> = {
+  'ALC-ANI-001': '452007',
+  'ALC-APE-001': '120008',
+  'ALC-APE-004': '120009',
+  'ALC-APE-005': '362115',
+  'ALC-APE-006': '363122',
+  'ALC-ARM-002': '134',
+  'ALC-CHR-001': '452308',
+  'ALC-CHR-002': '501282',
+  'ALC-COG-002': '650000',
+  'ALC-COG-005': '371233',
+  'ALC-EDV-002': '374132',
+  'ALC-GIN-003': '501345',
+  'ALC-GIN-004': '5,0101E+12',
+  'ALC-GIN-005': '452370',
+  'ALC-LIQ-002': '374065',
+  'ALC-LIQ-007': '600256',
+  'ALC-LIQ-008': '600271',
+  'ALC-LIQ-011': '334033',
+  'ALC-LIQ-016': '160118',
+  'ALC-LIQ-017': '372105',
+  'ALC-LIQ-019': '373081',
+  'ALC-LIQ-020': '373081',
+  'ALC-LIQ-021': '373064',
+  'ALC-LIQ-026': '160074',
+  'ALC-LIQ-029': '373066',
+  'ALC-LIQ-034': '452650',
+  'ALC-LIQ-037': '452000',
+  'ALC-LIQ-038': '160015',
+  'ALC-LIQ-039': '452012',
+  'ALC-LIQ-040': '452098',
+  'ALC-LIQ-041': '452082',
+  'ALC-LIQ-042': '452103',
+  'ALC-LIQ-044': '452132',
+  'ALC-LIQ-045': '600344',
+  'ALC-LIQ-051': '374102',
+  'ALC-LIQ-053': '374102',
+  'ALC-RHA-001': '391008',
+  'ALC-RHI-001': '452302',
+  'ALC-RHI-002': '5,00028E+12',
+  'ALC-RHI-003': '375148',
+  'ALC-RHI-005': '375158',
+  'ALC-RHI-006': '162002',
+  'ALC-RHI-007': '378013',
+  'ALC-TEQ-007': '160046',
+  'ALC-TEQ-008': '376374',
+  'ALC-TEQ-011': '347150',
+  'ALC-TEQ-012': '452121',
+  'ALC-TEQ-017': '160027',
+  'ALC-TEQ-018': '160027',
+  'ALC-VOD-002': '372069',
+  'ALC-VOD-005': '372069',
+  'ALC-VOD-010': '160028',
+  'ALC-WBO-002': '160009',
+  'ALC-WJA-001': '377321',
+  'ALC-WSC-002': '263600',
+  'ALC-WSC-003': '263041',
+  'ALC-WSC-004': '377402',
+  'ALC-WSC-005': '160040',
+  'ALC-WSC-006': '160187',
+  'BIE-DIV-001': '3770013289019',
+  'BIE-DIV-002': '0405',
+  'BIE-DIV-003': '0104',
+  'BIE-IMP-001': '335015',
+  'BIE-IMP-002': 'HKT0001',
+  'BIE-SAN-001': 'HKH0253',
+  'CHA-CHA-001': 'A001705',
+  'CHA-CHA-002': 'A001706',
+  'CHA-CHA-003': '351069',
+  'CHA-CHA-004': '351083',
+  'CHA-CHA-005': '351133',
+  'SOF-DIV-001': '121157',
+  'SOF-EAG-001': '121104',
+  'SOF-EAG-002': 'DAN0136',
+  'SOF-EAG-003': '121154',
+  'SOF-EAG-004': '121158',
+  'SOF-EAP-001': 'DAN009',
+  'SOF-JUS-001': '2517',
+  'SOF-JUS-002': '2217',
+  'SOF-JUS-003': '2261',
+  'SOF-JUS-004': '2517',
+  'SOF-JUS-005': '2336',
+  'SOF-JUS-006': '2256',
+  'SOF-JUS-008': '303038',
+  'SOF-JUS-009': '303096',
+  'SOF-JUS-010': '107272',
+  'SOF-JUS-011': '107273',
+  'SOF-LIM-001': '305569',
+  'SOF-PRE-001': 'Lune Rouge',
+  'SOF-PRE-002': 'Lune Rouge',
+  'SOF-PRE-004': 'Lune Rouge',
+  'SOF-PRE-005': 'Lune Rouge',
+  'SOF-PRE-006': '305532',
+  'SOF-PRE-007': '305540',
+  'SOF-SIR-001': '106012',
+  'SOF-SIR-003': '106014',
+  'SOF-SIR-004': '106013',
+  'SOF-SOD-001': '106328',
+  'SOF-SOD-002': '10177',
+  'SOF-SOD-003': '1653',
+  'SOF-SOD-005': '1334',
+  'SOF-SOD-006': '1864',
+  'SOF-SOD-007': '106162',
+  'SOF-SOD-008': '10947',
+  'SOF-THE-001': '107264',
+  'SOF-THE-002': '107263',
+  'SOF-THE-003': '107265',
+  'SOF-THE-004': '109043',
+  'SOF-THE-005': '109040',
+  'VIN-VBL-001': '183065',
+  'VIN-VBL-002': '183162',
+  'VIN-VRG-001': 'VIT0070',
+  'VIN-VRG-002': '181671',
+  'VIN-VRG-003': '201002',
+  'VIN-VRG-004': '184604',
+  'VIN-VRG-005': '180226',
+  'VIN-VRG-006': 'BXR1062',
+  'VIN-VRG-007': 'BXR1230',
+  'VIN-VRG-008': '8GR0309',
+  'VIN-VRG-009': 'BXR0996',
+  'VIN-VRG-010': 'BXR1073',
+  'VIN-VRG-011': '181408',
+  'VIN-VRG-015': '201002',
+  'VIN-VRG-019': '184604',
+  'VIN-VRG-020': 'BXR1109',
+  'VIN-VRG-021': 'BGR0280',
+  'VIN-VRG-022': 'BGR0309',
+  'VIN-VRG-023': '184604',
+  'VIN-VRG-024': '184604',
+  'VIN-VRG-025': '181651',
+  'VIN-VRG-026': 'VIT0070',
+  'VIN-VRG-027': '190168',
+  'VIN-VRG-030': '210020',
+  'VIN-VRS-001': 'BXR1081',
+  'VIN-VRS-003': '180000',
+}
+
 const emptyProduct: Product = {
   id: '',
   internalRef: '',
@@ -277,6 +415,8 @@ const emptyProduct: Product = {
   subcategory: '',
   packaging: '',
   unit: 'unité',
+  netUnitWeightKg: 0,
+  caseWeightKg: 0,
   purchasePrice: 0,
   priceUpdatedAt: new Date().toISOString().slice(0, 10),
   mainSupplier: '',
@@ -374,11 +514,48 @@ export default function Products() {
     }
   }, []) // migration automatique une seule fois au chargement
 
+  // Mise à jour automatique des références fournisseur à partir
+  // du document de référence transmis. La correspondance se fait
+  // par référence interne, donc elle ne dépend pas du libellé produit.
+  useEffect(() => {
+    if (!items.length) return
+
+    let changed = false
+
+    const next = items.map((product) => {
+      const supplierRef =
+        SUPPLIER_REFERENCE_UPDATES[
+          product.internalRef
+        ]
+
+      if (
+        !supplierRef ||
+        product.supplierRef === supplierRef
+      ) {
+        return product
+      }
+
+      changed = true
+
+      return {
+        ...product,
+        supplierRef,
+      }
+    })
+
+    if (changed) {
+      save(next)
+      setMsg(
+        'Références fournisseur mises à jour automatiquement.'
+      )
+    }
+  }, [items, save])
+
   const shown = useMemo(() => {
     const search = q.toLowerCase().trim()
 
     return items.filter((p) =>
-      `${p.name} ${p.internalRef} ${p.category} ${p.subcategory}`
+      `${p.name} ${p.internalRef} ${p.category} ${p.subcategory} ${p.mainSupplier || ''}`
         .toLowerCase()
         .includes(search)
     )
@@ -1471,6 +1648,7 @@ export default function Products() {
               productDisplay.isVisible('qrCategory') && '76px',
               productDisplay.isVisible('subcategory') && '155px',
               productDisplay.isVisible('qrSubcategory') && '76px',
+              productDisplay.isVisible('supplier') && '150px',
               productDisplay.isVisible('type') && '120px',
               productDisplay.isVisible('stock') && '110px',
               productDisplay.isVisible('expiry') && '185px',
@@ -1499,6 +1677,7 @@ export default function Products() {
                   {productDisplay.isVisible('qrCategory') && <div>QR Cat.</div>}
                   {productDisplay.isVisible('subcategory') && <div>Sous-catégorie</div>}
                   {productDisplay.isVisible('qrSubcategory') && <div>QR Sous-cat.</div>}
+                  {productDisplay.isVisible('supplier') && <div>Fournisseur</div>}
                   {productDisplay.isVisible('type') && <div>Type</div>}
                   {productDisplay.isVisible('stock') && <div>Stock</div>}
                   {productDisplay.isVisible('expiry') && <div>DLUO / DLC</div>}
@@ -1634,6 +1813,12 @@ export default function Products() {
                       {productDisplay.isVisible('subcategory') && <div>{p.subcategory || '—'}</div>}
                       {productDisplay.isVisible('qrSubcategory') &&
                         qrBox(`NUKUSTOCK|SUBCATEGORY|${p.subcategory || 'Sans sous-catégorie'}`)}
+
+                      {productDisplay.isVisible('supplier') && (
+                        <div>
+                          {p.mainSupplier || '—'}
+                        </div>
+                      )}
 
                       {productDisplay.isVisible('type') && (
                         <div>
@@ -2076,58 +2261,7 @@ export default function Products() {
                 />
               </div>
 
-              <div style={fieldWrapStyle}>
-                <select
-                  className="input"
-                  value={form.brand || ''}
-                  onChange={(e) => {
-                    const brand = e.target.value
-                    setForm({
-                      ...form,
-                      brand,
-                      brandId: resolveMasterId('brand', brand),
-                    })
-                  }}
-                >
-                  <option value="">Choisir une marque</option>
-                  {brandChoices.map((brand) => (
-                    <option key={brand} value={brand}>{brand}</option>
-                  ))}
-                </select>
-
-                <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 7 }}>
-                  <button
-                    className="button secondary small"
-                    type="button"
-                    onClick={() => {
-                      const value = askNewValue('une nouvelle marque')
-                      if (value) {
-                        const created = upsertMasterItem('brand', value)
-                        setForm({ ...form, brand: value, brandId: created?.id || '' })
-                      }
-                    }}
-                  >
-                    + Ajouter
-                  </button>
-                  <button
-                    className="button secondary small"
-                    type="button"
-                    disabled={!form.brand}
-                    onClick={() => {
-                      const nextName = renameMasterItem('brand', form.brand || '')
-                      if (nextName) setForm({ ...form, brand: nextName })
-                    }}
-                  >Modifier</button>
-                  <button
-                    className="button secondary small"
-                    type="button"
-                    disabled={!form.brand}
-                    onClick={() => deactivateMasterItem('brand', form.brand || '')}
-                  >Désactiver</button>
-                </div>
-              </div>
-
-              <div style={fieldWrapStyle}>
+                            <div style={fieldWrapStyle}>
                 <label style={fieldLabelStyle}>Zone</label>
                 <select
                   className="input"
@@ -2155,13 +2289,8 @@ export default function Products() {
                         setForm({ ...form, zone: value, zoneId: created?.id || '' })
                       }
                     }}>+ Ajouter</button>
-                  <button className="button secondary small" type="button" disabled={!form.zone}
-                    onClick={() => {
-                      const nextName = renameMasterItem('zone', form.zone || '')
-                      if (nextName) setForm({ ...form, zone: nextName })
-                    }}>Modifier</button>
-                  <button className="button secondary small" type="button" disabled={!form.zone}
-                    onClick={() => deactivateMasterItem('zone', form.zone || '')}>Désactiver</button>
+                  
+                  
                 </div>
               </div>
 
@@ -2211,15 +2340,6 @@ export default function Products() {
                 >
                   + Ajouter une nouvelle catégorie
                 </button>
-                <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 7 }}>
-                  <button className="button secondary small" type="button" disabled={!form.category}
-                    onClick={() => {
-                      const nextName = renameMasterItem('category', form.category)
-                      if (nextName) setForm({ ...form, category: nextName })
-                    }}>Modifier</button>
-                  <button className="button secondary small" type="button" disabled={!form.category}
-                    onClick={() => deactivateMasterItem('category', form.category)}>Désactiver</button>
-                </div>
               </div>
 
               <div style={fieldWrapStyle}>
@@ -2293,19 +2413,6 @@ export default function Products() {
                 >
                   + Ajouter une nouvelle sous-catégorie
                 </button>
-                <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 7 }}>
-                  <button className="button secondary small" type="button" disabled={!form.subcategory}
-                    onClick={() => {
-                      const categoryId = form.categoryId || resolveMasterId('category', form.category)
-                      const nextName = renameMasterItem('subcategory', form.subcategory, categoryId || undefined)
-                      if (nextName) setForm({ ...form, subcategory: nextName })
-                    }}>Modifier</button>
-                  <button className="button secondary small" type="button" disabled={!form.subcategory}
-                    onClick={() => {
-                      const categoryId = form.categoryId || resolveMasterId('category', form.category)
-                      deactivateMasterItem('subcategory', form.subcategory, categoryId || undefined)
-                    }}>Désactiver</button>
-                </div>
               </div>
 
               <div style={fieldWrapStyle}>
@@ -2348,15 +2455,6 @@ export default function Products() {
                 >
                   + Ajouter un nouveau conditionnement
                 </button>
-                <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 7 }}>
-                  <button className="button secondary small" type="button" disabled={!form.packaging}
-                    onClick={() => {
-                      const nextName = renameMasterItem('packaging', form.packaging)
-                      if (nextName) setForm({ ...form, packaging: nextName })
-                    }}>Modifier</button>
-                  <button className="button secondary small" type="button" disabled={!form.packaging}
-                    onClick={() => deactivateMasterItem('packaging', form.packaging)}>Désactiver</button>
-                </div>
               </div>
 
               <div style={fieldWrapStyle}>
@@ -2398,44 +2496,124 @@ export default function Products() {
                 >
                   + Ajouter une nouvelle unité
                 </button>
-                <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 7 }}>
-                  <button className="button secondary small" type="button" disabled={!form.unit}
-                    onClick={() => {
-                      const nextName = renameMasterItem('unit', form.unit)
-                      if (nextName) setForm({ ...form, unit: nextName })
-                    }}>Modifier</button>
-                  <button className="button secondary small" type="button" disabled={!form.unit}
-                    onClick={() => deactivateMasterItem('unit', form.unit)}>Désactiver</button>
-                </div>
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={fieldLabelStyle}>
+                  Poids net unitaire (kg)
+                </label>
+                <input
+                  className="input"
+                  type="number"
+                  min="0"
+                  step="0.001"
+                  value={form.netUnitWeightKg ?? 0}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      netUnitWeightKg: Math.max(
+                        0,
+                        Number(e.target.value) || 0
+                      ),
+                    })
+                  }
+                  placeholder="Ex. 0.33"
+                />
+              </div>
+
+              <div style={fieldWrapStyle}>
+                <label style={fieldLabelStyle}>
+                  Poids d'un colis / conditionnement (kg)
+                </label>
+                <input
+                  className="input"
+                  type="number"
+                  min="0"
+                  step="0.001"
+                  value={form.caseWeightKg ?? 0}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      caseWeightKg: Math.max(
+                        0,
+                        Number(e.target.value) || 0
+                      ),
+                    })
+                  }
+                  placeholder="Ex. 8.50"
+                />
               </div>
 
               <div style={fieldWrapStyle}>
                 <label style={fieldLabelStyle}>Fournisseur principal</label>
-                <input
+                <select
                   className="input"
-                  list="supplierSuggestions"
-                  value={form.mainSupplier}
+                  value={
+                    form.mainSupplierId ||
+                    suppliers.find(
+                      (supplier) =>
+                        supplier.name
+                          .trim()
+                          .toLowerCase() ===
+                        form.mainSupplier
+                          .trim()
+                          .toLowerCase()
+                    )?.id ||
+                    ''
+                  }
                   onChange={(e) => {
-                    const name = e.target.value
+                    const supplierId = e.target.value
+
+                    if (!supplierId) {
+                      setForm({
+                        ...form,
+                        mainSupplier: '',
+                        mainSupplierId: '',
+                      })
+                      return
+                    }
+
                     const linkedSupplier = suppliers.find(
                       (supplier) =>
-                        supplier.name.trim().toLowerCase() ===
-                        name.trim().toLowerCase()
+                        supplier.id === supplierId
                     )
 
                     setForm({
                       ...form,
-                      mainSupplier: name,
-                      mainSupplierId: linkedSupplier?.id || '',
+                      mainSupplier:
+                        linkedSupplier?.name || '',
+                      mainSupplierId:
+                        linkedSupplier?.id || '',
                     })
                   }}
-                  placeholder="Rechercher ou saisir"
-                />
-                <datalist id="supplierSuggestions">
-                  {supplierSuggestions.map((supplier) => (
-                    <option key={supplier} value={supplier} />
-                  ))}
-                </datalist>
+                >
+                  <option value="">
+                    — Sélectionner un fournisseur —
+                  </option>
+
+                  {[...suppliers]
+                    .filter(
+                      (supplier) =>
+                        supplier.active !== false
+                    )
+                    .sort((a, b) =>
+                      a.name.localeCompare(
+                        b.name,
+                        'fr',
+                        {
+                          sensitivity: 'base',
+                        }
+                      )
+                    )
+                    .map((supplier) => (
+                      <option
+                        key={supplier.id}
+                        value={supplier.id}
+                      >
+                        {supplier.name}
+                      </option>
+                    ))}
+                </select>
 
                 <button
                   className="button secondary small"
@@ -2448,30 +2626,6 @@ export default function Products() {
                 >
                   + Ajouter un nouveau fournisseur
                 </button>
-                <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 7 }}>
-                  <button
-                    className="button secondary small"
-                    type="button"
-                    disabled={!form.mainSupplierId}
-                    onClick={() => {
-                      const supplier = suppliers.find((item) => item.id === form.mainSupplierId)
-                      if (!supplier) return
-                      setSupplierForm(supplier)
-                      setSupplierModalOpen(true)
-                    }}
-                  >Modifier</button>
-                  <button
-                    className="button secondary small"
-                    type="button"
-                    disabled={!form.mainSupplierId}
-                    onClick={() => {
-                      const supplier = suppliers.find((item) => item.id === form.mainSupplierId)
-                      if (!supplier) return
-                      if (!window.confirm(`Désactiver le fournisseur « ${supplier.name} » ?`)) return
-                      saveSuppliers(suppliers.map((item) => item.id === supplier.id ? { ...item, active: false } : item))
-                    }}
-                  >Désactiver</button>
-                </div>
               </div>
 
               <div style={fieldWrapStyle}>

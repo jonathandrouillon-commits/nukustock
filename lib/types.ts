@@ -35,6 +35,10 @@ export type Product = {
   unit: string
   unitId?: string
 
+  // Poids produit
+  netUnitWeightKg?: number
+  caseWeightKg?: number
+
   purchasePrice: number
   priceUpdatedAt: string
 
@@ -42,7 +46,11 @@ export type Product = {
   mainSupplierId?: string
 
   minStock: number
-  productType: 'acheté' | 'fabriqué' | 'modifié'
+  productType:
+    | 'acheté'
+    | 'fabriqué'
+    | 'modifié'
+
   lots: Lot[]
 }
 
@@ -105,7 +113,10 @@ export type SupplierOrder = {
   purchaseOrderNumber?: string
   invoiceNumber?: string
   bl: string
-  receptionMode?: 'Bateau' | 'Avion' | 'Achat local'
+  receptionMode?:
+    | 'Bateau'
+    | 'Avion'
+    | 'Achat local'
   departureDate?: string
   status:
     | 'En traitement'
@@ -151,6 +162,7 @@ export type InventoryRecord = {
   guestCount?: number
   durationDays?: number
   stockAppliedAt?: string
+
   lines: {
     productId: string
     productName: string

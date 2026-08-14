@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import type { InternalRequest, MasterDataItem, Product } from '@/lib/types'
+import type { InternalRequest, MasterDataItem, Product, Supplier } from '@/lib/types'
 
 const PRODUCT_CACHE_KEY = 'nukustock_products_v11'
 const REQUEST_CACHE_KEY = 'nukustock_requests_v11'
 const MASTER_CACHE_KEY = 'nukustock_masterdata_v12'
+const SUPPLIER_CACHE_KEY = 'nukustock_suppliers_v12'
 
 function readCache<T>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback
@@ -67,7 +68,7 @@ async function fetchProducts(): Promise<Product[]> {
   const [{ data: rows, error }, { data: lots, error: lotsError }] = await Promise.all([
     supabase
       .from('products')
-      .select('id, legacy_id, internal_reference, supplier_reference, name, category, subcategory, brand, packaging, base_unit, default_unit_cost, minimum_stock, active, photo_url, has_expiry, product_type, price_updated_at, main_supplier, zone')
+      .select('id, legacy_id, internal_reference, supplier_reference, name, category, subcategory, brand, packaging, base_unit, default_unit_cost, minimum_stock, active, photo_url, has_expiry, product_type, price_updated_at, main_supplier, zone, net_unit_weight_kg, case_weight_kg')
       .eq('active', true)
       .order('name'),
     supabase
@@ -101,6 +102,8 @@ async function fetchProducts(): Promise<Product[]> {
     purchasePrice: Number(row.default_unit_cost) || 0,
     priceUpdatedAt: row.price_updated_at || new Date().toISOString().slice(0, 10),
     mainSupplier: row.main_supplier || '',
+    netUnitWeightKg: Number(row.net_unit_weight_kg) || 0,
+    caseWeightKg: Number(row.case_weight_kg) || 0,
     minStock: Number(row.minimum_stock) || 0,
     productType: (row.product_type || 'acheté') as Product['productType'],
     lots: (lotsByProduct.get(row.id) || []).map((lot: any) => ({
@@ -150,6 +153,14 @@ async function syncProducts(products: Product[]) {
       price_updated_at: product.priceUpdatedAt || null,
       main_supplier: product.mainSupplier || null,
       zone: product.zone || null,
+      net_unit_weight_kg: Math.max(
+        0,
+        Number(product.netUnitWeightKg) || 0
+      ),
+      case_weight_kg: Math.max(
+        0,
+        Number(product.caseWeightKg) || 0
+      ),
     }
 
     const { error } = await supabase.from('products').upsert(payload, { onConflict: 'id' })
@@ -223,6 +234,228 @@ export function useUnifiedProducts() {
   }
 
   return { items, save, reload }
+}
+
+
+
+async function ensureSuppliersFromProducts() {
+  const [
+    { data: productRows, error: productError },
+    { data: supplierRows, error: supplierError },
+  ] = await Promise.all([
+    supabase
+      .from('products')
+      .select('main_supplier')
+      .not('main_supplier', 'is', null),
+
+    supabase
+      .from('suppliers')
+      .select('id, name'),
+  ])
+
+  if (productError) throw productError
+  if (supplierError) throw supplierError
+
+  const existingNames = new Set(
+    (supplierRows || [])
+      .map((row: any) =>
+        String(row.name || '')
+          .trim()
+          .toLowerCase()
+      )
+      .filter(Boolean)
+  )
+
+  const names = Array.from(
+    new Set(
+      (productRows || [])
+        .map((row: any) =>
+          String(row.main_supplier || '').trim()
+        )
+        .filter(
+          (name: string) =>
+            name &&
+            name.toLowerCase() !== '(vide)' &&
+            name !== '0'
+        )
+    )
+  )
+
+  const missing = names.filter(
+    (name) =>
+      !existingNames.has(
+        name.toLowerCase()
+      )
+  )
+
+  if (!missing.length) return
+
+  const { error } = await supabase
+    .from('suppliers')
+    .insert(
+      missing.map((name) => ({
+        id: uuid(),
+        name,
+        contact: null,
+        phone: null,
+        payment: null,
+        notes:
+          'Créé automatiquement depuis les fournisseurs des produits',
+        address: null,
+        contact_person: null,
+        email: null,
+        delivery_lead_time: null,
+        currency: 'XPF',
+        active: true,
+      }))
+    )
+
+  if (error) throw error
+}
+
+async function fetchSuppliers(): Promise<Supplier[]> {
+  const { data, error } = await supabase
+    .from('suppliers')
+    .select(
+      'id, name, contact, phone, payment, notes, address, contact_person, email, delivery_lead_time, currency, active'
+    )
+    .order('name')
+
+  if (error) throw error
+
+  return (data || []).map((row: any) => ({
+    id: row.id,
+    name: row.name || '',
+    contact: row.contact || row.email || '',
+    phone: row.phone || '',
+    payment: row.payment || '',
+    notes: row.notes || '',
+    address: row.address || '',
+    contactPerson: row.contact_person || '',
+    email: row.email || '',
+    deliveryLeadTime: row.delivery_lead_time || '',
+    currency: row.currency || 'XPF',
+    active: row.active !== false,
+  }))
+}
+
+async function syncSuppliers(suppliers: Supplier[]) {
+  const { data: existing, error: existingError } = await supabase
+    .from('suppliers')
+    .select('id')
+
+  if (existingError) throw existingError
+
+  if (suppliers.length) {
+    const payload = suppliers.map((supplier) => ({
+      id: supplier.id || uuid(),
+      name: supplier.name.trim(),
+      contact: supplier.contact || null,
+      phone: supplier.phone || null,
+      payment: supplier.payment || null,
+      notes: supplier.notes || null,
+      address: supplier.address || null,
+      contact_person: supplier.contactPerson || null,
+      email: supplier.email || null,
+      delivery_lead_time: supplier.deliveryLeadTime || null,
+      currency: supplier.currency || 'XPF',
+      active: supplier.active !== false,
+    }))
+
+    const { error } = await supabase
+      .from('suppliers')
+      .upsert(payload, { onConflict: 'id' })
+
+    if (error) throw error
+  }
+
+  const keepIds = new Set(
+    suppliers
+      .map((supplier) => supplier.id)
+      .filter(Boolean)
+  )
+
+  const removedIds = (existing || [])
+    .map((row: any) => row.id)
+    .filter((id: string) => !keepIds.has(id))
+
+  if (removedIds.length) {
+    const { error } = await supabase
+      .from('suppliers')
+      .delete()
+      .in('id', removedIds)
+
+    if (error) throw error
+  }
+}
+
+export function useUnifiedSuppliers() {
+  const [items, setItems] = useState<Supplier[]>(
+    () => readCache<Supplier[]>(SUPPLIER_CACHE_KEY, [])
+  )
+
+  const reload = useCallback(async () => {
+    try {
+      // Synchronise automatiquement tous les noms de fournisseurs
+      // déjà présents dans les produits vers la table suppliers.
+      await ensureSuppliersFromProducts()
+
+      let remote = await fetchSuppliers()
+
+      // Si aucun fournisseur n'existe encore dans Supabase,
+      // on tente aussi de récupérer l'ancien cache local.
+      if (!remote.length) {
+        const cached = readCache<Supplier[]>(
+          SUPPLIER_CACHE_KEY,
+          []
+        )
+
+        if (cached.length) {
+          await syncSuppliers(cached)
+          await ensureSuppliersFromProducts()
+          remote = await fetchSuppliers()
+        }
+      }
+
+      setItems(remote)
+      writeCache(SUPPLIER_CACHE_KEY, remote)
+    } catch (error) {
+      console.error(
+        'NukuStock suppliers Supabase:',
+        error
+      )
+    }
+  }, [])
+
+  useEffect(() => {
+    void reload()
+
+    const onFocus = () => void reload()
+    window.addEventListener('focus', onFocus)
+
+    return () =>
+      window.removeEventListener('focus', onFocus)
+  }, [reload])
+
+  const save = (next: Supplier[]) => {
+    setItems(next)
+    writeCache(SUPPLIER_CACHE_KEY, next)
+
+    void syncSuppliers(next)
+      .then(() => reload())
+      .catch((error) =>
+        console.error(
+          'NukuStock save suppliers:',
+          error
+        )
+      )
+  }
+
+  return {
+    items,
+    save,
+    reload,
+  }
 }
 
 async function fetchMasterData(): Promise<MasterDataItem[]> {

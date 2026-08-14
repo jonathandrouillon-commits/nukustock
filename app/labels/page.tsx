@@ -4,14 +4,33 @@ import { useMemo, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 
 import { Page, Card } from '@/components/ui'
-import { useMasterData, useProducts } from '@/lib/store'
-import type { Product } from '@/lib/types'
+import { useMasterData, useProducts, useSuppliers } from '@/lib/store'
+import type { Product, Supplier } from '@/lib/types'
 
 type LabelMode =
   | 'categories'
   | 'subcategories'
   | 'products'
+  | 'suppliers'
   | 'locations'
+
+type PrintableLabel = {
+  id: string
+  title: string
+  subtitle?: string
+  reference?: string
+  qrValue: string
+}
+
+function chunk<T>(items: T[], size: number) {
+  const result: T[][] = []
+
+  for (let index = 0; index < items.length; index += size) {
+    result.push(items.slice(index, index + size))
+  }
+
+  return result
+}
 
 function normalize(value: string) {
   return value
@@ -64,6 +83,16 @@ function locationQrValue(location: {
     id: location.id,
     reference: location.internalRef || '',
     location: location.name,
+  })
+}
+
+function supplierQrValue(supplier: Supplier) {
+  return JSON.stringify({
+    app: 'NukuStock',
+    type: 'supplier',
+    id: supplier.id,
+    reference: supplier.internalRef || '',
+    supplier: supplier.name,
   })
 }
 
@@ -175,6 +204,7 @@ function LabelCard({
 
 export default function LabelsPage() {
   const { items: products } = useProducts()
+  const { items: suppliers } = useSuppliers()
   const { items: masterData } = useMasterData()
 
   const locations = useMemo(
@@ -196,6 +226,25 @@ export default function LabelsPage() {
           )
         ),
     [masterData]
+  )
+
+  const activeSuppliers = useMemo(
+    () =>
+      [...suppliers]
+        .filter(
+          (supplier) =>
+            supplier.active !== false
+        )
+        .sort((a, b) =>
+          a.name.localeCompare(
+            b.name,
+            'fr',
+            {
+              sensitivity: 'base',
+            }
+          )
+        ),
+    [suppliers]
   )
 
   const [mode, setMode] =
@@ -270,6 +319,18 @@ export default function LabelsPage() {
       )
   }, [products, search])
 
+  const filteredSuppliers = useMemo(() => {
+    const query = normalize(search)
+
+    return activeSuppliers.filter(
+      (supplier) =>
+        !query ||
+        normalize(
+          `${supplier.internalRef || ''} ${supplier.name}`
+        ).includes(query)
+    )
+  }, [activeSuppliers, search])
+
   const filteredLocations = useMemo(() => {
     const query = normalize(search)
 
@@ -332,6 +393,11 @@ export default function LabelsPage() {
             (product) =>
               `product:${product.id}`
           )
+        : mode === 'suppliers'
+        ? filteredSuppliers.map(
+            (supplier) =>
+              `supplier:${supplier.id}`
+          )
         : filteredLocations.map(
             (location) =>
               `location:${location.id}`
@@ -345,48 +411,273 @@ export default function LabelsPage() {
     ])
   }
 
-  const selectedCategories =
-    filteredCategories.filter((category) =>
-      selectedIds.includes(
-        `category:${category}`
-      )
-    )
+  const selectedLabelItems = useMemo<PrintableLabel[]>(
+    () =>
+      selectedIds.flatMap((id) => {
+        if (id.startsWith('category:')) {
+          const category = id.slice('category:'.length)
 
-  const selectedSubcategories =
-    filteredSubcategories.filter((item) =>
-      selectedIds.includes(
-        `subcategory:${item.category}:${item.subcategory}`
-      )
-    )
+          if (!categories.includes(category)) {
+            return []
+          }
 
-  const selectedProducts =
-    filteredProducts.filter((product) =>
-      selectedIds.includes(
-        `product:${product.id}`
-      )
-    )
+          return [
+            {
+              id,
+              title: category,
+              subtitle: 'Catégorie NukuStock',
+              qrValue: categoryQrValue(category),
+            },
+          ]
+        }
 
-  const selectedLocations =
-    filteredLocations.filter((location) =>
-      selectedIds.includes(
-        `location:${location.id}`
+        if (id.startsWith('subcategory:')) {
+          const raw = id.slice('subcategory:'.length)
+          const separatorIndex = raw.indexOf(':')
+
+          if (separatorIndex < 0) {
+            return []
+          }
+
+          const category = raw.slice(0, separatorIndex)
+          const subcategory = raw.slice(separatorIndex + 1)
+
+          const exists = subcategories.some(
+            (item) =>
+              item.category === category &&
+              item.subcategory === subcategory
+          )
+
+          if (!exists) {
+            return []
+          }
+
+          return [
+            {
+              id,
+              title: subcategory,
+              subtitle: `Catégorie : ${category}`,
+              qrValue: subcategoryQrValue(
+                category,
+                subcategory
+              ),
+            },
+          ]
+        }
+
+        if (id.startsWith('product:')) {
+          const productId = id.slice('product:'.length)
+          const product = products.find(
+            (item) => item.id === productId
+          )
+
+          if (!product) {
+            return []
+          }
+
+          return [
+            {
+              id,
+              title: product.name,
+              subtitle:
+                `${product.category} · ${product.subcategory}`,
+              reference: product.internalRef,
+              qrValue: productQrValue(product),
+            },
+          ]
+        }
+
+        if (id.startsWith('supplier:')) {
+          const supplierId = id.slice('supplier:'.length)
+          const supplier = suppliers.find(
+            (item) => item.id === supplierId
+          )
+
+          if (!supplier) {
+            return []
+          }
+
+          return [
+            {
+              id,
+              title: supplier.name,
+              subtitle: 'Fournisseur NukuStock',
+              reference: supplier.internalRef || '',
+              qrValue: supplierQrValue(supplier),
+            },
+          ]
+        }
+
+        if (id.startsWith('location:')) {
+          const locationId = id.slice('location:'.length)
+          const location = locations.find(
+            (item) => item.id === locationId
+          )
+
+          if (!location) {
+            return []
+          }
+
+          return [
+            {
+              id,
+              title: location.name,
+              subtitle: 'Lieu de stockage',
+              reference: location.internalRef || '',
+              qrValue: locationQrValue(location),
+            },
+          ]
+        }
+
+        return []
+      }),
+    [
+      selectedIds,
+      categories,
+      subcategories,
+      products,
+      suppliers,
+      locations,
+    ]
+  )
+
+  const a4Pages = useMemo(
+    () => chunk(selectedLabelItems, 6),
+    [selectedLabelItems]
+  )
+
+  const printLabels = () => {
+    if (!selectedLabelItems.length) {
+      window.alert(
+        'Sélectionne au moins une étiquette.'
       )
-    )
+      return
+    }
+
+    window.print()
+  }
+
+  const downloadPdf = async () => {
+    if (!selectedLabelItems.length) {
+      window.alert(
+        'Sélectionne au moins une étiquette.'
+      )
+      return
+    }
+
+    try {
+      const [{ default: html2canvas }, { jsPDF }] =
+        await Promise.all([
+          import('html2canvas'),
+          import('jspdf'),
+        ])
+
+      const pages = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          '.a4Page'
+        )
+      )
+
+      if (!pages.length) {
+        throw new Error(
+          'Aucune planche A4 à exporter.'
+        )
+      }
+
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+      })
+
+      for (
+        let index = 0;
+        index < pages.length;
+        index += 1
+      ) {
+        const page = pages[index]
+
+        const canvas = await html2canvas(
+          page,
+          {
+            scale: 2,
+            backgroundColor: '#ffffff',
+            useCORS: true,
+            logging: false,
+          }
+        )
+
+        const image =
+          canvas.toDataURL(
+            'image/jpeg',
+            0.95
+          )
+
+        if (index > 0) {
+          pdf.addPage('a4', 'portrait')
+        }
+
+        pdf.addImage(
+          image,
+          'JPEG',
+          0,
+          0,
+          210,
+          297,
+          undefined,
+          'FAST'
+        )
+      }
+
+      pdf.save(
+        `Etiquettes-NukuStock-${new Date()
+          .toISOString()
+          .slice(0, 10)}.pdf`
+      )
+    } catch (error) {
+      console.error(
+        'Téléchargement PDF étiquettes :',
+        error
+      )
+
+      window.alert(
+        'Impossible de créer le PDF des étiquettes.'
+      )
+    }
+  }
+
 
   return (
     <Page
       title="Étiquettes & QR Codes"
-      subtitle="Catégories, sous-catégories, produits et lieux de stockage"
+      subtitle="Catégories, sous-catégories, produits, fournisseurs et lieux de stockage"
       action={
-        <button
-          className="button"
-          type="button"
-          onClick={() =>
-            window.print()
-          }
+        <div
+          className="screenOnly"
+          style={{
+            display: 'flex',
+            gap: 8,
+            flexWrap: 'wrap',
+          }}
         >
-          Imprimer
-        </button>
+          <button
+            className="button secondary"
+            type="button"
+            onClick={() => {
+              void downloadPdf()
+            }}
+          >
+            Télécharger PDF
+          </button>
+
+          <button
+            className="button"
+            type="button"
+            onClick={printLabels}
+          >
+            Imprimer
+          </button>
+        </div>
       }
     >
       <div
@@ -407,7 +698,6 @@ export default function LabelsPage() {
           type="button"
           onClick={() => {
             setMode('categories')
-            setSelectedIds([])
             setSearch('')
           }}
         >
@@ -423,7 +713,6 @@ export default function LabelsPage() {
           type="button"
           onClick={() => {
             setMode('subcategories')
-            setSelectedIds([])
             setSearch('')
           }}
         >
@@ -439,11 +728,25 @@ export default function LabelsPage() {
           type="button"
           onClick={() => {
             setMode('products')
-            setSelectedIds([])
             setSearch('')
           }}
         >
           Produits
+        </button>
+
+        <button
+          className={
+            mode === 'suppliers'
+              ? 'button'
+              : 'button secondary'
+          }
+          type="button"
+          onClick={() => {
+            setMode('suppliers')
+            setSearch('')
+          }}
+        >
+          Fournisseurs
         </button>
 
         <button
@@ -455,7 +758,6 @@ export default function LabelsPage() {
           type="button"
           onClick={() => {
             setMode('locations')
-            setSelectedIds([])
             setSearch('')
           }}
         >
@@ -502,6 +804,8 @@ export default function LabelsPage() {
                   ? 'Catégorie ou sous-catégorie...'
                   : mode === 'products'
                   ? 'Nom, référence, marque...'
+                  : mode === 'suppliers'
+                  ? 'Nom ou référence fournisseur...'
                   : 'Lieu de stockage...'
               }
             />
@@ -698,6 +1002,67 @@ export default function LabelsPage() {
             }
           )}
 
+        {mode === 'suppliers' &&
+          filteredSuppliers.map(
+            (supplier) => {
+              const id =
+                `supplier:${supplier.id}`
+
+              return (
+                <label
+                  key={id}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns:
+                      'auto 1fr auto',
+                    gap: 10,
+                    alignItems:
+                      'center',
+                    padding: 10,
+                    border:
+                      '1px solid rgba(255,255,255,.08)',
+                    borderRadius: 12,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.includes(
+                      id
+                    )}
+                    onChange={() =>
+                      toggle(id)
+                    }
+                  />
+
+                  <div>
+                    <strong>
+                      {supplier.name}
+                    </strong>
+
+                    <div
+                      style={{
+                        marginTop: 2,
+                        fontSize: 10,
+                        opacity: 0.65,
+                      }}
+                    >
+                      Fournisseur
+                    </div>
+                  </div>
+
+                  <strong
+                    style={{
+                      fontSize: 11,
+                    }}
+                  >
+                    {supplier.internalRef || ''}
+                  </strong>
+                </label>
+              )
+            }
+          )}
+
         {mode === 'locations' &&
           filteredLocations.map(
             (location) => {
@@ -753,84 +1118,148 @@ export default function LabelsPage() {
       </div>
 
       <div
-        className="labelsGrid"
+        className="screenOnly"
         style={{
-          display: 'grid',
-          gridTemplateColumns:
-            'repeat(auto-fit, minmax(260px, 1fr))',
-          gap: 16,
           marginTop: 18,
+          marginBottom: 10,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          flexWrap: 'wrap',
         }}
       >
-        {mode === 'categories' &&
-          selectedCategories.map(
-            (category) => (
-              <LabelCard
-                key={category}
-                title={category}
-                subtitle="Catégorie NukuStock"
-                qrValue={categoryQrValue(
-                  category
-                )}
-              />
-            )
-          )}
+        <div>
+          <strong>
+            Planche A4
+          </strong>
 
-        {mode ===
-          'subcategories' &&
-          selectedSubcategories.map(
-            (item) => (
-              <LabelCard
-                key={`${item.category}-${item.subcategory}`}
-                title={
-                  item.subcategory
-                }
-                subtitle={`Catégorie : ${item.category}`}
-                qrValue={subcategoryQrValue(
-                  item.category,
-                  item.subcategory
-                )}
-              />
-            )
-          )}
+          <div
+            style={{
+              marginTop: 3,
+              fontSize: 11,
+              opacity: 0.7,
+            }}
+          >
+            {selectedLabelItems.length} étiquette
+            {selectedLabelItems.length > 1 ? 's' : ''}
+            {' · '}
+            6 par page
+            {' · '}
+            {a4Pages.length} page
+            {a4Pages.length > 1 ? 's' : ''}
+          </div>
+        </div>
 
-        {mode === 'products' &&
-          selectedProducts.map(
-            (product) => (
-              <LabelCard
-                key={product.id}
-                title={product.name}
-                subtitle={`${product.category} · ${product.subcategory}`}
-                reference={
-                  product.internalRef
-                }
-                qrValue={productQrValue(
-                  product
-                )}
-              />
-            )
-          )}
-
-        {mode === 'locations' &&
-          selectedLocations.map(
-            (location) => (
-              <LabelCard
-                key={location.id}
-                title={location.name}
-                subtitle="Lieu de stockage"
-                reference={location.internalRef}
-                qrValue={locationQrValue(
-                  location
-                )}
-              />
-            )
-          )}
+        {!!selectedLabelItems.length && (
+          <button
+            className="button secondary"
+            type="button"
+            onClick={() =>
+              setSelectedIds([])
+            }
+          >
+            Vider la planche
+          </button>
+        )}
       </div>
 
+      {!selectedLabelItems.length && (
+        <Card>
+          <div
+            className="screenOnly"
+            style={{
+              padding: 20,
+              textAlign: 'center',
+              opacity: 0.7,
+            }}
+          >
+            Sélectionne les étiquettes souhaitées.
+            Elles se placeront automatiquement sur
+            la planche A4 dans l’ordre de sélection.
+          </div>
+        </Card>
+      )}
+
+      <div className="a4Pages">
+        {a4Pages.map((pageItems, pageIndex) => (
+          <div
+            className="a4Page"
+            key={`page-${pageIndex}`}
+          >
+            <div className="a4LabelGrid">
+              {pageItems.map((label) => (
+                <LabelCard
+                  key={label.id}
+                  title={label.title}
+                  subtitle={label.subtitle}
+                  reference={label.reference}
+                  qrValue={label.qrValue}
+                />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+
       <style jsx global>{`
+        .a4Pages {
+          display: grid;
+          gap: 22px;
+          margin-top: 12px;
+        }
+
+        .a4Page {
+          width: 210mm;
+          min-height: 297mm;
+          box-sizing: border-box;
+          padding: 10mm;
+          margin: 0 auto;
+          background: #fff;
+          color: #101828;
+          box-shadow:
+            0 8px 30px rgba(16, 24, 40, 0.16);
+        }
+
+        .a4LabelGrid {
+          display: grid;
+          grid-template-columns:
+            repeat(2, 1fr);
+          grid-template-rows:
+            repeat(3, 1fr);
+          gap: 5mm;
+          height: 277mm;
+        }
+
+        .a4Page .printLabel {
+          width: 100% !important;
+          min-height: 0 !important;
+          height: 89mm !important;
+          box-sizing: border-box !important;
+          border-radius: 2mm !important;
+          padding: 4mm !important;
+          gap: 2mm !important;
+          overflow: hidden !important;
+        }
+
+        .a4Page .printLabel svg {
+          width: 43mm !important;
+          height: 43mm !important;
+          flex: 0 0 auto;
+        }
+
+        @page {
+          size: A4 portrait;
+          margin: 0;
+        }
+
         @media print {
+          html,
           body {
-            background: white !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #fff !important;
           }
 
           .sidebar,
@@ -841,27 +1270,79 @@ export default function LabelsPage() {
           }
 
           .shell,
-          .main {
+          .main,
+          .page {
             display: block !important;
             margin: 0 !important;
             padding: 0 !important;
-            width: 100% !important;
+            width: auto !important;
+            max-width: none !important;
+            background: #fff !important;
           }
 
-          .labelsGrid {
+          .a4Pages {
+            display: block !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+
+          .a4Page {
+            width: 210mm !important;
+            height: 297mm !important;
+            min-height: 297mm !important;
+            margin: 0 !important;
+            padding: 10mm !important;
+            box-shadow: none !important;
+            page-break-after: always !important;
+            break-after: page !important;
+          }
+
+          .a4Page:last-child {
+            page-break-after: auto !important;
+            break-after: auto !important;
+          }
+
+          .a4LabelGrid {
             display: grid !important;
             grid-template-columns:
+              repeat(2, 1fr) !important;
+            grid-template-rows:
               repeat(3, 1fr) !important;
-            gap: 10mm !important;
-            padding: 10mm !important;
+            gap: 5mm !important;
+            height: 277mm !important;
           }
 
           .printLabel {
-            width: 58mm !important;
-            min-height: 78mm !important;
-            border: 1px solid #999 !important;
-            border-radius: 3mm !important;
-            padding: 5mm !important;
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+            border: 1px solid #7d8696 !important;
+          }
+        }
+
+        @media screen and (max-width: 1000px) {
+          .a4Page {
+            width: 100%;
+            min-height: auto;
+            padding: 16px;
+          }
+
+          .a4LabelGrid {
+            height: auto;
+            grid-template-columns:
+              repeat(2, minmax(0, 1fr));
+            grid-template-rows: none;
+            gap: 12px;
+          }
+
+          .a4Page .printLabel {
+            height: auto !important;
+            min-height: 300px !important;
+          }
+        }
+
+        @media screen and (max-width: 650px) {
+          .a4LabelGrid {
+            grid-template-columns: 1fr;
           }
         }
       `}</style>
