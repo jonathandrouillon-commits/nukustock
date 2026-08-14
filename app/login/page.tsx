@@ -23,14 +23,26 @@ type BeforeInstallPromptEvent = Event & {
   }>
 }
 
-function isRequisitionHost() {
+function currentHost() {
   if (typeof window === 'undefined') {
-    return false
+    return ''
   }
 
+  return window.location.hostname
+    .toLowerCase()
+}
+
+function isRequisitionHost() {
   return (
-    window.location.hostname ===
+    currentHost() ===
     'requisitionnuku.fenuaprobartender.com'
+  )
+}
+
+function isNukuStockHost() {
+  return (
+    currentHost() ===
+    'nukustock.fenuaprobartender.com'
   )
 }
 
@@ -61,6 +73,11 @@ export default function LoginPage() {
   ] = useState(false)
 
   const [
+    nukuStockMode,
+    setNukuStockMode,
+  ] = useState(false)
+
+  const [
     installPrompt,
     setInstallPrompt,
   ] = useState<BeforeInstallPromptEvent | null>(null)
@@ -76,14 +93,23 @@ export default function LoginPage() {
   ] = useState('')
 
   useEffect(() => {
-    const isRequisition =
+    const requisition =
       isRequisitionHost()
 
+    const backOffice =
+      isNukuStockHost()
+
     setRequisitionMode(
-      isRequisition
+      requisition
+    )
+    setNukuStockMode(
+      backOffice
     )
 
-    if (!isRequisition) {
+    if (
+      !requisition &&
+      !backOffice
+    ) {
       return
     }
 
@@ -346,7 +372,7 @@ export default function LoginPage() {
             : 'Accéder à NukuStock'}
         </p>
 
-        {requisitionMode && (
+        {(requisitionMode || nukuStockMode) && (
           <div
             style={{
               marginBottom: 18,
@@ -390,7 +416,9 @@ export default function LoginPage() {
                   cursor: 'pointer',
                 }}
               >
-                Télécharger l’app
+                {requisitionMode
+                  ? 'Télécharger l’app Réquisitions'
+                  : 'Télécharger l’app NukuStock'}
               </button>
             )}
 

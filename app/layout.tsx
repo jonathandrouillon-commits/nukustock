@@ -3,24 +3,48 @@ import type {
   Viewport,
 } from 'next'
 
+import { headers } from 'next/headers'
+
 import './globals.css'
 
 import AuthGate from '@/components/auth-gate'
 
-export const metadata: Metadata = {
-  title: 'NukuStock',
-  description:
-    'Gestion des stocks et approvisionnements de Nukutepipi',
+function isRequisitionHost(host: string) {
+  return host
+    .toLowerCase()
+    .split(':')[0] ===
+    'requisitionnuku.fenuaprobartender.com'
+}
 
-  manifest:
-    '/manifest.webmanifest',
+export async function generateMetadata(): Promise<Metadata> {
+  const headersList = await headers()
+  const host =
+    headersList.get('host') || ''
 
-  appleWebApp: {
-    capable: true,
-    title: 'NukuStock',
-    statusBarStyle:
-      'default',
-  },
+  const requisitionMode =
+    isRequisitionHost(host)
+
+  return {
+    title: requisitionMode
+      ? 'Réquisitions Nuku'
+      : 'NukuStock',
+
+    description: requisitionMode
+      ? 'Réquisitions internes Nukutepipi'
+      : 'Gestion des stocks et approvisionnements de Nukutepipi',
+
+    manifest: requisitionMode
+      ? '/manifest.webmanifest'
+      : '/manifest-nukustock.webmanifest',
+
+    appleWebApp: {
+      capable: true,
+      title: requisitionMode
+        ? 'Réquisitions'
+        : 'NukuStock',
+      statusBarStyle: 'default',
+    },
+  }
 }
 
 export const viewport: Viewport = {
