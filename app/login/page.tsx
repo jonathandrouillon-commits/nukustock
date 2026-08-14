@@ -15,6 +15,14 @@ type LoginZone =
   | 'Matériel & Accessoires'
   | 'All'
 
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>
+  userChoice: Promise<{
+    outcome: 'accepted' | 'dismissed'
+    platform: string
+  }>
+}
+
 function isRequisitionHost() {
   if (typeof window === 'undefined') {
     return false
@@ -52,11 +60,115 @@ export default function LoginPage() {
     setRequisitionMode,
   ] = useState(false)
 
+  const [
+    installPrompt,
+    setInstallPrompt,
+  ] = useState<BeforeInstallPromptEvent | null>(null)
+
+  const [
+    appInstalled,
+    setAppInstalled,
+  ] = useState(false)
+
+  const [
+    installMessage,
+    setInstallMessage,
+  ] = useState('')
+
   useEffect(() => {
-    setRequisitionMode(
+    const isRequisition =
       isRequisitionHost()
+
+    setRequisitionMode(
+      isRequisition
     )
+
+    if (!isRequisition) {
+      return
+    }
+
+    const standalone =
+      window.matchMedia(
+        '(display-mode: standalone)'
+      ).matches ||
+      (
+        window.navigator as Navigator & {
+          standalone?: boolean
+        }
+      ).standalone === true
+
+    if (standalone) {
+      setAppInstalled(true)
+    }
+
+    const handleBeforeInstallPrompt = (
+      event: Event
+    ) => {
+      event.preventDefault()
+      setInstallPrompt(
+        event as BeforeInstallPromptEvent
+      )
+      setInstallMessage('')
+    }
+
+    const handleAppInstalled = () => {
+      setAppInstalled(true)
+      setInstallPrompt(null)
+      setInstallMessage(
+        'Application installée.'
+      )
+    }
+
+    window.addEventListener(
+      'beforeinstallprompt',
+      handleBeforeInstallPrompt
+    )
+
+    window.addEventListener(
+      'appinstalled',
+      handleAppInstalled
+    )
+
+    return () => {
+      window.removeEventListener(
+        'beforeinstallprompt',
+        handleBeforeInstallPrompt
+      )
+
+      window.removeEventListener(
+        'appinstalled',
+        handleAppInstalled
+      )
+    }
   }, [])
+
+  const installApp = async () => {
+    if (!installPrompt) {
+      setInstallMessage(
+        'L’installation automatique n’est pas disponible pour le moment. Utilise le menu du navigateur puis “Installer l’application” ou “Ajouter à l’écran d’accueil”.'
+      )
+      return
+    }
+
+    await installPrompt.prompt()
+
+    const choice =
+      await installPrompt.userChoice
+
+    if (
+      choice.outcome === 'accepted'
+    ) {
+      setInstallMessage(
+        'Installation lancée.'
+      )
+    } else {
+      setInstallMessage(
+        'Installation annulée.'
+      )
+    }
+
+    setInstallPrompt(null)
+  }
 
   const submit = async (
     event: FormEvent
@@ -233,6 +345,69 @@ export default function LoginPage() {
             ? 'Créer et suivre vos réquisitions'
             : 'Accéder à NukuStock'}
         </p>
+
+        {requisitionMode && (
+          <div
+            style={{
+              marginBottom: 18,
+              display: 'grid',
+              gap: 8,
+            }}
+          >
+            {appInstalled ? (
+              <div
+                style={{
+                  minHeight: 46,
+                  padding: '0 14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border:
+                    '1px solid #abefc6',
+                  borderRadius: 12,
+                  background:
+                    '#ecfdf3',
+                  color: '#067647',
+                  fontSize: 13,
+                  fontWeight: 800,
+                }}
+              >
+                ✓ Application installée
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={installApp}
+                style={{
+                  minHeight: 48,
+                  border:
+                    '1px solid #0b1220',
+                  borderRadius: 12,
+                  background: '#fff',
+                  color: '#0b1220',
+                  fontSize: 14,
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                }}
+              >
+                Télécharger l’app
+              </button>
+            )}
+
+            {installMessage && (
+              <div
+                style={{
+                  color: '#667085',
+                  fontSize: 11,
+                  textAlign: 'center',
+                  lineHeight: 1.4,
+                }}
+              >
+                {installMessage}
+              </div>
+            )}
+          </div>
+        )}
 
         {error && (
           <div
