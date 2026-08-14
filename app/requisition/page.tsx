@@ -8,6 +8,14 @@ import {
 } from 'react'
 import { supabase } from '@/lib/supabase'
 
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>
+  userChoice: Promise<{
+    outcome: 'accepted' | 'dismissed'
+    platform: string
+  }>
+}
+
 type Department = {
   id: string
   name: string
@@ -208,6 +216,21 @@ export default function RequisitionPage() {
   ] = useState<
     DraftLine[]
   >([])
+
+  const [
+    installPrompt,
+    setInstallPrompt,
+  ] = useState<BeforeInstallPromptEvent | null>(null)
+
+  const [
+    appInstalled,
+    setAppInstalled,
+  ] = useState(false)
+
+  const [
+    installMessage,
+    setInstallMessage,
+  ] = useState('')
 
   const productsById =
     useMemo(
@@ -437,6 +460,68 @@ export default function RequisitionPage() {
   useEffect(() => {
     void loadData()
   }, [])
+
+  useEffect(() => {
+    const standalone =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as Navigator & { standalone?: boolean }).standalone === true
+
+    if (standalone) {
+      setAppInstalled(true)
+    }
+
+    const handleBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault()
+      setInstallPrompt(event as BeforeInstallPromptEvent)
+      setInstallMessage('')
+    }
+
+    const handleAppInstalled = () => {
+      setAppInstalled(true)
+      setInstallPrompt(null)
+      setInstallMessage('Application installée.')
+    }
+
+    window.addEventListener(
+      'beforeinstallprompt',
+      handleBeforeInstallPrompt
+    )
+    window.addEventListener(
+      'appinstalled',
+      handleAppInstalled
+    )
+
+    return () => {
+      window.removeEventListener(
+        'beforeinstallprompt',
+        handleBeforeInstallPrompt
+      )
+      window.removeEventListener(
+        'appinstalled',
+        handleAppInstalled
+      )
+    }
+  }, [])
+
+  const installApp = async () => {
+    if (!installPrompt) {
+      setInstallMessage(
+        'Installation non disponible pour le moment. Si tu as déjà installé l’application, cherche “Réquisitions” dans tes applications.'
+      )
+      return
+    }
+
+    await installPrompt.prompt()
+    const choice = await installPrompt.userChoice
+
+    if (choice.outcome === 'accepted') {
+      setInstallMessage('Installation lancée.')
+    } else {
+      setInstallMessage('Installation annulée.')
+    }
+
+    setInstallPrompt(null)
+  }
 
   const resetForm =
     () => {
@@ -884,6 +969,32 @@ export default function RequisitionPage() {
             {error}
           </div>
         )}
+
+        <div style={styles.installBox}>
+          {appInstalled ? (
+            <div style={styles.installedBadge}>
+              ✓ Application installée
+            </div>
+          ) : installPrompt ? (
+            <button
+              type="button"
+              onClick={installApp}
+              style={styles.installButton}
+            >
+              Installer Réquisitions
+            </button>
+          ) : (
+            <div style={styles.installHint}>
+              Réquisitions n’est pas ouverte en mode application.
+            </div>
+          )}
+
+          {installMessage && (
+            <div style={styles.installMessage}>
+              {installMessage}
+            </div>
+          )}
+        </div>
 
         <button
           type="button"
@@ -1430,6 +1541,49 @@ const styles:
     marginTop: 3,
     color: '#667085',
     fontSize: 12,
+  },
+  installBox: {
+    marginBottom: 14,
+  },
+  installButton: {
+    width: '100%',
+    minHeight: 48,
+    padding: '0 16px',
+    border: '1px solid #0b1220',
+    borderRadius: 12,
+    background: '#ffffff',
+    color: '#0b1220',
+    fontSize: 14,
+    fontWeight: 900,
+    cursor: 'pointer',
+  },
+  installedBadge: {
+    minHeight: 46,
+    padding: '0 14px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    border: '1px solid #abefc6',
+    borderRadius: 12,
+    background: '#ecfdf3',
+    color: '#067647',
+    fontSize: 13,
+    fontWeight: 900,
+  },
+  installHint: {
+    padding: '10px 12px',
+    border: '1px solid #e4e7ec',
+    borderRadius: 12,
+    background: '#ffffff',
+    color: '#667085',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  installMessage: {
+    marginTop: 7,
+    color: '#667085',
+    fontSize: 11,
+    textAlign: 'center',
   },
   sectionTitle: {
     margin: '22px 0 12px',
