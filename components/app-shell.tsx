@@ -641,14 +641,6 @@ export function AppShell({
           </Link>
 
           <Link
-            href="/reports"
-            className={isActive(pathname, '/reports') ? 'active' : ''}
-          >
-            <span className="nskSidebarIcon" aria-hidden="true">▦</span>
-            <span>Rapports</span>
-          </Link>
-
-          <Link
             href="/settings"
             className={isActive(pathname, '/settings') ? 'active' : ''}
           >

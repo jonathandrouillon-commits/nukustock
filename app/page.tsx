@@ -17,6 +17,7 @@ type DashboardBlockKey =
   | 'operationalSummary'
   | 'stockByLocation'
   | 'mainStats'
+  | 'charts'
   | 'alerts'
   | 'quickEntries'
   | 'recentMovements'
@@ -38,6 +39,7 @@ const DEFAULT_DASHBOARD_VISIBILITY:
   operationalSummary: true,
   stockByLocation: true,
   mainStats: true,
+  charts: true,
   alerts: true,
   quickEntries: true,
   recentMovements: true,
@@ -55,6 +57,8 @@ const DASHBOARD_BLOCK_LABELS:
     'Stock par lieu',
   mainStats:
     'Indicateurs principaux',
+  charts:
+    'Rapports graphiques',
   alerts:
     'À traiter / Alertes',
   quickEntries:
@@ -75,6 +79,158 @@ function movementSign(
   quantity: number
 ) {
   return quantity > 0 ? '+' : ''
+}
+
+function DashboardBarChart({
+  items,
+  valueFormatter = (value: number) => value.toLocaleString('fr-FR'),
+}: {
+  items: { label: string; value: number }[]
+  valueFormatter?: (value: number) => string
+}) {
+  const max = Math.max(1, ...items.map((item) => item.value))
+
+  if (items.length === 0) {
+    return <div className="muted">Aucune donnée disponible.</div>
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 11 }}>
+      {items.map((item) => (
+        <div key={item.label}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              gap: 12,
+              fontSize: 11,
+              marginBottom: 5,
+            }}
+          >
+            <strong
+              style={{
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {item.label}
+            </strong>
+            <span style={{ color: '#667085', flexShrink: 0 }}>
+              {valueFormatter(item.value)}
+            </span>
+          </div>
+          <div
+            style={{
+              height: 10,
+              borderRadius: 999,
+              background: '#eef2f6',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                width: `${Math.max(2, (item.value / max) * 100)}%`,
+                height: '100%',
+                borderRadius: 999,
+                background: '#0b1220',
+              }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function DashboardDonut({
+  items,
+  centerLabel,
+}: {
+  items: { label: string; value: number; color: string }[]
+  centerLabel: string
+}) {
+  const total = items.reduce((sum, item) => sum + item.value, 0)
+  let cursor = 0
+  const gradient = total
+    ? items
+        .filter((item) => item.value > 0)
+        .map((item) => {
+          const start = (cursor / total) * 100
+          cursor += item.value
+          const end = (cursor / total) * 100
+          return `${item.color} ${start}% ${end}%`
+        })
+        .join(', ')
+    : '#eef2f6 0% 100%'
+
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'minmax(130px,180px) minmax(0,1fr)',
+        gap: 18,
+        alignItems: 'center',
+      }}
+    >
+      <div
+        style={{
+          width: '100%',
+          aspectRatio: '1',
+          borderRadius: '50%',
+          background: `conic-gradient(${gradient})`,
+          display: 'grid',
+          placeItems: 'center',
+        }}
+      >
+        <div
+          style={{
+            width: '64%',
+            aspectRatio: '1',
+            borderRadius: '50%',
+            background: '#fff',
+            display: 'grid',
+            placeItems: 'center',
+            textAlign: 'center',
+            padding: 8,
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 22, fontWeight: 900 }}>
+              {total.toLocaleString('fr-FR')}
+            </div>
+            <div style={{ fontSize: 10, color: '#667085' }}>{centerLabel}</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gap: 8 }}>
+        {items.map((item) => (
+          <div
+            key={item.label}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '10px minmax(0,1fr) auto',
+              gap: 8,
+              alignItems: 'center',
+              fontSize: 11,
+            }}
+          >
+            <span
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: 3,
+                background: item.color,
+              }}
+            />
+            <span>{item.label}</span>
+            <strong>{item.value.toLocaleString('fr-FR')}</strong>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 export default function Home() {
@@ -360,6 +516,114 @@ export default function Home() {
   }, [products])
 
 
+  const stockByCategory = useMemo(() => {
+    const map = new Map<string, number>()
+
+    products.forEach((product) => {
+      const category = product.category || 'Sans catégorie'
+      const value = product.lots.reduce(
+        (sum, lot) =>
+          sum +
+          Math.max(0, Number(lot.quantity) || 0) *
+            Math.max(0, Number(product.purchasePrice) || 0),
+        0
+      )
+      map.set(category, (map.get(category) || 0) + value)
+    })
+
+    return [...map.entries()]
+      .map(([label, value]) => ({ label, value }))
+      .filter((item) => item.value > 0)
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 8)
+  }, [products])
+
+  const expiryChart = useMemo(() => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const buckets = {
+      expired: 0,
+      under30: 0,
+      oneToThree: 0,
+      threeToSix: 0,
+      sixToTwelve: 0,
+      overYear: 0,
+    }
+
+    products.forEach((product) => {
+      product.lots.forEach((lot) => {
+        const qty = Math.max(0, Number(lot.quantity) || 0)
+        if (!lot.expiry || qty <= 0) return
+        const expiry = new Date(`${lot.expiry}T00:00:00`)
+        const days =
+          (expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+
+        if (days < 0) buckets.expired += qty
+        else if (days < 30) buckets.under30 += qty
+        else if (days < 90) buckets.oneToThree += qty
+        else if (days < 180) buckets.threeToSix += qty
+        else if (days < 365) buckets.sixToTwelve += qty
+        else buckets.overYear += qty
+      })
+    })
+
+    return [
+      { label: 'Périmé', value: buckets.expired, color: '#991b1b' },
+      { label: '< 1 mois', value: buckets.under30, color: '#dc2626' },
+      { label: '1–3 mois', value: buckets.oneToThree, color: '#f97316' },
+      { label: '3–6 mois', value: buckets.threeToSix, color: '#eab308' },
+      { label: '6–12 mois', value: buckets.sixToTwelve, color: '#84cc16' },
+      { label: '+ 1 an', value: buckets.overYear, color: '#16a34a' },
+    ]
+  }, [products])
+
+  const movement30Days = useMemo(() => {
+    const now = new Date()
+    const rows = Array.from({ length: 30 }, (_, index) => {
+      const date = new Date(now)
+      date.setHours(0, 0, 0, 0)
+      date.setDate(date.getDate() - (29 - index))
+      return {
+        key: date.toISOString().slice(0, 10),
+        label: date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
+        in: 0,
+        out: 0,
+      }
+    })
+    const map = new Map(rows.map((row) => [row.key, row]))
+
+    movements.forEach((movement) => {
+      const key = new Date(movement.createdAt).toISOString().slice(0, 10)
+      const row = map.get(key)
+      if (!row) return
+      const qty = Number(movement.quantity) || 0
+      if (qty >= 0) row.in += qty
+      else row.out += Math.abs(qty)
+    })
+
+    return rows
+  }, [movements])
+
+  const requestStatusChart = useMemo(() => {
+    const map = new Map<string, number>()
+    requests.forEach((request) => {
+      map.set(request.status, (map.get(request.status) || 0) + 1)
+    })
+    return [...map.entries()]
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value)
+  }, [requests])
+
+  const orderStatusChart = useMemo(() => {
+    const map = new Map<string, number>()
+    orders.forEach((order) => {
+      map.set(order.status, (map.get(order.status) || 0) + 1)
+    })
+    return [...map.entries()]
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value)
+  }, [orders])
+
   const quickEntryGroups =
     useMemo(() => {
       const groups =
@@ -578,7 +842,7 @@ export default function Home() {
   return (
     <Page
       title="Dashboard"
-      subtitle="Vue d’ensemble de NukuStock"
+      subtitle="Pilotage, rapports et analyses NukuStock"
       action={
         <div
           style={{
@@ -1140,6 +1404,171 @@ export default function Home() {
           </div>
         </div>
       </div>
+      )}
+
+      {dashboardVisibility.charts && (
+        <div style={{ marginBottom: 16 }}>
+          <Card>
+            <div style={{ marginBottom: 16 }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: '#667085',
+                  fontWeight: 800,
+                  letterSpacing: '.08em',
+                }}
+              >
+                RAPPORTS GRAPHIQUES
+              </div>
+              <h2 style={{ margin: '5px 0 0', fontSize: 22 }}>
+                Analyse visuelle du stock
+              </h2>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))',
+                gap: 16,
+              }}
+            >
+              <div style={statStyle}>
+                <h3 style={{ margin: '0 0 14px', fontSize: 15 }}>
+                  Stock par catégorie
+                </h3>
+                <DashboardBarChart
+                  items={stockByCategory}
+                  valueFormatter={(value) =>
+                    `${Math.round(value).toLocaleString('fr-FR')} XPF`
+                  }
+                />
+              </div>
+
+              <div style={statStyle}>
+                <h3 style={{ margin: '0 0 14px', fontSize: 15 }}>
+                  Valorisation par lieu
+                </h3>
+                <DashboardBarChart
+                  items={byLocation.slice(0, 10).map((item) => ({
+                    label: item.location,
+                    value: item.value,
+                  }))}
+                  valueFormatter={(value) =>
+                    `${Math.round(value).toLocaleString('fr-FR')} XPF`
+                  }
+                />
+              </div>
+
+              <div style={statStyle}>
+                <h3 style={{ margin: '0 0 14px', fontSize: 15 }}>
+                  DLUO / DLC
+                </h3>
+                <DashboardDonut items={expiryChart} centerLabel="unités datées" />
+              </div>
+
+              <div style={statStyle}>
+                <h3 style={{ margin: '0 0 14px', fontSize: 15 }}>
+                  Top consommations
+                </h3>
+                <DashboardBarChart
+                  items={topConsumption.slice(0, 8).map((line) => ({
+                    label: line.productName,
+                    value: Math.max(0, Number(line.diff) || 0),
+                  }))}
+                />
+              </div>
+
+              <div style={statStyle}>
+                <h3 style={{ margin: '0 0 14px', fontSize: 15 }}>
+                  Mouvements sur 30 jours
+                </h3>
+                <div style={{ display: 'grid', gap: 8 }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      fontSize: 11,
+                      color: '#667085',
+                    }}
+                  >
+                    <span>Entrées</span>
+                    <strong style={{ color: '#101828' }}>
+                      {movement30Days
+                        .reduce((sum, row) => sum + row.in, 0)
+                        .toLocaleString('fr-FR')}
+                    </strong>
+                  </div>
+                  <div
+                    style={{
+                      height: 90,
+                      display: 'flex',
+                      alignItems: 'flex-end',
+                      gap: 3,
+                      borderBottom: '1px solid #e5e7eb',
+                    }}
+                  >
+                    {movement30Days.map((row) => {
+                      const max = Math.max(
+                        1,
+                        ...movement30Days.map((item) => Math.max(item.in, item.out))
+                      )
+                      return (
+                        <div
+                          key={row.key}
+                          title={`${row.label} · Entrées ${row.in} · Sorties ${row.out}`}
+                          style={{
+                            flex: 1,
+                            minWidth: 2,
+                            height: `${Math.max(2, (Math.max(row.in, row.out) / max) * 100)}%`,
+                            borderRadius: '4px 4px 0 0',
+                            background: row.in >= row.out ? '#0b1220' : '#98a2b3',
+                          }}
+                        />
+                      )
+                    })}
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      fontSize: 10,
+                      color: '#98a2b3',
+                    }}
+                  >
+                    <span>{movement30Days[0]?.label}</span>
+                    <span>{movement30Days[movement30Days.length - 1]?.label}</span>
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      fontSize: 11,
+                      color: '#667085',
+                    }}
+                  >
+                    <span>Sorties</span>
+                    <strong style={{ color: '#101828' }}>
+                      {movement30Days
+                        .reduce((sum, row) => sum + row.out, 0)
+                        .toLocaleString('fr-FR')}
+                    </strong>
+                  </div>
+                </div>
+              </div>
+
+              <div style={statStyle}>
+                <h3 style={{ margin: '0 0 14px', fontSize: 15 }}>
+                  Réquisitions par statut
+                </h3>
+                <DashboardBarChart items={requestStatusChart} />
+                <h3 style={{ margin: '20px 0 14px', fontSize: 15 }}>
+                  Commandes par statut
+                </h3>
+                <DashboardBarChart items={orderStatusChart} />
+              </div>
+            </div>
+          </Card>
+        </div>
       )}
 
       {dashboardVisibility.alerts && (
