@@ -36,6 +36,11 @@ type ScanType =
   | 'location'
   | 'supplier'
 
+type StorageLocation = {
+  id: string
+  name: string
+}
+
 function formatDate(value: string | null) {
   if (!value) return 'Sans DLUO/DLC'
 
@@ -130,6 +135,41 @@ export default function ScanPage() {
     setLots,
   ] = useState<LotRow[]>([])
 
+  const [
+    storageLocations,
+    setStorageLocations,
+  ] = useState<StorageLocation[]>([])
+
+  const [
+    transferOpen,
+    setTransferOpen,
+  ] = useState(false)
+
+  const [
+    transferLot,
+    setTransferLot,
+  ] = useState<LotRow | null>(null)
+
+  const [
+    transferTo,
+    setTransferTo,
+  ] = useState('')
+
+  const [
+    transferQty,
+    setTransferQty,
+  ] = useState(1)
+
+  const [
+    transferBusy,
+    setTransferBusy,
+  ] = useState(false)
+
+  const [
+    transferMessage,
+    setTransferMessage,
+  ] = useState('')
+
   useEffect(() => {
     const load = async () => {
       setLoading(true)
@@ -163,6 +203,23 @@ export default function ScanPage() {
       setType(scanType)
 
       try {
+        const {
+          data: locationRows,
+          error: locationError,
+        } = await supabase
+          .from('storage_locations')
+          .select('id, name')
+          .eq('active', true)
+          .order('name')
+
+        if (locationError) {
+          throw locationError
+        }
+
+        setStorageLocations(
+          (locationRows || []) as StorageLocation[]
+        )
+
         let productQuery =
           supabase
             .from('products')
@@ -478,6 +535,230 @@ export default function ScanPage() {
     void load()
   }, [])
 
+  const openTransfer = (
+    lot: LotRow
+  ) => {
+    const available =
+      Math.max(
+        0,
+        Number(lot.quantity) || 0
+      )
+
+    if (available <= 0) {
+      setTransferMessage(
+        'Aucun stock disponible à transférer.'
+      )
+      return
+    }
+
+    setTransferLot(lot)
+    setTransferTo('')
+    setTransferQty(1)
+    setTransferMessage('')
+    setTransferOpen(true)
+  }
+
+  const confirmTransfer =
+    async () => {
+      if (!transferLot) {
+        return
+      }
+
+      const available =
+        Math.max(
+          0,
+          Number(
+            transferLot.quantity
+          ) || 0
+        )
+
+      const quantity =
+        Math.max(
+          0,
+          Number(transferQty) || 0
+        )
+
+      if (!transferTo) {
+        setTransferMessage(
+          'Choisis le lieu de destination.'
+        )
+        return
+      }
+
+      if (
+        transferTo ===
+        transferLot.location_name
+      ) {
+        setTransferMessage(
+          'Le lieu de destination doit être différent du lieu source.'
+        )
+        return
+      }
+
+      if (
+        quantity <= 0 ||
+        quantity > available
+      ) {
+        setTransferMessage(
+          `Quantité invalide. Disponible : ${available}.`
+        )
+        return
+      }
+
+      setTransferBusy(true)
+      setTransferMessage('')
+
+      try {
+        const remaining =
+          available - quantity
+
+        const {
+          error: sourceError,
+        } = await supabase
+          .from('product_lots')
+          .update({
+            quantity: remaining,
+          })
+          .eq('id', transferLot.id)
+
+        if (sourceError) {
+          throw sourceError
+        }
+
+        const {
+          data: destinationLots,
+          error: destinationFindError,
+        } = await supabase
+          .from('product_lots')
+          .select(
+            'id, quantity'
+          )
+          .eq(
+            'product_id',
+            transferLot.product_id
+          )
+          .eq(
+            'location_name',
+            transferTo
+          )
+
+        if (destinationFindError) {
+          throw destinationFindError
+        }
+
+        const sameDestination =
+          (destinationLots || []).find(
+            (row: any) => {
+              const lot =
+                lots.find(
+                  (item) =>
+                    item.id === row.id
+                )
+
+              return lot
+                ? (
+                    (lot.lot_number || '') ===
+                      (transferLot.lot_number || '') &&
+                    (lot.expiry || '') ===
+                      (transferLot.expiry || '')
+                  )
+                : false
+            }
+          )
+
+        if (sameDestination) {
+          const {
+            error: destinationUpdateError,
+          } = await supabase
+            .from('product_lots')
+            .update({
+              quantity:
+                Math.max(
+                  0,
+                  Number(
+                    sameDestination.quantity
+                  ) || 0
+                ) + quantity,
+            })
+            .eq(
+              'id',
+              sameDestination.id
+            )
+
+          if (destinationUpdateError) {
+            throw destinationUpdateError
+          }
+        } else {
+          const {
+            error: destinationInsertError,
+          } = await supabase
+            .from('product_lots')
+            .insert({
+              id: crypto.randomUUID(),
+              legacy_id:
+                crypto.randomUUID(),
+              product_id:
+                transferLot.product_id,
+              lot_number:
+                transferLot.lot_number ||
+                null,
+              expiry:
+                transferLot.expiry ||
+                null,
+              location_name:
+                transferTo,
+              quantity,
+            })
+
+          if (destinationInsertError) {
+            throw destinationInsertError
+          }
+        }
+
+        const {
+          data: refreshedLots,
+          error: refreshError,
+        } = await supabase
+          .from('product_lots')
+          .select(
+            'id, product_id, lot_number, expiry, location_name, quantity'
+          )
+          .eq(
+            'product_id',
+            transferLot.product_id
+          )
+          .order('expiry', {
+            ascending: true,
+          })
+
+        if (refreshError) {
+          throw refreshError
+        }
+
+        setLots(
+          (refreshedLots || []) as LotRow[]
+        )
+
+        setTransferOpen(false)
+        setTransferMessage(
+          `Transfert effectué : ${quantity} unité(s) vers ${transferTo}.`
+        )
+      } catch (caughtError) {
+        console.error(
+          'Transfert QR NukuStock:',
+          caughtError
+        )
+
+        setTransferMessage(
+          caughtError instanceof Error
+            ? caughtError.message
+            : 'Impossible d’effectuer le transfert.'
+        )
+      } finally {
+        setTransferBusy(false)
+      }
+    }
+
   const sortedProducts =
     useMemo(
       () =>
@@ -517,6 +798,12 @@ export default function ScanPage() {
         {error && (
           <div style={styles.error}>
             {error}
+          </div>
+        )}
+
+        {transferMessage && !transferOpen && (
+          <div style={styles.transferNotice}>
+            {transferMessage}
           </div>
         )}
 
@@ -733,15 +1020,39 @@ export default function ScanPage() {
                                   </div>
                                 </div>
 
-                                <strong
-                                  style={
-                                    styles.qty
-                                  }
+                                <div
+                                  style={{
+                                    display: 'grid',
+                                    justifyItems: 'end',
+                                    gap: 6,
+                                  }}
                                 >
-                                  {Number(
-                                    lot.quantity
-                                  ) || 0}
-                                </strong>
+                                  <strong
+                                    style={
+                                      styles.qty
+                                    }
+                                  >
+                                    {Number(
+                                      lot.quantity
+                                    ) || 0}
+                                  </strong>
+
+                                  {type === 'product' && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        openTransfer(
+                                          lot
+                                        )
+                                      }
+                                      style={
+                                        styles.transferButton
+                                      }
+                                    >
+                                      Transférer
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             )
                           )
@@ -771,6 +1082,166 @@ export default function ScanPage() {
           </>
         )}
       </section>
+
+      {transferOpen && transferLot && (
+        <div
+          style={styles.modalBackdrop}
+          onMouseDown={(event) => {
+            if (
+              event.currentTarget ===
+              event.target
+            ) {
+              setTransferOpen(false)
+            }
+          }}
+        >
+          <div style={styles.modal}>
+            <h2 style={{ margin: 0 }}>
+              Transférer le stock
+            </h2>
+
+            <div
+              style={{
+                marginTop: 8,
+                color: '#667085',
+                fontSize: 13,
+              }}
+            >
+              Source :{' '}
+              <strong>
+                {transferLot.location_name ||
+                  'Non affecté'}
+              </strong>
+              {' · '}
+              Disponible :{' '}
+              <strong>
+                {Math.max(
+                  0,
+                  Number(
+                    transferLot.quantity
+                  ) || 0
+                )}
+              </strong>
+            </div>
+
+            <div
+              style={{
+                marginTop: 18,
+                display: 'grid',
+                gap: 14,
+              }}
+            >
+              <label>
+                <div style={styles.fieldLabel}>
+                  Lieu de destination
+                </div>
+
+                <select
+                  value={transferTo}
+                  onChange={(event) =>
+                    setTransferTo(
+                      event.target.value
+                    )
+                  }
+                  style={styles.field}
+                >
+                  <option value="">
+                    Choisir un lieu
+                  </option>
+
+                  {storageLocations
+                    .filter(
+                      (location) =>
+                        location.name !==
+                        transferLot.location_name
+                    )
+                    .map((location) => (
+                      <option
+                        key={location.id}
+                        value={location.name}
+                      >
+                        {location.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+
+              <label>
+                <div style={styles.fieldLabel}>
+                  Quantité
+                </div>
+
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  max={Math.max(
+                    0,
+                    Number(
+                      transferLot.quantity
+                    ) || 0
+                  )}
+                  value={transferQty}
+                  onChange={(event) =>
+                    setTransferQty(
+                      Math.max(
+                        0,
+                        Number(
+                          event.target.value
+                        ) || 0
+                      )
+                    )
+                  }
+                  style={styles.field}
+                />
+              </label>
+
+              {transferMessage && (
+                <div style={styles.error}>
+                  {transferMessage}
+                </div>
+              )}
+            </div>
+
+            <div
+              style={{
+                marginTop: 20,
+                display: 'grid',
+                gridTemplateColumns:
+                  '1fr 1.3fr',
+                gap: 8,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() =>
+                  setTransferOpen(false)
+                }
+                style={
+                  styles.secondaryButton
+                }
+              >
+                Annuler
+              </button>
+
+              <button
+                type="button"
+                disabled={transferBusy}
+                onClick={() =>
+                  void confirmTransfer()
+                }
+                style={
+                  styles.primaryButton
+                }
+              >
+                {transferBusy
+                  ? 'Transfert...'
+                  : 'Confirmer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }
@@ -937,6 +1408,80 @@ const styles:
     color: '#b42318',
     fontSize: 12,
     fontWeight: 700,
+  },
+  transferButton: {
+    border: '1px solid #d0d5dd',
+    borderRadius: 9,
+    background: '#fff',
+    color: '#101828',
+    padding: '7px 10px',
+    fontSize: 11,
+    fontWeight: 800,
+    cursor: 'pointer',
+  },
+  transferNotice: {
+    marginBottom: 12,
+    padding: 12,
+    borderRadius: 12,
+    background: '#ecfdf3',
+    border: '1px solid #abefc6',
+    color: '#067647',
+    fontSize: 12,
+    fontWeight: 800,
+  },
+  modalBackdrop: {
+    position: 'fixed',
+    inset: 0,
+    zIndex: 1000,
+    display: 'grid',
+    placeItems: 'center',
+    padding: 16,
+    background: 'rgba(15,23,42,.62)',
+  },
+  modal: {
+    width: 'min(520px,100%)',
+    maxHeight: '90vh',
+    overflowY: 'auto',
+    padding: 20,
+    borderRadius: 18,
+    background: '#fff',
+    color: '#101828',
+    boxShadow:
+      '0 24px 70px rgba(15,23,42,.28)',
+  },
+  fieldLabel: {
+    marginBottom: 6,
+    fontSize: 12,
+    fontWeight: 800,
+  },
+  field: {
+    width: '100%',
+    minHeight: 48,
+    boxSizing: 'border-box',
+    padding: '0 12px',
+    borderRadius: 12,
+    border: '1px solid #d0d5dd',
+    background: '#fff',
+    color: '#101828',
+    fontSize: 16,
+  },
+  primaryButton: {
+    minHeight: 48,
+    border: 0,
+    borderRadius: 12,
+    background: '#101828',
+    color: '#fff',
+    fontWeight: 900,
+    cursor: 'pointer',
+  },
+  secondaryButton: {
+    minHeight: 48,
+    border: '1px solid #d0d5dd',
+    borderRadius: 12,
+    background: '#fff',
+    color: '#101828',
+    fontWeight: 800,
+    cursor: 'pointer',
   },
   empty: {
     padding: 26,
