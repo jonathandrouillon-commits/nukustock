@@ -22,6 +22,7 @@ type DashboardBlockKey =
   | 'quickEntries'
   | 'recentMovements'
   | 'latestInventory'
+  | 'dailyConsumption'
   | 'topConsumption'
   | 'orders'
   | 'requests'
@@ -44,6 +45,7 @@ const DEFAULT_DASHBOARD_VISIBILITY:
   quickEntries: true,
   recentMovements: true,
   latestInventory: true,
+  dailyConsumption: true,
   topConsumption: true,
   orders: true,
   requests: true,
@@ -67,6 +69,8 @@ const DASHBOARD_BLOCK_LABELS:
     'Mouvements récents',
   latestInventory:
     'Dernier inventaire',
+  dailyConsumption:
+    'Consommation journalière',
   topConsumption:
     'Plus fortes consommations',
   orders:
@@ -425,6 +429,98 @@ export default function Home() {
       guests,
     }
   }, [latestInventory])
+
+  const dailyConsumptionBetweenInventories = useMemo(() => {
+    if (inventories.length < 2) {
+      return {
+        currentInventory: undefined,
+        previousInventory: undefined,
+        days: 0,
+        guests: 0,
+        totalConsumption: 0,
+        totalValue: 0,
+        perDay: 0,
+        perGuestPerDay: 0,
+        valuePerDay: 0,
+        valuePerGuestPerDay: 0,
+      }
+    }
+
+    const sorted = [...inventories].sort(
+      (a, b) =>
+        new Date(b.date).getTime() -
+        new Date(a.date).getTime()
+    )
+
+    const currentInventory = sorted[0]
+    const previousInventory = sorted[1]
+
+    const start = new Date(
+      `${previousInventory.date}T00:00:00`
+    )
+
+    const end = new Date(
+      `${currentInventory.date}T00:00:00`
+    )
+
+    const days = Math.max(
+      1,
+      Math.round(
+        (end.getTime() - start.getTime()) /
+          (1000 * 60 * 60 * 24)
+      )
+    )
+
+    const totalConsumption =
+      currentInventory.lines.reduce(
+        (sum, line) =>
+          sum +
+          Math.max(
+            0,
+            Number(line.diff) || 0
+          ),
+        0
+      )
+
+    const totalValue =
+      currentInventory.lines.reduce(
+        (sum, line) =>
+          sum +
+          Math.max(
+            0,
+            Number(line.value) || 0
+          ),
+        0
+      )
+
+    const guests = Math.max(
+      0,
+      Number(currentInventory.guestCount) || 0
+    )
+
+    return {
+      currentInventory,
+      previousInventory,
+      days,
+      guests,
+      totalConsumption,
+      totalValue,
+      perDay:
+        totalConsumption / days,
+      perGuestPerDay:
+        guests > 0
+          ? totalConsumption /
+            (days * guests)
+          : 0,
+      valuePerDay:
+        totalValue / days,
+      valuePerGuestPerDay:
+        guests > 0
+          ? totalValue /
+            (days * guests)
+          : 0,
+    }
+  }, [inventories])
 
   const topConsumption = useMemo(() => {
     if (!latestInventory) return []
@@ -1973,6 +2069,239 @@ export default function Home() {
           )}
         </div>
       )}
+
+      {dashboardVisibility.dailyConsumption && (
+        <Card>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-start',
+              gap: 12,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: '#667085',
+                  fontWeight: 800,
+                  letterSpacing: '.08em',
+                }}
+              >
+                CONSOMMATION ENTRE INVENTAIRES
+              </div>
+
+              <h2
+                style={{
+                  margin: '4px 0 0',
+                }}
+              >
+                Consommation journalière
+              </h2>
+
+              {dailyConsumptionBetweenInventories.currentInventory &&
+              dailyConsumptionBetweenInventories.previousInventory ? (
+                <div
+                  style={{
+                    marginTop: 5,
+                    color: '#667085',
+                    fontSize: 12,
+                  }}
+                >
+                  Du{' '}
+                  {new Date(
+                    dailyConsumptionBetweenInventories.previousInventory.date
+                  ).toLocaleDateString('fr-FR')}{' '}
+                  au{' '}
+                  {new Date(
+                    dailyConsumptionBetweenInventories.currentInventory.date
+                  ).toLocaleDateString('fr-FR')}
+                  {' · '}
+                  {dailyConsumptionBetweenInventories.days}{' '}
+                  jour
+                  {dailyConsumptionBetweenInventories.days > 1
+                    ? 's'
+                    : ''}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    marginTop: 5,
+                    color: '#667085',
+                    fontSize: 12,
+                  }}
+                >
+                  Il faut au moins deux inventaires pour calculer la consommation journalière.
+                </div>
+              )}
+            </div>
+
+            {dailyConsumptionBetweenInventories.guests > 0 && (
+              <Badge tone="info">
+                {dailyConsumptionBetweenInventories.guests}{' '}
+                invité
+                {dailyConsumptionBetweenInventories.guests > 1
+                  ? 's'
+                  : ''}
+              </Badge>
+            )}
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns:
+                'repeat(auto-fit,minmax(180px,1fr))',
+              gap: 12,
+              marginTop: 16,
+            }}
+          >
+            <div style={statStyle}>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: '#667085',
+                }}
+              >
+                Consommation totale
+              </div>
+
+              <div
+                style={{
+                  fontSize: 22,
+                  fontWeight: 900,
+                  marginTop: 5,
+                }}
+              >
+                {dailyConsumptionBetweenInventories.totalConsumption.toLocaleString(
+                  'fr-FR',
+                  {
+                    maximumFractionDigits: 2,
+                  }
+                )}
+              </div>
+            </div>
+
+            <div style={statStyle}>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: '#667085',
+                }}
+              >
+                Consommation / jour
+              </div>
+
+              <div
+                style={{
+                  fontSize: 22,
+                  fontWeight: 900,
+                  marginTop: 5,
+                }}
+              >
+                {dailyConsumptionBetweenInventories.perDay.toLocaleString(
+                  'fr-FR',
+                  {
+                    maximumFractionDigits: 2,
+                  }
+                )}
+              </div>
+            </div>
+
+            <div style={statStyle}>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: '#667085',
+                }}
+              >
+                Valeur / jour
+              </div>
+
+              <div
+                style={{
+                  fontSize: 20,
+                  fontWeight: 900,
+                  marginTop: 5,
+                }}
+              >
+                {dailyConsumptionBetweenInventories.valuePerDay.toLocaleString(
+                  'fr-FR',
+                  {
+                    maximumFractionDigits: 0,
+                  }
+                )}{' '}
+                XPF
+              </div>
+            </div>
+
+            {dailyConsumptionBetweenInventories.guests > 0 && (
+              <>
+                <div style={statStyle}>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: '#667085',
+                    }}
+                  >
+                    Consommation / personne / jour
+                  </div>
+
+                  <div
+                    style={{
+                      fontSize: 22,
+                      fontWeight: 900,
+                      marginTop: 5,
+                    }}
+                  >
+                    {dailyConsumptionBetweenInventories.perGuestPerDay.toLocaleString(
+                      'fr-FR',
+                      {
+                        maximumFractionDigits: 3,
+                      }
+                    )}
+                  </div>
+                </div>
+
+                <div style={statStyle}>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: '#667085',
+                    }}
+                  >
+                    Valeur / personne / jour
+                  </div>
+
+                  <div
+                    style={{
+                      fontSize: 20,
+                      fontWeight: 900,
+                      marginTop: 5,
+                    }}
+                  >
+                    {dailyConsumptionBetweenInventories.valuePerGuestPerDay.toLocaleString(
+                      'fr-FR',
+                      {
+                        maximumFractionDigits: 0,
+                      }
+                    )}{' '}
+                    XPF
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </Card>
+      )}
+
+      <div
+        style={{
+          height: 16,
+        }}
+      />
 
       <div
         style={{

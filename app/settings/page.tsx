@@ -5,6 +5,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  type ReactNode,
 } from 'react'
 
 import {
@@ -14,6 +15,10 @@ import {
 
 import { resetDemoData, useMasterData } from '@/lib/store'
 import { supabase } from '@/lib/supabase'
+
+import * as XLSX from 'xlsx'
+import { jsPDF } from 'jspdf'
+import { autoTable } from 'jspdf-autotable'
 
 type Role =
   | 'admin'
@@ -50,6 +55,136 @@ type UserForm = {
   job_title: string
   role: Role
   active: boolean
+}
+
+type SettingsSectionKey =
+  | 'system'
+  | 'categories'
+  | 'subcategories'
+  | 'users'
+
+type SettingsSectionState =
+  Record<SettingsSectionKey, boolean>
+
+const SETTINGS_SECTION_VISIBILITY_KEY =
+  'nukustock_settings_section_visibility_v1'
+
+const SETTINGS_SECTION_OPEN_KEY =
+  'nukustock_settings_section_open_v1'
+
+const DEFAULT_SETTINGS_SECTION_STATE:
+  SettingsSectionState = {
+  system: true,
+  categories: true,
+  subcategories: true,
+  users: true,
+}
+
+const SETTINGS_SECTION_LABELS:
+  Record<SettingsSectionKey, string> = {
+  system: 'Système',
+  categories: 'Catégories produits',
+  subcategories: 'Sous-catégories',
+  users: 'Gestion des utilisateurs',
+}
+
+function SettingsSectionFrame({
+  sectionKey,
+  title,
+  description,
+  open,
+  onToggleOpen,
+  onExcel,
+  onPdf,
+  onPrint,
+  children,
+}: {
+  sectionKey: SettingsSectionKey
+  title: string
+  description: string
+  open: boolean
+  onToggleOpen: () => void
+  onExcel: () => void
+  onPdf: () => void
+  onPrint: () => void
+  children: ReactNode
+}) {
+  return (
+    <section
+      data-settings-section={sectionKey}
+      style={{ marginBottom: 16 }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 12,
+          flexWrap: 'wrap',
+          padding: 14,
+          border: '1px solid #e5e7eb',
+          borderRadius: 14,
+          background: '#fff',
+          marginBottom: open ? 10 : 0,
+        }}
+      >
+        <div style={{ minWidth: 0, flex: '1 1 240px' }}>
+          <div style={{ fontSize: 16, fontWeight: 900 }}>
+            {title}
+          </div>
+          <div
+            style={{
+              marginTop: 4,
+              color: '#667085',
+              fontSize: 11,
+              lineHeight: 1.45,
+            }}
+          >
+            {description}
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: 'flex',
+            gap: 7,
+            flexWrap: 'wrap',
+          }}
+        >
+          <button
+            type="button"
+            className="button secondary small"
+            onClick={onToggleOpen}
+          >
+            {open ? 'Masquer détails' : 'Ouvrir en détails'}
+          </button>
+          <button
+            type="button"
+            className="button secondary small"
+            onClick={onExcel}
+          >
+            XLS
+          </button>
+          <button
+            type="button"
+            className="button secondary small"
+            onClick={onPdf}
+          >
+            PDF A4
+          </button>
+          <button
+            type="button"
+            className="button secondary small"
+            onClick={onPrint}
+          >
+            Imprimer
+          </button>
+        </div>
+      </div>
+
+      {open && children}
+    </section>
+  )
 }
 
 const emptyForm: UserForm = {
@@ -108,17 +243,6 @@ export default function Settings() {
     setEditingSubcategoryId,
   ] = useState('')
 
-
-  const [
-    zoneName,
-    setZoneName,
-  ] = useState('')
-
-  const [
-    editingZoneId,
-    setEditingZoneId,
-  ] = useState('')
-
   const [
     users,
     setUsers,
@@ -170,6 +294,85 @@ export default function Settings() {
     setIsAdmin,
   ] = useState(false)
 
+  const [
+    sectionVisibility,
+    setSectionVisibility,
+  ] = useState<SettingsSectionState>(
+    DEFAULT_SETTINGS_SECTION_STATE
+  )
+
+  const [
+    sectionOpen,
+    setSectionOpen,
+  ] = useState<SettingsSectionState>(
+    DEFAULT_SETTINGS_SECTION_STATE
+  )
+
+  useEffect(() => {
+    try {
+      const visibleRaw = localStorage.getItem(
+        SETTINGS_SECTION_VISIBILITY_KEY
+      )
+
+      if (visibleRaw) {
+        setSectionVisibility({
+          ...DEFAULT_SETTINGS_SECTION_STATE,
+          ...JSON.parse(visibleRaw),
+        })
+      }
+
+      const openRaw = localStorage.getItem(
+        SETTINGS_SECTION_OPEN_KEY
+      )
+
+      if (openRaw) {
+        setSectionOpen({
+          ...DEFAULT_SETTINGS_SECTION_STATE,
+          ...JSON.parse(openRaw),
+        })
+      }
+    } catch {
+      // Garde les réglages par défaut.
+    }
+  }, [])
+
+  const updateSectionVisibility = (
+    key: SettingsSectionKey,
+    visible: boolean
+  ) => {
+    setSectionVisibility((current) => {
+      const next = {
+        ...current,
+        [key]: visible,
+      }
+
+      localStorage.setItem(
+        SETTINGS_SECTION_VISIBILITY_KEY,
+        JSON.stringify(next)
+      )
+
+      return next
+    })
+  }
+
+  const toggleSectionOpen = (
+    key: SettingsSectionKey
+  ) => {
+    setSectionOpen((current) => {
+      const next = {
+        ...current,
+        [key]: !current[key],
+      }
+
+      localStorage.setItem(
+        SETTINGS_SECTION_OPEN_KEY,
+        JSON.stringify(next)
+      )
+
+      return next
+    })
+  }
+
   const normalizeReferenceName = (
     value: string
   ) =>
@@ -182,25 +385,6 @@ export default function Settings() {
       .replace(/\s+/g, ' ')
       .trim()
       .toLowerCase()
-
-  const zones =
-    useMemo(
-      () =>
-        masterData
-          .filter(
-            (item) =>
-              item.type ===
-              'zone'
-          )
-          .sort(
-            (a, b) =>
-              a.name.localeCompare(
-                b.name,
-                'fr'
-              )
-          ),
-      [masterData]
-    )
 
   const categories =
     useMemo(
@@ -670,185 +854,6 @@ export default function Settings() {
       )
     }
 
-  const saveZone =
-    () => {
-      const name =
-        zoneName
-          .replace(/\s+/g, ' ')
-          .trim()
-          .toUpperCase()
-
-      if (!name) {
-        setError(
-          'Le nom de la zone est obligatoire.'
-        )
-        return
-      }
-
-      const duplicate =
-        zones.find(
-          (item) =>
-            normalizeReferenceName(
-              item.name
-            ) ===
-              normalizeReferenceName(
-                name
-              ) &&
-            item.id !==
-              editingZoneId
-        )
-
-      if (duplicate) {
-        setError(
-          `La zone "${duplicate.name}" existe déjà.`
-        )
-        return
-      }
-
-      setError('')
-      setMessage('')
-
-      if (editingZoneId) {
-        saveMasterData(
-          masterData.map(
-            (item) =>
-              item.id ===
-                editingZoneId
-                ? {
-                    ...item,
-                    name,
-                  }
-                : item
-          )
-        )
-
-        setMessage(
-          `Zone "${name}" modifiée.`
-        )
-      } else {
-        saveMasterData([
-          ...masterData,
-          {
-            id:
-              crypto.randomUUID(),
-            type: 'zone',
-            name,
-            active: true,
-          },
-        ])
-
-        setMessage(
-          `Zone "${name}" ajoutée.`
-        )
-      }
-
-      setZoneName('')
-      setEditingZoneId('')
-    }
-
-  const editZone =
-    (id: string) => {
-      const zone =
-        zones.find(
-          (item) =>
-            item.id === id
-        )
-
-      if (!zone) return
-
-      setZoneName(
-        zone.name
-      )
-
-      setEditingZoneId(
-        zone.id
-      )
-    }
-
-  const toggleZone =
-    (id: string) => {
-      const zone =
-        zones.find(
-          (item) =>
-            item.id === id
-        )
-
-      if (!zone) return
-
-      const nextActive =
-        zone.active === false
-
-      if (
-        !window.confirm(
-          nextActive
-            ? `Réactiver la zone "${zone.name}" ?`
-            : `Désactiver la zone "${zone.name}" ?`
-        )
-      ) {
-        return
-      }
-
-      saveMasterData(
-        masterData.map(
-          (item) =>
-            item.id === id
-              ? {
-                  ...item,
-                  active:
-                    nextActive,
-                }
-              : item
-        )
-      )
-
-      setMessage(
-        nextActive
-          ? `Zone "${zone.name}" réactivée.`
-          : `Zone "${zone.name}" désactivée.`
-      )
-    }
-
-  const deleteZone =
-    (id: string) => {
-      const zone =
-        zones.find(
-          (item) =>
-            item.id === id
-        )
-
-      if (!zone) return
-
-      if (
-        !window.confirm(
-          `Supprimer la zone "${zone.name}" ?`
-        )
-      ) {
-        return
-      }
-
-      if (
-        !window.confirm(
-          `DERNIÈRE CONFIRMATION\n\nSupprimer définitivement la zone "${zone.name}" ?`
-        )
-      ) {
-        return
-      }
-
-      saveMasterData(
-        masterData.filter(
-          (item) =>
-            item.id !== id
-        )
-      )
-
-      setZoneName('')
-      setEditingZoneId('')
-
-      setMessage(
-        `Zone "${zone.name}" supprimée.`
-      )
-    }
-
   const departmentById =
     useMemo(
       () =>
@@ -1230,6 +1235,318 @@ export default function Settings() {
       await loadUsers()
     }
 
+  const getSettingsSectionRows = (
+    key: SettingsSectionKey
+  ): Record<string, string | number>[] => {
+    if (key === 'system') {
+      return [
+        {
+          Élément: 'Mode de données',
+          Valeur:
+            'Supabase + données locales NukuStock',
+        },
+        {
+          Élément: 'Catégories',
+          Valeur: categories.length,
+        },
+        {
+          Élément: 'Sous-catégories',
+          Valeur: masterData.filter(
+            (item) => item.type === 'subcategory'
+          ).length,
+        },
+        {
+          Élément: 'Utilisateurs',
+          Valeur: users.length,
+        },
+      ]
+    }
+
+    if (key === 'categories') {
+      return categories.map((category) => {
+        const subcategoryCount =
+          masterData.filter(
+            (item) =>
+              item.type === 'subcategory' &&
+              item.parentId === category.id
+          ).length
+
+        return {
+          ID: category.id,
+          Catégorie: category.name,
+          Statut:
+            category.active === false
+              ? 'Désactivée'
+              : 'Active',
+          'Sous-catégories':
+            subcategoryCount,
+        }
+      })
+    }
+
+    if (key === 'subcategories') {
+      return masterData
+        .filter(
+          (item) =>
+            item.type === 'subcategory'
+        )
+        .sort((a, b) =>
+          a.name.localeCompare(b.name, 'fr')
+        )
+        .map((subcategory) => {
+          const parent = categories.find(
+            (category) =>
+              category.id ===
+              subcategory.parentId
+          )
+
+          return {
+            ID: subcategory.id,
+            'Sous-catégorie':
+              subcategory.name,
+            Catégorie:
+              parent?.name ||
+              'Non rattachée',
+          }
+        })
+    }
+
+    return users.map((user) => {
+      const department = departments.find(
+        (item) =>
+          item.id ===
+          user.department_id
+      )
+
+      return {
+        Nom:
+          [user.first_name, user.last_name]
+            .filter(Boolean)
+            .join(' ') ||
+          user.full_name ||
+          '',
+        Email: user.email,
+        Fonction: user.job_title || '',
+        Rôle: roleLabel[user.role],
+        Département: department?.name || '',
+        Statut: user.active
+          ? 'Actif'
+          : 'Inactif',
+      }
+    })
+  }
+
+  const exportSettingsSectionExcel = (
+    key: SettingsSectionKey
+  ) => {
+    const rows = getSettingsSectionRows(key)
+
+    if (!rows.length) {
+      setError('Aucune donnée à exporter.')
+      return
+    }
+
+    const workbook = XLSX.utils.book_new()
+    const worksheet =
+      XLSX.utils.json_to_sheet(rows)
+
+    XLSX.utils.book_append_sheet(
+      workbook,
+      worksheet,
+      SETTINGS_SECTION_LABELS[key].slice(0, 31)
+    )
+
+    XLSX.writeFile(
+      workbook,
+      `NukuStock-${key}-${new Date()
+        .toISOString()
+        .slice(0, 10)}.xlsx`
+    )
+  }
+
+  const exportSettingsSectionPdf = (
+    key: SettingsSectionKey
+  ) => {
+    const rows = getSettingsSectionRows(key)
+
+    if (!rows.length) {
+      setError('Aucune donnée à exporter.')
+      return
+    }
+
+    const headers = Object.keys(rows[0])
+    const body = rows.map((row) =>
+      headers.map((header) =>
+        String(row[header] ?? '')
+      )
+    )
+
+    const doc = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: 'a4',
+    })
+
+    doc.setFontSize(16)
+    doc.text(
+      `NukuStock - ${SETTINGS_SECTION_LABELS[key]}`,
+      14,
+      15
+    )
+
+    doc.setFontSize(8)
+    doc.text(
+      `Édité le ${new Date().toLocaleDateString('fr-FR')}`,
+      14,
+      21
+    )
+
+    autoTable(doc, {
+      startY: 27,
+      head: [headers],
+      body,
+      styles: {
+        fontSize: 7,
+        cellPadding: 2,
+        overflow: 'linebreak',
+      },
+      headStyles: {
+        fontStyle: 'bold',
+      },
+      margin: {
+        left: 10,
+        right: 10,
+      },
+    })
+
+    doc.save(
+      `NukuStock-${key}-${new Date()
+        .toISOString()
+        .slice(0, 10)}.pdf`
+    )
+  }
+
+  const printSettingsSection = (
+    key: SettingsSectionKey
+  ) => {
+    const rows = getSettingsSectionRows(key)
+
+    if (!rows.length) {
+      setError('Aucune donnée à imprimer.')
+      return
+    }
+
+    const headers = Object.keys(rows[0])
+    const popup = window.open(
+      '',
+      '_blank',
+      'width=1100,height=800'
+    )
+
+    if (!popup) {
+      setError(
+        'Le navigateur a bloqué la fenêtre d’impression.'
+      )
+      return
+    }
+
+    const escapeHtml = (value: unknown) =>
+      String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+
+    popup.document.write(`
+      <!doctype html>
+      <html lang="fr">
+        <head>
+          <meta charset="utf-8" />
+          <title>NukuStock - ${escapeHtml(
+            SETTINGS_SECTION_LABELS[key]
+          )}</title>
+          <style>
+            @page {
+              size: A4 landscape;
+              margin: 10mm;
+            }
+            body {
+              font-family: Arial, sans-serif;
+              color: #101828;
+              margin: 0;
+            }
+            h1 {
+              font-size: 18px;
+              margin: 0 0 4px;
+            }
+            .meta {
+              font-size: 10px;
+              color: #667085;
+              margin-bottom: 12px;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 9px;
+            }
+            th, td {
+              border: 1px solid #d0d5dd;
+              padding: 5px;
+              text-align: left;
+              vertical-align: top;
+            }
+            th {
+              background: #f2f4f7;
+              font-weight: 700;
+            }
+          </style>
+        </head>
+        <body>
+          <h1>NukuStock - ${escapeHtml(
+            SETTINGS_SECTION_LABELS[key]
+          )}</h1>
+          <div class="meta">
+            Édité le ${escapeHtml(
+              new Date().toLocaleDateString('fr-FR')
+            )}
+          </div>
+          <table>
+            <thead>
+              <tr>
+                ${headers
+                  .map(
+                    (header) =>
+                      `<th>${escapeHtml(header)}</th>`
+                  )
+                  .join('')}
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row) =>
+                    `<tr>${headers
+                      .map(
+                        (header) =>
+                          `<td>${escapeHtml(
+                            row[header]
+                          )}</td>`
+                      )
+                      .join('')}</tr>`
+                )
+                .join('')}
+            </tbody>
+          </table>
+          <script>
+            window.onload = () => window.print()
+          </script>
+        </body>
+      </html>
+    `)
+
+    popup.document.close()
+  }
+
   return (
     <Page
       title="Réglages"
@@ -1263,6 +1580,180 @@ export default function Settings() {
         </div>
       )}
 
+      <Card>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div>
+            <h2 style={{ margin: 0 }}>
+              Affichage des réglages
+            </h2>
+            <p
+              className="muted"
+              style={{ margin: '5px 0 0' }}
+            >
+              Masque ou affiche les différentes sections. Chaque section peut être ouverte en détails, exportée en XLS/PDF A4 ou imprimée.
+            </p>
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              gap: 7,
+              flexWrap: 'wrap',
+            }}
+          >
+            <button
+              type="button"
+              className="button secondary small"
+              onClick={() => {
+                setSectionVisibility(
+                  DEFAULT_SETTINGS_SECTION_STATE
+                )
+                localStorage.setItem(
+                  SETTINGS_SECTION_VISIBILITY_KEY,
+                  JSON.stringify(
+                    DEFAULT_SETTINGS_SECTION_STATE
+                  )
+                )
+              }}
+            >
+              Tout afficher
+            </button>
+
+            <button
+              type="button"
+              className="button secondary small"
+              onClick={() => {
+                const next: SettingsSectionState = {
+                  system: false,
+                  categories: false,
+                  subcategories: false,
+                  users: false,
+                }
+                setSectionVisibility(next)
+                localStorage.setItem(
+                  SETTINGS_SECTION_VISIBILITY_KEY,
+                  JSON.stringify(next)
+                )
+              }}
+            >
+              Tout masquer
+            </button>
+
+            <button
+              type="button"
+              className="button secondary small"
+              onClick={() => {
+                setSectionOpen(
+                  DEFAULT_SETTINGS_SECTION_STATE
+                )
+                localStorage.setItem(
+                  SETTINGS_SECTION_OPEN_KEY,
+                  JSON.stringify(
+                    DEFAULT_SETTINGS_SECTION_STATE
+                  )
+                )
+              }}
+            >
+              Ouvrir tout
+            </button>
+
+            <button
+              type="button"
+              className="button secondary small"
+              onClick={() => {
+                const next: SettingsSectionState = {
+                  system: false,
+                  categories: false,
+                  subcategories: false,
+                  users: false,
+                }
+                setSectionOpen(next)
+                localStorage.setItem(
+                  SETTINGS_SECTION_OPEN_KEY,
+                  JSON.stringify(next)
+                )
+              }}
+            >
+              Fermer tout
+            </button>
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns:
+              'repeat(auto-fit,minmax(220px,1fr))',
+            gap: 8,
+            marginTop: 14,
+          }}
+        >
+          {(
+            Object.keys(
+              SETTINGS_SECTION_LABELS
+            ) as SettingsSectionKey[]
+          ).map((key) => (
+            <label
+              key={key}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 9,
+                minHeight: 44,
+                padding: '8px 10px',
+                border: '1px solid #e5e7eb',
+                borderRadius: 10,
+                cursor: 'pointer',
+                background:
+                  sectionVisibility[key]
+                    ? '#f8fafc'
+                    : '#fff',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={sectionVisibility[key]}
+                onChange={(event) =>
+                  updateSectionVisibility(
+                    key,
+                    event.target.checked
+                  )
+                }
+              />
+              <span
+                style={{
+                  fontWeight: 700,
+                  fontSize: 12,
+                }}
+              >
+                {SETTINGS_SECTION_LABELS[key]}
+              </span>
+            </label>
+          ))}
+        </div>
+      </Card>
+
+      <div style={{ height: 16 }} />
+
+      {sectionVisibility.system && (
+        <SettingsSectionFrame
+          sectionKey="system"
+          title="Système"
+          description="Mode actuel, état de la configuration et remise à zéro."
+          open={sectionOpen.system}
+          onToggleOpen={() => toggleSectionOpen('system')}
+          onExcel={() => exportSettingsSectionExcel('system')}
+          onPdf={() => exportSettingsSectionPdf('system')}
+          onPrint={() => printSettingsSection('system')}
+        >
       <div className="grid two">
         <Card>
           <h2>
@@ -1310,6 +1801,8 @@ export default function Settings() {
           </button>
         </Card>
       </div>
+        </SettingsSectionFrame>
+      )}
 
       <div
         style={{
@@ -1317,232 +1810,120 @@ export default function Settings() {
         }}
       />
 
-      <Card>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent:
-              'space-between',
-            alignItems:
-              'center',
-            gap: 12,
-            flexWrap:
-              'wrap',
-          }}
+      {sectionVisibility.categories && (
+        <SettingsSectionFrame
+          sectionKey="categories"
+          title="Catégories produits"
+          description="Afficher/masquer, ouvrir en détails, exporter ou imprimer le référentiel des catégories produits."
+          open={sectionOpen.categories}
+          onToggleOpen={() => toggleSectionOpen('categories')}
+          onExcel={() => exportSettingsSectionExcel('categories')}
+          onPdf={() => exportSettingsSectionPdf('categories')}
+          onPrint={() => printSettingsSection('categories')}
         >
-          <div>
-            <h2
-              style={{
-                margin: 0,
-              }}
-            >
-              Zones produits
-            </h2>
-
-            <p
-              className="muted"
-              style={{
-                margin:
-                  '5px 0 0',
-              }}
-            >
-              Référentiel central des zones produit. La référence ZON-xxx reste permanente même si le nom de la zone change.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            className="button secondary"
-            onClick={() =>
-              void reloadMasterData()
-            }
-          >
-            Actualiser
-          </button>
-        </div>
-
+      <Card>
         <div
           style={{
             display: 'grid',
             gridTemplateColumns:
-              'minmax(240px,1fr) auto',
+              'repeat(auto-fit,minmax(150px,1fr))',
             gap: 10,
-            marginTop: 18,
+            marginBottom: 16,
           }}
         >
-          <input
-            className="input"
-            placeholder="Nom de la zone..."
-            value={
-              zoneName
-            }
-            onChange={(
-              event
-            ) =>
-              setZoneName(
-                event.target.value
-              )
-            }
-          />
+          <div
+            style={{
+              padding: 12,
+              borderRadius: 11,
+              border: '1px solid #e5e7eb',
+              background: '#f8fafc',
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                color: '#667085',
+              }}
+            >
+              Catégories
+            </div>
+            <div
+              style={{
+                marginTop: 4,
+                fontSize: 20,
+                fontWeight: 900,
+              }}
+            >
+              {categories.length}
+            </div>
+          </div>
 
           <div
             style={{
-              display: 'flex',
-              gap: 8,
-              flexWrap:
-                'wrap',
+              padding: 12,
+              borderRadius: 11,
+              border: '1px solid #e5e7eb',
+              background: '#f8fafc',
             }}
           >
-            <button
-              type="button"
-              className="button"
-              onClick={
-                saveZone
-              }
+            <div
+              style={{
+                fontSize: 11,
+                color: '#667085',
+              }}
             >
-              {editingZoneId
-                ? 'Enregistrer'
-                : '+ Ajouter'}
-            </button>
+              Actives
+            </div>
+            <div
+              style={{
+                marginTop: 4,
+                fontSize: 20,
+                fontWeight: 900,
+              }}
+            >
+              {
+                categories.filter(
+                  (category) =>
+                    category.active !== false
+                ).length
+              }
+            </div>
+          </div>
 
-            {editingZoneId && (
-              <button
-                type="button"
-                className="button secondary"
-                onClick={() => {
-                  setEditingZoneId('')
-                  setZoneName('')
-                }}
-              >
-                Annuler
-              </button>
-            )}
+          <div
+            style={{
+              padding: 12,
+              borderRadius: 11,
+              border: '1px solid #e5e7eb',
+              background: '#f8fafc',
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                color: '#667085',
+              }}
+            >
+              Sous-catégories
+            </div>
+            <div
+              style={{
+                marginTop: 4,
+                fontSize: 20,
+                fontWeight: 900,
+              }}
+            >
+              {
+                masterData.filter(
+                  (item) =>
+                    item.type ===
+                    'subcategory'
+                ).length
+              }
+            </div>
           </div>
         </div>
 
-        <div
-          className="tableWrap"
-          style={{
-            marginTop: 18,
-          }}
-        >
-          <table>
-            <thead>
-              <tr>
-                <th>Référence</th>
-                <th>Zone</th>
-                <th>Statut</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {zones.map(
-                (zone) => (
-                  <tr
-                    key={
-                      zone.id
-                    }
-                  >
-                    <td>
-                      <strong>
-                        {
-                          zone.internalRef ||
-                          '—'
-                        }
-                      </strong>
-                    </td>
-
-                    <td>
-                      <strong>
-                        {
-                          zone.name
-                        }
-                      </strong>
-                    </td>
-
-                    <td>
-                      {zone.active ===
-                      false
-                        ? 'Désactivée'
-                        : 'Active'}
-                    </td>
-
-                    <td>
-                      <div
-                        style={{
-                          display:
-                            'flex',
-                          gap: 7,
-                          flexWrap:
-                            'wrap',
-                        }}
-                      >
-                        <button
-                          type="button"
-                          className="button secondary"
-                          onClick={() =>
-                            editZone(
-                              zone.id
-                            )
-                          }
-                        >
-                          Modifier
-                        </button>
-
-                        <button
-                          type="button"
-                          className="button secondary"
-                          onClick={() =>
-                            toggleZone(
-                              zone.id
-                            )
-                          }
-                        >
-                          {zone.active ===
-                          false
-                            ? 'Réactiver'
-                            : 'Désactiver'}
-                        </button>
-
-                        <button
-                          type="button"
-                          className="button dangerButton"
-                          onClick={() =>
-                            deleteZone(
-                              zone.id
-                            )
-                          }
-                        >
-                          Supprimer
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              )}
-
-              {!zones.length && (
-                <tr>
-                  <td
-                    colSpan={4}
-                  >
-                    Aucune zone.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-
-      <div
-        style={{
-          height: 16,
-        }}
-      />
-
-      <Card>
         <div
           style={{
             display: 'flex',
@@ -1654,7 +2035,6 @@ export default function Settings() {
           <table>
             <thead>
               <tr>
-                <th>Référence</th>
                 <th>Catégorie</th>
                 <th>Statut</th>
                 <th>Actions</th>
@@ -1669,15 +2049,6 @@ export default function Settings() {
                       category.id
                     }
                   >
-                    <td>
-                      <strong>
-                        {
-                          category.internalRef ||
-                          '—'
-                        }
-                      </strong>
-                    </td>
-
                     <td>
                       <strong>
                         {
@@ -1774,7 +2145,7 @@ export default function Settings() {
               {!categories.length && (
                 <tr>
                   <td
-                    colSpan={4}
+                    colSpan={3}
                   >
                     Aucune catégorie.
                   </td>
@@ -1784,6 +2155,8 @@ export default function Settings() {
           </table>
         </div>
       </Card>
+        </SettingsSectionFrame>
+      )}
 
       <div
         style={{
@@ -1791,6 +2164,17 @@ export default function Settings() {
         }}
       />
 
+      {sectionVisibility.subcategories && (
+        <SettingsSectionFrame
+          sectionKey="subcategories"
+          title="Sous-catégories"
+          description="Référentiel rattaché aux catégories principales."
+          open={sectionOpen.subcategories}
+          onToggleOpen={() => toggleSectionOpen('subcategories')}
+          onExcel={() => exportSettingsSectionExcel('subcategories')}
+          onPdf={() => exportSettingsSectionPdf('subcategories')}
+          onPrint={() => printSettingsSection('subcategories')}
+        >
       <Card>
         <div>
           <h2
@@ -1915,7 +2299,6 @@ export default function Settings() {
           <table>
             <thead>
               <tr>
-                <th>Référence</th>
                 <th>
                   Sous-catégorie
                 </th>
@@ -1932,15 +2315,6 @@ export default function Settings() {
                       subcategory.id
                     }
                   >
-                    <td>
-                      <strong>
-                        {
-                          subcategory.internalRef ||
-                          '—'
-                        }
-                      </strong>
-                    </td>
-
                     <td>
                       <strong>
                         {
@@ -2037,7 +2411,7 @@ export default function Settings() {
               {!subcategories.length && (
                 <tr>
                   <td
-                    colSpan={4}
+                    colSpan={3}
                   >
                     Aucune sous-catégorie pour cette catégorie.
                   </td>
@@ -2047,6 +2421,8 @@ export default function Settings() {
           </table>
         </div>
       </Card>
+        </SettingsSectionFrame>
+      )}
 
       <div
         style={{
@@ -2054,6 +2430,17 @@ export default function Settings() {
         }}
       />
 
+      {sectionVisibility.users && (
+        <SettingsSectionFrame
+          sectionKey="users"
+          title="Gestion des utilisateurs"
+          description="Comptes, rôles, départements et statut des utilisateurs."
+          open={sectionOpen.users}
+          onToggleOpen={() => toggleSectionOpen('users')}
+          onExcel={() => exportSettingsSectionExcel('users')}
+          onPdf={() => exportSettingsSectionPdf('users')}
+          onPrint={() => printSettingsSection('users')}
+        >
       <Card>
         <div
           style={{
@@ -2288,6 +2675,8 @@ export default function Settings() {
           </div>
         )}
       </Card>
+        </SettingsSectionFrame>
+      )}
 
       {modalOpen && (
         <div
