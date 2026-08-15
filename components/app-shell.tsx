@@ -90,6 +90,14 @@ const navGroups: NavGroup[] = [
       { href: '/transport', label: 'Transport', icon: '✈' },
     ],
   },
+  {
+    label: 'BAR TEAM',
+    icon: '♟',
+    items: [
+      { href: '/planning-bar', label: 'Planning', icon: '▦' },
+      { href: '/setup', label: 'SET UP', icon: '◫' },
+    ],
+  },
 ]
 
 const mobileQuickLinks = [
@@ -623,22 +631,6 @@ export function AppShell({
               </div>
             )
           })}
-
-          <Link
-            href="/planning-bar"
-            className={isActive(pathname, '/planning-bar') ? 'active' : ''}
-          >
-            <span className="nskSidebarIcon" aria-hidden="true">▦</span>
-            <span>Planning Bar</span>
-          </Link>
-
-          <Link
-            href="/setup"
-            className={isActive(pathname, '/setup') ? 'active' : ''}
-          >
-            <span className="nskSidebarIcon" aria-hidden="true">◫</span>
-            <span>SET UP</span>
-          </Link>
 
           <Link
             href="/settings"
