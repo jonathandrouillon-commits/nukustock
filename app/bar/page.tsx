@@ -455,18 +455,16 @@ export default function BarPage() {
     if (!currentRequest) {
       return {
         ok: false,
-        message:
-          'Réquisition introuvable.',
+        message: 'Réquisition introuvable.',
+        hasNonFullLine: false,
       }
     }
 
-    if (
-      currentRequest.stockAppliedAt
-    ) {
+    if (currentRequest.stockAppliedAt) {
       return {
         ok: false,
-        message:
-          'Cette réquisition est déjà traitée.',
+        message: 'Cette réquisition est déjà traitée.',
+        hasNonFullLine: false,
       }
     }
 
@@ -474,8 +472,7 @@ export default function BarPage() {
 
     for (
       let index = 0;
-      index <
-      currentRequest.items.length;
+      index < currentRequest.items.length;
       index += 1
     ) {
       const requestLine =
@@ -489,6 +486,7 @@ export default function BarPage() {
           ok: false,
           message:
             `Ligne introuvable pour ${requestLine.productName}.`,
+          hasNonFullLine,
         }
       }
 
@@ -498,40 +496,38 @@ export default function BarPage() {
           : requestLine.requested
 
       /*
-       * Toutes les lignes doivent avoir
-       * un choix explicite.
+       * Chaque ligne doit simplement avoir
+       * une décision finale.
        */
       if (
-        treatment.status ===
-        'pending'
+        treatment.status === 'pending'
       ) {
         return {
           ok: false,
           message:
             `Choisis Servi complet, Partiel ou Out of stock pour ${requestLine.productName}.`,
+          hasNonFullLine,
         }
       }
 
       /*
-       * OUT OF STOCK :
-       * pas besoin de lieu source.
+       * OUT OF STOCK = ligne traitée.
+       * Rien à sortir du stock.
        */
       if (
         treatment.status ===
         'out_of_stock'
       ) {
         hasNonFullLine = true
-
         continue
       }
 
-      if (
-        !treatment.sourceLocation
-      ) {
+      if (!treatment.sourceLocation) {
         return {
           ok: false,
           message:
             `Choisis le lieu source pour ${requestLine.productName}.`,
+          hasNonFullLine,
         }
       }
 
@@ -541,6 +537,9 @@ export default function BarPage() {
           treatment.sourceLocation
         )
 
+      /*
+       * SERVI COMPLET
+       */
       if (
         treatment.status ===
         'fulfilled'
@@ -553,10 +552,16 @@ export default function BarPage() {
             ok: false,
             message:
               `${requestLine.productName} doit être servi à ${requested} pour être marqué Servi complet.`,
+            hasNonFullLine,
           }
         }
       }
 
+      /*
+       * PARTIEL = ligne traitée dès qu'une
+       * quantité > 0 et < quantité demandée
+       * est renseignée.
+       */
       if (
         treatment.status ===
         'partial'
@@ -569,7 +574,8 @@ export default function BarPage() {
           return {
             ok: false,
             message:
-              `${requestLine.productName} : pour une quantité de 0, utilise Out of stock.`,
+              `${requestLine.productName} : saisis une quantité réellement donnée, ou utilise Out of stock.`,
+            hasNonFullLine,
           }
         }
 
@@ -580,7 +586,8 @@ export default function BarPage() {
           return {
             ok: false,
             message:
-              `${requestLine.productName} : une quantité partielle doit être inférieure à ${requested}.`,
+              `${requestLine.productName} : pour une quantité égale à ${requested}, utilise Servi complet.`,
+            hasNonFullLine,
           }
         }
       }
@@ -593,6 +600,7 @@ export default function BarPage() {
           ok: false,
           message:
             `${requestLine.productName} : stock insuffisant à ${treatment.sourceLocation}. Disponible : ${available}, sortie : ${treatment.quantity}.`,
+          hasNonFullLine,
         }
       }
 
@@ -604,6 +612,7 @@ export default function BarPage() {
           ok: false,
           message:
             `${requestLine.productName} : maximum autorisé ${requested}.`,
+          hasNonFullLine,
         }
       }
     }
@@ -651,18 +660,12 @@ export default function BarPage() {
         .destinationLocation ||
       'Destination'
 
-    /*
-     * On travaille d'abord sur une copie.
-     * Rien n'est enregistré tant que toutes
-     * les sorties ne sont pas valides.
-     */
     let nextProducts =
       products
 
     for (
       let index = 0;
-      index <
-      currentRequest.items.length;
+      index < currentRequest.items.length;
       index += 1
     ) {
       const requestLine =
@@ -674,12 +677,12 @@ export default function BarPage() {
       if (!treatment) continue
 
       /*
-       * OUT OF STOCK :
-       * zéro sortie de stock.
+       * OUT OF STOCK = traité,
+       * mais aucune déduction.
        */
       if (
         treatment.status ===
-        'out_of_stock' ||
+          'out_of_stock' ||
         treatment.quantity <= 0
       ) {
         continue
@@ -699,7 +702,6 @@ export default function BarPage() {
           result.message ||
             `Impossible de sortir ${requestLine.productName}.`
         )
-
         return
       }
 
@@ -707,9 +709,6 @@ export default function BarPage() {
         result.products
     }
 
-    /*
-     * Mise à jour de la réquisition.
-     */
     const updatedRequests =
       requests.map(
         (request) => {
@@ -727,9 +726,7 @@ export default function BarPage() {
                 index
               ) => {
                 const treatment =
-                  getTreatmentLine(
-                    index
-                  )
+                  getTreatmentLine(index)
 
                 if (!treatment) {
                   return requestLine
@@ -738,17 +735,6 @@ export default function BarPage() {
                 return {
                   ...requestLine,
 
-                  /*
-                   * approved reste la
-                   * quantité approuvée.
-                   */
-                  approved:
-                    requestLine.approved,
-
-                  /*
-                   * Quantité réellement
-                   * remise.
-                   */
                   delivered:
                     treatment.quantity,
 
@@ -782,16 +768,14 @@ export default function BarPage() {
             ...request,
 
             /*
-             * Résultat métier.
+             * Si tout est complet => Livrée.
+             * Sinon => Partielle.
+             *
+             * Dans les deux cas, la demande
+             * est considérée comme TRAITÉE.
              */
             status: finalStatus,
 
-            /*
-             * IMPORTANT :
-             *
-             * Les deux modes sont considérés
-             * comme TRAITÉS définitivement.
-             */
             deliveredAt:
               timestamp,
 
@@ -805,16 +789,11 @@ export default function BarPage() {
       )
 
     saveProducts(nextProducts)
+    saveRequests(updatedRequests)
 
-    saveRequests(
-      updatedRequests
-    )
-
-    setTreatmentOpen(false)
-    setTreatingId('')
-    setTreatmentLines([])
-    setError('')
-
+    /*
+     * Fermeture immédiate après validation.
+     */
     setTreatmentOpen(false)
     setTreatingId('')
     setTreatmentLines([])
@@ -824,7 +803,7 @@ export default function BarPage() {
     setMessage(
       finalStatus === 'Livrée'
         ? `Réquisition ${currentRequest.id} livrée complètement et clôturée.`
-        : `Réquisition ${currentRequest.id} traitée et clôturée avec une ligne partielle ou OUT OF STOCK.`
+        : `Réquisition ${currentRequest.id} traitée partiellement et clôturée.`
     )
   }
 
