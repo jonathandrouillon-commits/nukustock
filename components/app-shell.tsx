@@ -39,6 +39,7 @@ const VIEW_MODE_KEY = 'nukustock_view_mode'
 
 const navItems: NavItem[] = [
   { href: '/', label: 'Dashboard', icon: '⌂' },
+  { href: '/scan', label: 'Scan QR', icon: '⌗' },
   { href: '/products', label: 'Produits', icon: '▣' },
   { href: '/product-images', label: 'Photos produits', icon: '▧' },
   { href: '/stocks', label: 'Stocks', icon: '▤' },
@@ -96,6 +97,7 @@ const mobileQuickLinks = [
   '/stocks',
   '/requests',
   '/inventory',
+  '/scan',
 ]
 
 function isActive(
@@ -532,16 +534,21 @@ export function AppShell({
         }`}
       >
         <div className="nskSidebarBrand">
-          <div className="nskBrandMark">
-            N
+          <div className="nskSidebarLogo">
+            <img
+              src="/images/nukutepipi.jpg"
+              alt="Nukutepipi"
+            />
           </div>
 
           <div className="nskBrandText">
             <strong>
               NukuStock
             </strong>
-            <span>
-              Nukutepipi
+            <span className="nskPoweredBy">
+              powered by
+              <br />
+              Fenua Pro Bartender
             </span>
           </div>
 
@@ -564,6 +571,14 @@ export function AppShell({
           >
             <span className="nskSidebarIcon" aria-hidden="true">⌂</span>
             <span>Dashboard</span>
+          </Link>
+
+          <Link
+            href="/scan"
+            className={isActive(pathname, '/scan') ? 'active' : ''}
+          >
+            <span className="nskSidebarIcon" aria-hidden="true">⌗</span>
+            <span>Scan QR</span>
           </Link>
 
           {navGroups.map((group) => {
@@ -864,13 +879,6 @@ export function AppShell({
               )}
             </div>
 
-            <div className="nskLogoWrap">
-              <img
-                src="/images/nukutepipi.jpg"
-                alt="Nukutepipi"
-              />
-            </div>
-
             <UserMenu />
           </div>
         </header>
@@ -1016,7 +1024,7 @@ export function AppShell({
           position: fixed;
           inset: 0 auto 0 0;
           z-index: 60;
-          width: 208px;
+          width: 230px;
           display: flex;
           flex-direction: column;
           background: #0c1525;
@@ -1024,44 +1032,62 @@ export function AppShell({
         }
 
         .nskSidebarBrand {
-          min-height: 80px;
-          padding: 18px 16px;
+          position: relative;
+          min-height: 156px;
+          padding: 18px 16px 16px;
           display: flex;
-          align-items: center;
-          gap: 11px;
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 10px;
           border-bottom: 1px solid rgba(255,255,255,.08);
         }
 
-        .nskBrandMark {
-          width: 38px;
-          height: 38px;
-          flex: 0 0 auto;
-          border-radius: 12px;
-          display: grid;
-          place-items: center;
+        .nskSidebarLogo {
+          width: 168px;
+          height: 54px;
+          display: flex;
+          align-items: center;
+          justify-content: flex-start;
+          overflow: hidden;
+          border-radius: 8px;
           background: #fff;
-          color: #0c1525;
-          font-weight: 900;
+        }
+
+        .nskSidebarLogo img {
+          display: block;
+          max-width: 100%;
+          max-height: 100%;
+          object-fit: contain;
+          object-position: left center;
         }
 
         .nskBrandText {
           display: flex;
           flex-direction: column;
+          min-width: 0;
         }
 
         .nskBrandText strong {
-          font-size: 14px;
+          color: #fff;
+          font-size: 18px;
+          line-height: 1.1;
+          font-weight: 900;
+          letter-spacing: -.02em;
         }
 
-        .nskBrandText span {
-          margin-top: 3px;
-          color: #7f8ca3;
-          font-size: 11px;
+        .nskBrandText .nskPoweredBy {
+          margin-top: 5px;
+          color: #a7b3c6;
+          font-size: 10px;
+          line-height: 1.35;
+          font-weight: 600;
         }
 
         .nskTabletClose {
           display: none;
-          margin-left: auto;
+          position: absolute;
+          top: 14px;
+          right: 14px;
           width: 36px;
           height: 36px;
           border: 0;
@@ -1169,7 +1195,7 @@ export function AppShell({
 
         .nskMain {
           min-height: 100vh;
-          margin-left: 208px;
+          margin-left: 230px;
         }
 
         .nskTopbar {
@@ -1364,22 +1390,6 @@ export function AppShell({
           border-radius: 12px;
           background: #fff;
           font-size: 20px;
-        }
-
-        .nskLogoWrap {
-          width: 110px;
-          height: 52px;
-          display: grid;
-          place-items: center;
-          overflow: hidden;
-          border-radius: 10px;
-          background: #fff;
-        }
-
-        .nskLogoWrap img {
-          max-width: 100%;
-          max-height: 100%;
-          object-fit: contain;
         }
 
         .nskViewSelector {
@@ -1663,11 +1673,6 @@ export function AppShell({
           align-self: center;
         }
 
-        .view-phone .nskLogoWrap {
-          width: 48px;
-          height: 32px;
-        }
-
         .view-phone .nskViewStage {
           width: 100%;
           padding: 0;
@@ -1927,7 +1932,7 @@ export function AppShell({
           }
 
           .nskAppShell.view-pc .nskMain {
-            margin-left: 208px !important;
+            margin-left: 230px !important;
             width: auto !important;
           }
 
@@ -1940,10 +1945,6 @@ export function AppShell({
         }
 
         @media (max-width: 420px) {
-          .view-phone .nskLogoWrap {
-            display: none;
-          }
-
           .view-phone .nskTopbarTitle strong {
             max-width: 110px;
             overflow: hidden;

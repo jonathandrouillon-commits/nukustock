@@ -3,11 +3,13 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
 } from 'react'
 
 import { supabase } from '@/lib/supabase'
+import jsQR from 'jsqr'
 
 type ProductRow = {
   id: string
@@ -170,6 +172,35 @@ export default function ScanPage() {
     setTransferMessage,
   ] = useState('')
 
+  const videoRef =
+    useRef<HTMLVideoElement | null>(null)
+
+  const canvasRef =
+    useRef<HTMLCanvasElement | null>(null)
+
+  const scanLoopRef =
+    useRef<number | null>(null)
+
+  const streamRef =
+    useRef<MediaStream | null>(null)
+
+  const [
+    scannerActive,
+    setScannerActive,
+  ] = useState(false)
+
+  const [
+    scannerError,
+    setScannerError,
+  ] = useState('')
+
+  const [
+    scannerStatus,
+    setScannerStatus,
+  ] = useState(
+    'Appuie sur « Ouvrir la caméra » pour scanner un QR code NukuStock.'
+  )
+
   useEffect(() => {
     const load = async () => {
       setLoading(true)
@@ -183,8 +214,15 @@ export default function ScanPage() {
       const scanType =
         params.get('type') as ScanType | null
 
+      if (!scanType) {
+        setTitle('Scanner un QR code')
+        setProducts([])
+        setLots([])
+        setLoading(false)
+        return
+      }
+
       if (
-        !scanType ||
         ![
           'product',
           'category',
@@ -535,6 +573,308 @@ export default function ScanPage() {
     void load()
   }, [])
 
+  const stopScanner = () => {
+    if (scanLoopRef.current !== null) {
+      cancelAnimationFrame(
+        scanLoopRef.current
+      )
+      scanLoopRef.current = null
+    }
+
+    streamRef.current
+      ?.getTracks()
+      .forEach((track) =>
+        track.stop()
+      )
+
+    streamRef.current = null
+    setScannerActive(false)
+  }
+
+  const openScannedValue = (
+    rawValue: string
+  ) => {
+    const value =
+      rawValue.trim()
+
+    if (!value) {
+      return
+    }
+
+    stopScanner()
+
+    try {
+      const url =
+        new URL(
+          value,
+          window.location.origin
+        )
+
+      if (
+        url.protocol === 'http:' ||
+        url.protocol === 'https:'
+      ) {
+        setScannerStatus(
+          'QR détecté. Ouverture...'
+        )
+        window.location.href =
+          url.toString()
+        return
+      }
+    } catch {
+      // Peut être un ancien QR JSON NukuStock.
+    }
+
+    try {
+      const parsed =
+        JSON.parse(value)
+
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        typeof parsed.type === 'string'
+      ) {
+        const params =
+          new URLSearchParams()
+
+        params.set(
+          'type',
+          parsed.type
+        )
+
+        if (parsed.id) {
+          params.set(
+            'id',
+            String(parsed.id)
+          )
+        }
+
+        if (parsed.category) {
+          params.set(
+            'category',
+            String(parsed.category)
+          )
+        }
+
+        if (parsed.subcategory) {
+          params.set(
+            'subcategory',
+            String(
+              parsed.subcategory
+            )
+          )
+        }
+
+        if (
+          parsed.location ||
+          parsed.name
+        ) {
+          params.set(
+            'location',
+            String(
+              parsed.location ||
+                parsed.name
+            )
+          )
+        }
+
+        if (
+          parsed.supplier ||
+          parsed.name
+        ) {
+          if (
+            parsed.type ===
+            'supplier'
+          ) {
+            params.set(
+              'supplier',
+              String(
+                parsed.supplier ||
+                  parsed.name
+              )
+            )
+          }
+        }
+
+        window.location.href =
+          `/scan?${params.toString()}`
+        return
+      }
+    } catch {
+      // Ce n'est pas un ancien QR JSON.
+    }
+
+    setScannerError(
+      'Ce QR code ne correspond pas à un QR NukuStock reconnu.'
+    )
+  }
+
+  const scanFrame = () => {
+    const video =
+      videoRef.current
+
+    const canvas =
+      canvasRef.current
+
+    if (
+      !video ||
+      !canvas ||
+      video.readyState <
+        video.HAVE_ENOUGH_DATA
+    ) {
+      scanLoopRef.current =
+        requestAnimationFrame(
+          scanFrame
+        )
+      return
+    }
+
+    const width =
+      video.videoWidth
+
+    const height =
+      video.videoHeight
+
+    if (
+      width > 0 &&
+      height > 0
+    ) {
+      canvas.width = width
+      canvas.height = height
+
+      const context =
+        canvas.getContext(
+          '2d',
+          {
+            willReadFrequently:
+              true,
+          }
+        )
+
+      if (context) {
+        context.drawImage(
+          video,
+          0,
+          0,
+          width,
+          height
+        )
+
+        const imageData =
+          context.getImageData(
+            0,
+            0,
+            width,
+            height
+          )
+
+        const code =
+          jsQR(
+            imageData.data,
+            imageData.width,
+            imageData.height,
+            {
+              inversionAttempts:
+                'attemptBoth',
+            }
+          )
+
+        if (code?.data) {
+          openScannedValue(
+            code.data
+          )
+          return
+        }
+      }
+    }
+
+    scanLoopRef.current =
+      requestAnimationFrame(
+        scanFrame
+      )
+  }
+
+  const startScanner =
+    async () => {
+      setScannerError('')
+      setScannerStatus(
+        'Recherche du QR code...'
+      )
+
+      try {
+        stopScanner()
+
+        const stream =
+          await navigator.mediaDevices.getUserMedia(
+            {
+              video: {
+                facingMode: {
+                  ideal:
+                    'environment',
+                },
+              },
+              audio: false,
+            }
+          )
+
+        streamRef.current =
+          stream
+
+        const video =
+          videoRef.current
+
+        if (!video) {
+          throw new Error(
+            'Caméra indisponible.'
+          )
+        }
+
+        video.srcObject =
+          stream
+
+        await video.play()
+
+        setScannerActive(true)
+
+        scanLoopRef.current =
+          requestAnimationFrame(
+            scanFrame
+          )
+      } catch (caughtError) {
+        console.error(
+          'NukuStock scanner:',
+          caughtError
+        )
+
+        setScannerError(
+          'Impossible d’ouvrir la caméra. Vérifie que le navigateur a l’autorisation d’utiliser la caméra.'
+        )
+
+        setScannerStatus(
+          'Caméra arrêtée.'
+        )
+      }
+    }
+
+  useEffect(() => {
+    return () => {
+      if (
+        scanLoopRef.current !==
+        null
+      ) {
+        cancelAnimationFrame(
+          scanLoopRef.current
+        )
+      }
+
+      streamRef.current
+        ?.getTracks()
+        .forEach((track) =>
+          track.stop()
+        )
+    }
+  }, [])
+
   const openTransfer = (
     lot: LotRow
   ) => {
@@ -795,6 +1135,82 @@ export default function ScanPage() {
       </header>
 
       <section style={styles.content}>
+        {!type && !error && (
+          <div style={styles.scannerCard}>
+            <div style={styles.scannerIntro}>
+              <h2 style={styles.scannerTitle}>
+                Scanner un QR code
+              </h2>
+
+              <p style={styles.scannerText}>
+                Scanne un QR Produit, Catégorie,
+                Sous-catégorie, Lieu ou Fournisseur.
+              </p>
+            </div>
+
+            <div style={styles.cameraFrame}>
+              <video
+                ref={videoRef}
+                playsInline
+                muted
+                style={styles.cameraVideo}
+              />
+
+              {!scannerActive && (
+                <div style={styles.cameraPlaceholder}>
+                  <div style={styles.cameraIcon}>
+                    ⌗
+                  </div>
+                  <strong>
+                    Caméra prête
+                  </strong>
+                </div>
+              )}
+
+              <div style={styles.scanGuide} />
+            </div>
+
+            <canvas
+              ref={canvasRef}
+              style={{
+                display: 'none',
+              }}
+            />
+
+            <div style={styles.scannerStatus}>
+              {scannerStatus}
+            </div>
+
+            {scannerError && (
+              <div style={styles.error}>
+                {scannerError}
+              </div>
+            )}
+
+            <div style={styles.scannerActions}>
+              {!scannerActive ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    void startScanner()
+                  }
+                  style={styles.scanPrimaryButton}
+                >
+                  Ouvrir la caméra
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={stopScanner}
+                  style={styles.scanSecondaryButton}
+                >
+                  Arrêter la caméra
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         {error && (
           <div style={styles.error}>
             {error}
@@ -1408,6 +1824,107 @@ const styles:
     color: '#b42318',
     fontSize: 12,
     fontWeight: 700,
+  },
+  scannerCard: {
+    padding: 16,
+    borderRadius: 18,
+    background: '#fff',
+    border: '1px solid #e4e7ec',
+    boxShadow:
+      '0 12px 32px rgba(16,24,40,.06)',
+  },
+  scannerIntro: {
+    marginBottom: 14,
+  },
+  scannerTitle: {
+    margin: 0,
+    fontSize: 22,
+    lineHeight: 1.15,
+  },
+  scannerText: {
+    margin: '7px 0 0',
+    color: '#667085',
+    fontSize: 13,
+    lineHeight: 1.45,
+  },
+  cameraFrame: {
+    position: 'relative',
+    width: '100%',
+    aspectRatio: '4 / 5',
+    maxHeight: 560,
+    overflow: 'hidden',
+    borderRadius: 18,
+    background: '#0c1525',
+  },
+  cameraVideo: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+  },
+  cameraPlaceholder: {
+    position: 'absolute',
+    inset: 0,
+    display: 'grid',
+    placeItems: 'center',
+    alignContent: 'center',
+    gap: 8,
+    color: '#fff',
+    background:
+      'linear-gradient(180deg,#101828,#0c1525)',
+  },
+  cameraIcon: {
+    fontSize: 52,
+    lineHeight: 1,
+  },
+  scanGuide: {
+    position: 'absolute',
+    left: '50%',
+    top: '50%',
+    width: 'min(68%,280px)',
+    aspectRatio: '1 / 1',
+    transform:
+      'translate(-50%,-50%)',
+    border: '3px solid rgba(255,255,255,.92)',
+    borderRadius: 22,
+    boxShadow:
+      '0 0 0 999px rgba(0,0,0,.18)',
+    pointerEvents: 'none',
+  },
+  scannerStatus: {
+    marginTop: 12,
+    padding: '10px 12px',
+    borderRadius: 11,
+    background: '#f8fafc',
+    border: '1px solid #eaecf0',
+    color: '#475467',
+    fontSize: 12,
+    fontWeight: 700,
+    textAlign: 'center',
+  },
+  scannerActions: {
+    marginTop: 12,
+    display: 'grid',
+    gridTemplateColumns: '1fr',
+  },
+  scanPrimaryButton: {
+    minHeight: 52,
+    border: 0,
+    borderRadius: 13,
+    background: '#0c1525',
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: 900,
+    cursor: 'pointer',
+  },
+  scanSecondaryButton: {
+    minHeight: 52,
+    border: '1px solid #d0d5dd',
+    borderRadius: 13,
+    background: '#fff',
+    color: '#101828',
+    fontSize: 15,
+    fontWeight: 900,
+    cursor: 'pointer',
   },
   transferButton: {
     border: '1px solid #d0d5dd',
