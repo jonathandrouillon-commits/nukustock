@@ -94,6 +94,9 @@ export default function BarPage() {
   const [treatingId, setTreatingId] =
     useState('')
 
+  const [treatmentOpen, setTreatmentOpen] =
+    useState(false)
+
   const [
     treatmentLines,
     setTreatmentLines,
@@ -103,6 +106,9 @@ export default function BarPage() {
     useState('')
 
   const [error, setError] =
+    useState('')
+
+  const [modalError, setModalError] =
     useState('')
 
   const currentRequest =
@@ -285,6 +291,7 @@ export default function BarPage() {
     request: InternalRequest
   ) => {
     setError('')
+    setModalError('')
     setMessage('')
 
     if (request.stockAppliedAt) {
@@ -338,12 +345,15 @@ export default function BarPage() {
 
     setTreatmentLines(initial)
     setTreatingId(request.id)
+    setTreatmentOpen(true)
   }
 
   const closeTreatment = () => {
+    setTreatmentOpen(false)
     setTreatingId('')
     setTreatmentLines([])
     setError('')
+    setModalError('')
   }
 
   const updateTreatment = (
@@ -638,13 +648,14 @@ export default function BarPage() {
       | 'partial'
   ) => {
     setError('')
+    setModalError('')
     setMessage('')
 
     const validation =
       validateTreatmentLines(mode)
 
     if (!validation.ok) {
-      setError(
+      setModalError(
         validation.message
       )
       return
@@ -706,7 +717,7 @@ export default function BarPage() {
         )
 
       if (!result.ok) {
-        setError(
+        setModalError(
           result.message ||
             `Impossible de sortir ${requestLine.productName}.`
         )
@@ -824,6 +835,12 @@ export default function BarPage() {
       updatedRequests
     )
 
+    setTreatmentOpen(false)
+    setTreatingId('')
+    setTreatmentLines([])
+    setError('')
+    setModalError('')
+
     if (mode === 'complete') {
       setMessage(
         `Réquisition ${currentRequest.id} livrée complètement et clôturée.`
@@ -834,8 +851,6 @@ export default function BarPage() {
       )
     }
 
-    setTreatingId('')
-    setTreatmentLines([])
   }
 
   return (
@@ -1146,7 +1161,7 @@ export default function BarPage() {
         </div>
       </section>
 
-      {currentRequest && (
+      {treatmentOpen && currentRequest && (
         <div className="modalBackdrop">
           <div className="treatmentModal">
             <div className="modalHeader">
@@ -1183,6 +1198,13 @@ export default function BarPage() {
               indique ce qui a réellement
               été remis au service.
             </div>
+
+            {modalError && (
+              <div className="modalError">
+                <strong>Action requise</strong>
+                <span>{modalError}</span>
+              </div>
+            )}
 
             <div className="modalBody">
               {currentRequest.items.map(
@@ -1969,6 +1991,28 @@ export default function BarPage() {
             1px solid #eaecf0;
           color: #667085;
           font-size: 10px;
+        }
+
+        .modalError {
+          margin: 12px 20px 0;
+          padding: 11px 13px;
+          border: 1px solid #fecdca;
+          border-radius: 10px;
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
+          background: #fef3f2;
+          color: #b42318;
+          font-size: 10px;
+        }
+
+        .modalError strong {
+          font-size: 10px;
+          font-weight: 900;
+        }
+
+        .modalError span {
+          line-height: 1.4;
         }
 
         .modalBody {
