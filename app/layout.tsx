@@ -9,6 +9,7 @@ export const metadata: Metadata = {
     default: 'NukuStock',
     template: '%s | NukuStock',
   },
+
   description: 'Gestion des stocks Nukutepipi',
 
   manifest: '/manifest.webmanifest',
@@ -26,6 +27,7 @@ export const metadata: Metadata = {
         type: 'image/png',
       },
     ],
+
     apple: [
       {
         url: '/bar-nuku-192.png',
