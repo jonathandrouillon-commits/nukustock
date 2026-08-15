@@ -7,6 +7,21 @@ import { Page, Card } from '@/components/ui'
 import { useMasterData, useProducts, useSuppliers } from '@/lib/store'
 import type { Product, Supplier } from '@/lib/types'
 
+const NUKUSTOCK_PUBLIC_URL =
+  'https://nukustock.fenuaprobartender.com'
+
+function scanUrl(
+  type: 'product' | 'category' | 'subcategory' | 'location' | 'supplier',
+  params: Record<string, string>
+) {
+  const query = new URLSearchParams({
+    type,
+    ...params,
+  })
+
+  return `${NUKUSTOCK_PUBLIC_URL}/scan?${query.toString()}`
+}
+
 type LabelMode =
   | 'categories'
   | 'subcategories'
@@ -41,9 +56,7 @@ function normalize(value: string) {
 }
 
 function categoryQrValue(category: string) {
-  return JSON.stringify({
-    app: 'NukuStock',
-    type: 'category',
+  return scanUrl('category', {
     category,
   })
 }
@@ -52,23 +65,15 @@ function subcategoryQrValue(
   category: string,
   subcategory: string
 ) {
-  return JSON.stringify({
-    app: 'NukuStock',
-    type: 'subcategory',
+  return scanUrl('subcategory', {
     category,
     subcategory,
   })
 }
 
 function productQrValue(product: Product) {
-  return JSON.stringify({
-    app: 'NukuStock',
-    type: 'product',
+  return scanUrl('product', {
     id: product.id,
-    reference: product.internalRef,
-    name: product.name,
-    category: product.category,
-    subcategory: product.subcategory,
   })
 }
 
@@ -77,21 +82,13 @@ function locationQrValue(location: {
   name: string
   internalRef?: string
 }) {
-  return JSON.stringify({
-    app: 'NukuStock',
-    type: 'location',
-    id: location.id,
-    reference: location.internalRef || '',
+  return scanUrl('location', {
     location: location.name,
   })
 }
 
 function supplierQrValue(supplier: Supplier) {
-  return JSON.stringify({
-    app: 'NukuStock',
-    type: 'supplier',
-    id: supplier.id,
-    reference: supplier.internalRef || '',
+  return scanUrl('supplier', {
     supplier: supplier.name,
   })
 }

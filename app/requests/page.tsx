@@ -2738,6 +2738,230 @@ export default function Requests() {
         }
       `}</style>
 
+
+      <style jsx global>{`
+        @media (max-width: 767px) {
+          /* =====================================================
+             RÉQUISITION - CRÉATION / MODIFICATION - TÉLÉPHONE
+             ===================================================== */
+
+          .requestModalBackdrop {
+            position: fixed !important;
+            inset: 0 !important;
+            z-index: 2000 !important;
+            width: 100vw !important;
+            height: 100dvh !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+            background: #f4f6f9 !important;
+          }
+
+          .requestModal {
+            position: fixed !important;
+            inset: 0 !important;
+            width: 100vw !important;
+            max-width: 100vw !important;
+            height: 100dvh !important;
+            max-height: 100dvh !important;
+            min-height: 100dvh !important;
+            margin: 0 !important;
+            padding:
+              calc(12px + env(safe-area-inset-top))
+              12px
+              calc(92px + env(safe-area-inset-bottom))
+              12px !important;
+            border: 0 !important;
+            border-radius: 0 !important;
+            box-sizing: border-box !important;
+            background: #f4f6f9 !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+            overscroll-behavior-y: contain !important;
+            -webkit-overflow-scrolling: touch !important;
+          }
+
+          .requestModalHead {
+            position: sticky !important;
+            top: calc(-12px - env(safe-area-inset-top)) !important;
+            z-index: 20 !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: space-between !important;
+            gap: 10px !important;
+            width: calc(100% + 24px) !important;
+            margin:
+              calc(-12px - env(safe-area-inset-top))
+              -12px
+              16px !important;
+            padding:
+              calc(12px + env(safe-area-inset-top))
+              12px
+              12px !important;
+            box-sizing: border-box !important;
+            background: #ffffff !important;
+            border-bottom: 1px solid #e4e7ec !important;
+          }
+
+          .requestModalHead h2 {
+            margin: 0 !important;
+            min-width: 0 !important;
+            font-size: 20px !important;
+            line-height: 1.15 !important;
+          }
+
+          .requestModalHead .button {
+            flex: 0 0 auto !important;
+            min-height: 40px !important;
+            padding: 0 12px !important;
+          }
+
+          .requestModal .formGrid {
+            display: grid !important;
+            grid-template-columns: 1fr !important;
+            gap: 12px !important;
+            width: 100% !important;
+          }
+
+          .requestModal .field {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            margin: 0 !important;
+          }
+
+          .requestModal .field label {
+            display: block !important;
+            margin-bottom: 6px !important;
+            font-size: 13px !important;
+            font-weight: 800 !important;
+          }
+
+          .requestModal select,
+          .requestModal input,
+          .requestModal textarea,
+          .requestModal .destinationNativeSelect {
+            display: block !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            min-height: 50px !important;
+            margin: 0 !important;
+            padding-left: 12px !important;
+            padding-right: 12px !important;
+            box-sizing: border-box !important;
+            font-size: 16px !important;
+            border-radius: 12px !important;
+          }
+
+          .requestModal h3 {
+            font-size: 20px !important;
+          }
+
+          .requestModal .requestProductTable {
+            width: 100% !important;
+            max-width: 100% !important;
+            margin-top: 12px !important;
+            border: 0 !important;
+            border-radius: 0 !important;
+            overflow: visible !important;
+            background: transparent !important;
+          }
+
+          .requestProductTableHead {
+            display: none !important;
+          }
+
+          .requestProductVisualRow,
+          .requestFormProductRow {
+            display: grid !important;
+            grid-template-columns: 1fr !important;
+            gap: 12px !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            min-height: 0 !important;
+            margin: 0 0 12px !important;
+            padding: 14px !important;
+            box-sizing: border-box !important;
+            border: 1px solid #e4e7ec !important;
+            border-radius: 14px !important;
+            background: #ffffff !important;
+          }
+
+          .requestProductVisualRow > *,
+          .requestFormProductRow > * {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+          }
+
+          .requestProductVisualRow > div:first-child {
+            display: grid !important;
+            grid-template-columns: 58px minmax(0, 1fr) !important;
+            gap: 10px !important;
+            align-items: start !important;
+          }
+
+          .requestProductPhoto {
+            width: 58px !important;
+            height: 58px !important;
+            border-radius: 10px !important;
+          }
+
+          .requestProductVisualRow select {
+            width: 100% !important;
+            min-height: 48px !important;
+          }
+
+          .requestProductVisualRow input[type="number"] {
+            width: 100% !important;
+            min-height: 48px !important;
+          }
+
+          .requestProductVisualRow > div:last-child {
+            display: block !important;
+          }
+
+          .requestProductVisualRow > div:last-child button {
+            width: 100% !important;
+            min-height: 46px !important;
+          }
+
+          .requestModal .requestModalActions {
+            position: fixed !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            z-index: 2050 !important;
+            display: grid !important;
+            grid-template-columns: 1fr !important;
+            gap: 8px !important;
+            width: 100vw !important;
+            margin: 0 !important;
+            padding:
+              10px
+              12px
+              calc(10px + env(safe-area-inset-bottom)) !important;
+            box-sizing: border-box !important;
+            background: rgba(255,255,255,.98) !important;
+            border-top: 1px solid #e4e7ec !important;
+            box-shadow: 0 -8px 24px rgba(15,23,42,.10) !important;
+          }
+
+          .requestModal .requestModalActions button {
+            width: 100% !important;
+            min-height: 48px !important;
+            font-size: 14px !important;
+          }
+
+          /* Annuler plus discret sur téléphone */
+          .requestModal .requestModalActions .secondary {
+            min-height: 42px !important;
+          }
+        }
+      `}</style>
+
     </Page>
   )
 }

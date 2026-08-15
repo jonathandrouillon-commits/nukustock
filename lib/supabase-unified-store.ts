@@ -991,7 +991,7 @@ export function useUnifiedMasterData() {
 
 async function fetchRequests(): Promise<InternalRequest[]> {
   const [{ data: requestRows, error: requestError }, { data: lineRows, error: lineError }, { data: deps }, { data: locs }, { data: productRows }] = await Promise.all([
-    supabase.from('internal_requests').select('id, request_number, department_id, destination_location_id, requested_for, status, requested_by, created_at').order('created_at', { ascending: false }),
+    supabase.from('internal_requests').select('id, request_number, department_id, destination_location_id, requested_for, status, requested_by, created_at, delivered_at, stock_applied_at').order('created_at', { ascending: false }),
     supabase.from('internal_request_lines').select('id, request_id, product_id, requested_quantity, approved_quantity, delivered_quantity, notes'),
     supabase.from('departments').select('id, name'),
     supabase.from('storage_locations').select('id, name'),
@@ -1018,6 +1018,8 @@ async function fetchRequests(): Promise<InternalRequest[]> {
     status: STATUS_FROM_DB[row.status] || 'Envoyée',
     createdAt: (row.created_at || row.requested_for || new Date().toISOString()).slice(0, 10),
     destinationLocation: locName.get(row.destination_location_id) || '',
+    deliveredAt: row.delivered_at || undefined,
+    stockAppliedAt: row.stock_applied_at || undefined,
     items: (linesByRequest.get(row.id) || []).map((line: any) => {
       const product: any = productByDbId.get(line.product_id)
       return {
@@ -1039,7 +1041,7 @@ async function syncRequests(requests: InternalRequest[]) {
     supabase.from('departments').select('id, name'),
     supabase.from('storage_locations').select('id, name'),
     supabase.from('products').select('id, legacy_id, name'),
-    supabase.from('internal_requests').select('id, request_number, requested_by'),
+    supabase.from('internal_requests').select('id, request_number, requested_by, delivered_at, stock_applied_at'),
   ])
 
   const depByName = new Map((deps || []).map((x: any) => [String(x.name).trim().toLowerCase(), x.id]))
@@ -1066,6 +1068,15 @@ async function syncRequests(requests: InternalRequest[]) {
       status: STATUS_TO_DB[request.status] || 'submitted',
       notes: null,
       requested_by: existing?.requested_by || user.id,
+      delivered_at:
+        request.deliveredAt ||
+        (request.status === 'Livrée'
+          ? existing?.delivered_at || new Date().toISOString()
+          : null),
+      stock_applied_at:
+        request.stockAppliedAt ||
+        existing?.stock_applied_at ||
+        null,
     }, { onConflict: 'id' })
 
     if (requestError) throw requestError
