@@ -3173,6 +3173,7 @@ export default function Inventory() {
 
       {createOpen && (
         <div
+          className="inventoryCreateBackdrop"
           style={{
             position: 'fixed',
             inset: 0,
@@ -3187,6 +3188,7 @@ export default function Inventory() {
           }}
         >
           <div
+            className="inventoryCreateModal"
             style={{
               width:
                 'min(620px, 100%)',
@@ -3236,6 +3238,7 @@ export default function Inventory() {
             </div>
 
             <div
+              className="inventoryCreateGrid"
               style={{
                 display: 'grid',
                 gridTemplateColumns:
@@ -3281,6 +3284,7 @@ export default function Inventory() {
                 </label>
 
                 <div
+                  className="inventoryPurposeGrid"
                   style={{
                     display: 'grid',
                     gridTemplateColumns:
@@ -3338,6 +3342,7 @@ export default function Inventory() {
                 </label>
 
                 <div
+                  className="inventoryEntryModeGrid"
                   style={{
                     display: 'grid',
                     gridTemplateColumns:
@@ -3605,6 +3610,7 @@ export default function Inventory() {
             </div>
 
             <div
+              className="inventoryCreateActions"
               style={{
                 display: 'flex',
                 justifyContent:
@@ -3632,6 +3638,156 @@ export default function Inventory() {
           </div>
         </div>
       )}
+
+      <style jsx global>{`
+        @media (max-width: 767px) {
+          .inventoryCreateBackdrop {
+            align-items: stretch !important;
+            justify-content: stretch !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+          }
+
+          .inventoryCreateModal {
+            width: 100vw !important;
+            max-width: 100vw !important;
+            height: 100dvh !important;
+            max-height: 100dvh !important;
+            margin: 0 !important;
+            padding:
+              calc(14px + env(safe-area-inset-top))
+              14px
+              calc(100px + env(safe-area-inset-bottom))
+              14px !important;
+            border-radius: 0 !important;
+            box-sizing: border-box !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+            -webkit-overflow-scrolling: touch !important;
+            overscroll-behavior: contain !important;
+          }
+
+          .inventoryCreateModal > div:first-child {
+            position: sticky !important;
+            top: calc(-14px - env(safe-area-inset-top)) !important;
+            z-index: 20 !important;
+            width: calc(100% + 28px) !important;
+            margin:
+              calc(-14px - env(safe-area-inset-top))
+              -14px
+              16px !important;
+            padding:
+              calc(14px + env(safe-area-inset-top))
+              14px
+              12px !important;
+            box-sizing: border-box !important;
+            background: #111827 !important;
+            border-bottom: 1px solid rgba(255,255,255,.08) !important;
+          }
+
+          .inventoryCreateModal > div:first-child h2 {
+            font-size: 20px !important;
+            line-height: 1.15 !important;
+          }
+
+          .inventoryCreateGrid {
+            grid-template-columns: 1fr !important;
+            gap: 14px !important;
+          }
+
+          .inventoryCreateGrid > * {
+            grid-column: 1 !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            box-sizing: border-box !important;
+          }
+
+          .inventoryCreateModal input,
+          .inventoryCreateModal select,
+          .inventoryCreateModal textarea,
+          .inventoryCreateModal .input {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            box-sizing: border-box !important;
+            font-size: 16px !important;
+          }
+
+          .inventoryCreateModal input,
+          .inventoryCreateModal select,
+          .inventoryCreateModal .input {
+            min-height: 50px !important;
+          }
+
+          .inventoryPurposeGrid {
+            grid-template-columns: 1fr !important;
+            gap: 8px !important;
+          }
+
+          .inventoryPurposeGrid button {
+            width: 100% !important;
+            min-height: 52px !important;
+            font-size: 16px !important;
+          }
+
+          .inventoryEntryModeGrid {
+            grid-template-columns: 1fr 1fr !important;
+            gap: 8px !important;
+          }
+
+          .inventoryEntryModeGrid button {
+            width: 100% !important;
+            min-width: 0 !important;
+            min-height: 54px !important;
+            padding: 8px 10px !important;
+            white-space: normal !important;
+            line-height: 1.15 !important;
+            font-size: 15px !important;
+          }
+
+          .inventoryCreateActions {
+            position: fixed !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            z-index: 30 !important;
+            display: grid !important;
+            grid-template-columns: 1fr 1.35fr !important;
+            gap: 8px !important;
+            width: 100vw !important;
+            margin: 0 !important;
+            padding:
+              10px
+              12px
+              calc(10px + env(safe-area-inset-bottom)) !important;
+            box-sizing: border-box !important;
+            background: rgba(255,255,255,.98) !important;
+            border-top: 1px solid #e5e7eb !important;
+            box-shadow: 0 -8px 24px rgba(15,23,42,.14) !important;
+          }
+
+          .inventoryCreateActions button {
+            width: 100% !important;
+            min-width: 0 !important;
+            min-height: 50px !important;
+            padding: 10px !important;
+            white-space: normal !important;
+            line-height: 1.15 !important;
+            font-size: 14px !important;
+          }
+        }
+
+        @media (max-width: 390px) {
+          .inventoryEntryModeGrid {
+            grid-template-columns: 1fr !important;
+          }
+
+          .inventoryCreateActions {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      `}</style>
     </Page>
   )
 }
