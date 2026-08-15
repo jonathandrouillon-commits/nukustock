@@ -91,6 +91,7 @@ type SourceChoice = {
 
 const BUNGALOW_ALLOWED_PRODUCT_NAMES = [
   'Hinano Blonde', 'Hinano Ambré', 'Heineken', 'Corona', 'Hoa',
+  'Hoa Mara 0%',
   'Coca', 'Coca Zero', 'Sprite', 'Tonic', 'Rotui Mangue',
   'Rotui Ananas', 'Vals', 'Evian',
 ] as const
@@ -116,7 +117,8 @@ function isAllowedBungalowProduct(productName: string) {
   const name = normalizeProductName(productName)
   const rules = [
     /^hinano blonde(?:\s|$)/, /^hinano ambre(?:\s|$)/,
-    /^heineken(?:\s|$)/, /^corona(?:\s|$)/, /^hoa(?:\s|$)/,
+    /^heineken(?:\s|$)/, /^corona(?:\s|$)/, /^hoa mara 0(?:\s|$)/,
+    /^hoa(?:\s|$)/,
     /^coca cola zero(?:\s|$)/, /^coca zero(?:\s|$)/,
     /^coca cola(?:\s|$)/, /^coca(?:\s|$)/, /^sprite(?:\s|$)/,
     /^tonic(?:\s|$)/, /^rotui mangue(?:\s|$)/,
