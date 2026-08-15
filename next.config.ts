@@ -5,7 +5,6 @@ const nextConfig: NextConfig = {
 
   async redirects() {
     return [
-      // Application Réquisition
       {
         source: '/',
         has: [
@@ -18,7 +17,6 @@ const nextConfig: NextConfig = {
         permanent: false,
       },
 
-      // Bar Nuku
       {
         source: '/',
         has: [

@@ -36,6 +36,28 @@ type NavGroup = {
 }
 
 const VIEW_MODE_KEY = 'nukustock_view_mode'
+const BAR_NUKU_HOST = 'barnuku.fenuaprobartender.com'
+
+const barNukuNavItems: NavItem[] = [
+  { href: '/bar', label: 'Accueil Bar', icon: '◉' },
+  { href: '/planning-bar', label: 'Planning', icon: '▦' },
+  { href: '/setup', label: 'SET UP', icon: '◫' },
+]
+
+const BAR_NUKU_ALLOWED_ROUTES = [
+  '/bar',
+  '/planning-bar',
+  '/setup',
+  '/login',
+  '/forgot-password',
+  '/update-password',
+]
+
+function isBarNukuPathAllowed(pathname: string) {
+  return BAR_NUKU_ALLOWED_ROUTES.some(
+    (href) => pathname === href || pathname.startsWith(`${href}/`)
+  )
+}
 
 const navItems: NavItem[] = [
   { href: '/', label: 'Dashboard', icon: '⌂' },
@@ -175,6 +197,9 @@ export function AppShell({
   const pathname = usePathname()
   const router = useRouter()
 
+  const [isBarNuku, setIsBarNuku] = useState(false)
+  const [siteModeResolved, setSiteModeResolved] = useState(false)
+
   const { items: products } = useProducts()
   const { items: orders } = useOrders()
   const { items: requests } = useRequests()
@@ -217,6 +242,7 @@ export function AppShell({
     PRODUITS: true,
     STOCKS: true,
     APPROVISIONNEMENT: true,
+    'BAR TEAM': true,
   })
 
   const toggleGroup = (label: string) => {
@@ -233,9 +259,25 @@ export function AppShell({
 
   const rootClass = useMemo(
     () =>
-      `nskAppShell view-${effectiveMode}`,
-    [effectiveMode]
+      `nskAppShell view-${effectiveMode}${isBarNuku ? ' barNukuMode' : ''}`,
+    [effectiveMode, isBarNuku]
   )
+
+  useEffect(() => {
+    const hostname = window.location.hostname.toLowerCase()
+    const barMode = hostname === BAR_NUKU_HOST
+
+    setIsBarNuku(barMode)
+    setSiteModeResolved(true)
+  }, [])
+
+  useEffect(() => {
+    if (!siteModeResolved || !isBarNuku) return
+
+    if (!isBarNukuPathAllowed(pathname)) {
+      router.replace('/bar')
+    }
+  }, [isBarNuku, pathname, router, siteModeResolved])
 
   useEffect(() => {
     const saved =
@@ -319,6 +361,8 @@ export function AppShell({
 
 
   const globalSearchResults = useMemo<GlobalSearchResult[]>(() => {
+    if (isBarNuku) return []
+
     const query = normalizeSearch(globalSearch)
 
     if (query.length < 2) return []
@@ -513,6 +557,7 @@ export function AppShell({
     requests,
     inventories,
     movements,
+    isBarNuku,
   ])
 
   const openSearchResult = (result: GlobalSearchResult) => {
@@ -551,7 +596,7 @@ export function AppShell({
 
           <div className="nskBrandText">
             <strong>
-              NukuStock
+              {isBarNuku ? 'Bar Nuku' : 'NukuStock'}
             </strong>
             <span className="nskPoweredBy">
               powered by
@@ -573,80 +618,101 @@ export function AppShell({
         </div>
 
         <nav className="nskSidebarNav">
-          <Link
-            href="/"
-            className={isActive(pathname, '/') ? 'active' : ''}
-          >
-            <span className="nskSidebarIcon" aria-hidden="true">⌂</span>
-            <span>Dashboard</span>
-          </Link>
-
-          <Link
-            href="/scan"
-            className={isActive(pathname, '/scan') ? 'active' : ''}
-          >
-            <span className="nskSidebarIcon" aria-hidden="true">⌗</span>
-            <span>Scan QR</span>
-          </Link>
-
-          {navGroups.map((group) => {
-            const groupActive = group.items.some((item) =>
-              isActive(pathname, item.href)
-            )
-            const groupOpen = openGroups[group.label] ?? groupActive
-
-            return (
-              <div className="nskNavGroup" key={group.label}>
-                <button
-                  type="button"
-                  className={`nskNavGroupButton ${groupActive ? 'activeGroup' : ''}`}
-                  onClick={() => toggleGroup(group.label)}
-                  aria-expanded={groupOpen}
+          {isBarNuku ? (
+            <>
+              {barNukuNavItems.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={isActive(pathname, item.href) ? 'active' : ''}
                 >
                   <span className="nskSidebarIcon" aria-hidden="true">
-                    {group.icon}
+                    {item.icon}
                   </span>
-                  <span className="nskNavGroupLabel">{group.label}</span>
-                  <span className="nskNavChevron" aria-hidden="true">
-                    {groupOpen ? '⌄' : '›'}
-                  </span>
-                </button>
+                  <span>{item.label}</span>
+                </Link>
+              ))}
+            </>
+          ) : (
+            <>
+              <Link
+                href="/"
+                className={isActive(pathname, '/') ? 'active' : ''}
+              >
+                <span className="nskSidebarIcon" aria-hidden="true">⌂</span>
+                <span>Dashboard</span>
+              </Link>
 
-                {groupOpen && (
-                  <div className="nskNavGroupItems">
-                    {group.items.map((item) => (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        className={isActive(pathname, item.href) ? 'active' : ''}
-                      >
-                        <span className="nskSidebarIcon" aria-hidden="true">
-                          {item.icon}
-                        </span>
-                        <span>{item.label}</span>
-                      </Link>
-                    ))}
+              <Link
+                href="/scan"
+                className={isActive(pathname, '/scan') ? 'active' : ''}
+              >
+                <span className="nskSidebarIcon" aria-hidden="true">⌗</span>
+                <span>Scan QR</span>
+              </Link>
+
+              {navGroups.map((group) => {
+                const groupActive = group.items.some((item) =>
+                  isActive(pathname, item.href)
+                )
+                const groupOpen = openGroups[group.label] ?? groupActive
+
+                return (
+                  <div className="nskNavGroup" key={group.label}>
+                    <button
+                      type="button"
+                      className={`nskNavGroupButton ${groupActive ? 'activeGroup' : ''}`}
+                      onClick={() => toggleGroup(group.label)}
+                      aria-expanded={groupOpen}
+                    >
+                      <span className="nskSidebarIcon" aria-hidden="true">
+                        {group.icon}
+                      </span>
+                      <span className="nskNavGroupLabel">{group.label}</span>
+                      <span className="nskNavChevron" aria-hidden="true">
+                        {groupOpen ? '⌄' : '›'}
+                      </span>
+                    </button>
+
+                    {groupOpen && (
+                      <div className="nskNavGroupItems">
+                        {group.items.map((item) => (
+                          <Link
+                            key={item.href}
+                            href={item.href}
+                            className={isActive(pathname, item.href) ? 'active' : ''}
+                          >
+                            <span className="nskSidebarIcon" aria-hidden="true">
+                              {item.icon}
+                            </span>
+                            <span>{item.label}</span>
+                          </Link>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            )
-          })}
+                )
+              })}
 
-          <Link
-            href="/settings"
-            className={isActive(pathname, '/settings') ? 'active' : ''}
-          >
-            <span className="nskSidebarIcon" aria-hidden="true">⚙</span>
-            <span>Réglages</span>
-          </Link>
+              <Link
+                href="/settings"
+                className={isActive(pathname, '/settings') ? 'active' : ''}
+              >
+                <span className="nskSidebarIcon" aria-hidden="true">⚙</span>
+                <span>Réglages</span>
+              </Link>
+            </>
+          )}
         </nav>
 
         <div className="nskSidebarFoot">
           <strong>
-            NukuStock
+            {isBarNuku ? 'Bar Nuku' : 'NukuStock'}
           </strong>
           <span>
-            Gestion des stocks Nukutepipi
+            {isBarNuku
+              ? 'Portail équipe Bar · Nukutepipi'
+              : 'Gestion des stocks Nukutepipi'}
           </span>
         </div>
       </aside>
@@ -667,14 +733,15 @@ export function AppShell({
 
             <div className="nskTopbarTitle">
               <span className="nskEyebrow">
-                NUKUTEPIPI
+                {isBarNuku ? 'BAR NUKU' : 'NUKUTEPIPI'}
               </span>
               <strong>
-                Gestion des stocks
+                {isBarNuku ? 'Portail équipe Bar' : 'Gestion des stocks'}
               </strong>
             </div>
           </div>
 
+          {!isBarNuku && (
           <div className="nskGlobalSearch">
             <span
               className="nskGlobalSearchIcon"
@@ -761,6 +828,7 @@ export function AppShell({
               </div>
             )}
           </div>
+          )}
 
           <div className="nskTopbarRight">
             <div className="nskViewSelector">
@@ -874,62 +942,60 @@ export function AppShell({
         </div>
       </main>
 
-      <nav className="nskMobileNav">
-        {navItems
-          .filter((item) =>
-            mobileQuickLinks.includes(
-              item.href
+      <nav className={`nskMobileNav ${isBarNuku ? 'nskBarMobileNav' : ''}`}>
+        {(isBarNuku
+          ? barNukuNavItems
+          : navItems.filter((item) =>
+              mobileQuickLinks.includes(item.href)
             )
-          )
-          .map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={
-                isActive(
-                  pathname,
-                  item.href
-                )
-                  ? 'active'
-                  : ''
-              }
-            >
-              <span
-                className="nskMobileNavIcon"
-                aria-hidden="true"
-              >
-                {item.icon}
-              </span>
-              <span className="nskMobileNavLabel">
-                {item.label}
-              </span>
-            </Link>
-          ))}
-
-        <button
-          type="button"
-          className={
-            mobileMenuOpen
-              ? 'active'
-              : ''
-          }
-          onClick={() =>
-            setMobileMenuOpen(true)
-          }
-        >
-          <span
-            className="nskMobileNavIcon"
-            aria-hidden="true"
+        ).map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={
+              isActive(pathname, item.href)
+                ? 'active'
+                : ''
+            }
           >
-            ☰
-          </span>
-          <span className="nskMobileNavLabel">
-            Menu
-          </span>
-        </button>
+            <span
+              className="nskMobileNavIcon"
+              aria-hidden="true"
+            >
+              {item.icon}
+            </span>
+            <span className="nskMobileNavLabel">
+              {item.label}
+            </span>
+          </Link>
+        ))}
+
+        {!isBarNuku && (
+          <button
+            type="button"
+            className={
+              mobileMenuOpen
+                ? 'active'
+                : ''
+            }
+            onClick={() =>
+              setMobileMenuOpen(true)
+            }
+          >
+            <span
+              className="nskMobileNavIcon"
+              aria-hidden="true"
+            >
+              ☰
+            </span>
+            <span className="nskMobileNavLabel">
+              Menu
+            </span>
+          </button>
+        )}
       </nav>
 
-      {mobileMenuOpen && (
+      {!isBarNuku && mobileMenuOpen && (
         <div className="nskMobileMenuScreen">
           <div className="nskMobileMenuHeader">
             <div>
@@ -1773,6 +1839,22 @@ export function AppShell({
           background: rgba(255,255,255,.98);
           border-top: 1px solid #e6e9ef;
           box-shadow: 0 -8px 30px rgba(15,23,42,.08);
+        }
+
+        .view-phone .nskMobileNav.nskBarMobileNav {
+          grid-template-columns: repeat(3, minmax(0,1fr));
+        }
+
+        .barNukuMode .nskSidebar {
+          background: #101827;
+        }
+
+        .barNukuMode .nskSidebarNav a.active {
+          background: #23324a;
+        }
+
+        .barNukuMode .nskTopbar {
+          border-bottom-color: #dfe5ec;
         }
 
         .view-phone .nskMobileNav a,
