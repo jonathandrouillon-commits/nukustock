@@ -5,6 +5,10 @@ const nextConfig: NextConfig = {
 
   async redirects() {
     return [
+      // ==========================================
+      // APPLICATION RÉQUISITION
+      // requisitionnuku.fenuaprobartender.com
+      // ==========================================
       {
         source: '/',
         has: [
@@ -14,6 +18,22 @@ const nextConfig: NextConfig = {
           },
         ],
         destination: '/requisition',
+        permanent: false,
+      },
+
+      // ==========================================
+      // APPLICATION BAR NUKU
+      // barnuku.fenuaprobartender.com
+      // ==========================================
+      {
+        source: '/',
+        has: [
+          {
+            type: 'host',
+            value: 'barnuku.fenuaprobartender.com',
+          },
+        ],
+        destination: '/bar',
         permanent: false,
       },
     ]

@@ -911,6 +911,111 @@ function BarPlanningPage() {
     )
   }
 
+  const validateWeek = (
+    employeeId: string
+  ) => {
+    const employee =
+      employees.find(
+        item =>
+          item.id === employeeId
+      )
+
+    const invalidDays =
+      days.filter(day => {
+        const dateKey =
+          isoDate(day)
+
+        const current =
+          getDay(
+            employeeId,
+            dateKey
+          )
+
+        if (current.off) {
+          return false
+        }
+
+        if (
+          !current.start ||
+          !current.end
+        ) {
+          return true
+        }
+
+        if (
+          current.split &&
+          (
+            !current.start2 ||
+            !current.end2
+          )
+        ) {
+          return true
+        }
+
+        return false
+      })
+
+    if (invalidDays.length) {
+      const labels =
+        invalidDays
+          .map(day =>
+            `${formatDay(day)} ${formatDate(day)}`
+          )
+          .join(', ')
+
+      window.alert(
+        `Impossible de valider la semaine de ${employee?.name || 'cet employé'}. Horaires incomplets : ${labels}.`
+      )
+      return
+    }
+
+    const confirmed =
+      window.confirm(
+        `Valider toute la semaine de ${employee?.name || 'cet employé'} ?`
+      )
+
+    if (!confirmed) {
+      return
+    }
+
+    const validatedAt =
+      new Date().toISOString()
+
+    setPlanning(prev => {
+      const next = {
+        ...prev,
+      }
+
+      const employeePlanning = {
+        ...(next[employeeId] || {}),
+      }
+
+      days.forEach(day => {
+        const dateKey =
+          isoDate(day)
+
+        const current =
+          employeePlanning[
+            dateKey
+          ] ||
+          emptyDay()
+
+        employeePlanning[
+          dateKey
+        ] = {
+          ...current,
+          validated: true,
+          validatedAt,
+        }
+      })
+
+      next[employeeId] =
+        employeePlanning
+
+      return next
+    })
+  }
+
   const unlockDay = (
     employeeId: string,
     dateKey: string
@@ -2419,6 +2524,28 @@ function BarPlanningPage() {
                       </div>
 
                       <button
+                        type="button"
+                        className="validateWeekBtn noPrint"
+                        disabled={
+                          isWeekFullyValidated(
+                            employee.id
+                          )
+                        }
+                        onClick={() =>
+                          validateWeek(
+                            employee.id
+                          )
+                        }
+                        title="Valider les 7 jours de la semaine"
+                      >
+                        {isWeekFullyValidated(
+                          employee.id
+                        )
+                          ? '✓ Semaine validée'
+                          : 'Valider semaine'}
+                      </button>
+
+                      <button
                         className="deleteEmployee noPrint"
                         onClick={() => removeEmployee(employee.id)}
                         title="Supprimer l'employé"
@@ -3017,7 +3144,25 @@ function BarPlanningPage() {
           .totalHead, .totalCell { width:55px; min-width:55px; }
           .totalCell { font-size:11px; }
         }
-      `}</style>
+.validateWeekBtn {
+          width: 100%;
+          margin-top: 8px;
+          min-height: 34px;
+          padding: 6px 8px;
+          border: 1px solid #86efac;
+          border-radius: 8px;
+          background: #ecfdf3;
+          color: #067647;
+          font-size: 11px;
+          font-weight: 900;
+          cursor: pointer;
+        }
+        .validateWeekBtn:disabled {
+          opacity: 0.72;
+          cursor: default;
+        }
+      `}
+</style>
     </Page>
   )
 }
