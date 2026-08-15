@@ -451,9 +451,7 @@ export default function BarPage() {
    * Contrôle toutes les lignes
    * avant l'application au stock.
    */
-  const validateTreatmentLines = (
-    mode: 'complete' | 'partial'
-  ) => {
+  const validateTreatmentLines = () => {
     if (!currentRequest) {
       return {
         ok: false,
@@ -610,31 +608,10 @@ export default function BarPage() {
       }
     }
 
-    if (
-      mode === 'complete' &&
-      hasNonFullLine
-    ) {
-      return {
-        ok: false,
-        message:
-          'Une ou plusieurs lignes sont partielles ou Out of stock. Utilise « Valider partiellement et clôturer ».',
-      }
-    }
-
-    if (
-      mode === 'partial' &&
-      !hasNonFullLine
-    ) {
-      return {
-        ok: false,
-        message:
-          'Toutes les lignes sont servies complètement. Utilise « Valider complètement ».',
-      }
-    }
-
     return {
       ok: true,
       message: '',
+      hasNonFullLine,
     }
   }
 
@@ -642,17 +619,13 @@ export default function BarPage() {
    * Applique réellement les sorties
    * de stock puis clôture la demande.
    */
-  const confirmTreatment = (
-    mode:
-      | 'complete'
-      | 'partial'
-  ) => {
+  const confirmTreatment = () => {
     setError('')
     setModalError('')
     setMessage('')
 
     const validation =
-      validateTreatmentLines(mode)
+      validateTreatmentLines()
 
     if (!validation.ok) {
       setModalError(
@@ -664,6 +637,11 @@ export default function BarPage() {
     if (!currentRequest) {
       return
     }
+
+    const finalStatus =
+      validation.hasNonFullLine
+        ? ('Partielle' as const)
+        : ('Livrée' as const)
 
     const timestamp =
       new Date().toISOString()
@@ -806,10 +784,7 @@ export default function BarPage() {
             /*
              * Résultat métier.
              */
-            status:
-              mode === 'complete'
-                ? ('Livrée' as const)
-                : ('Partielle' as const),
+            status: finalStatus,
 
             /*
              * IMPORTANT :
@@ -839,18 +814,18 @@ export default function BarPage() {
     setTreatingId('')
     setTreatmentLines([])
     setError('')
+
+    setTreatmentOpen(false)
+    setTreatingId('')
+    setTreatmentLines([])
+    setError('')
     setModalError('')
 
-    if (mode === 'complete') {
-      setMessage(
-        `Réquisition ${currentRequest.id} livrée complètement et clôturée.`
-      )
-    } else {
-      setMessage(
-        `Réquisition ${currentRequest.id} traitée partiellement et clôturée.`
-      )
-    }
-
+    setMessage(
+      finalStatus === 'Livrée'
+        ? `Réquisition ${currentRequest.id} livrée complètement et clôturée.`
+        : `Réquisition ${currentRequest.id} traitée et clôturée avec une ligne partielle ou OUT OF STOCK.`
+    )
   }
 
   return (
@@ -1489,27 +1464,12 @@ export default function BarPage() {
 
               <button
                 type="button"
-                className="partialValidateButton"
-                onClick={() =>
-                  confirmTreatment(
-                    'partial'
-                  )
-                }
-              >
-                Valider partiellement
-                et clôturer
-              </button>
-
-              <button
-                type="button"
                 className="confirmButton"
-                onClick={() =>
-                  confirmTreatment(
-                    'complete'
-                  )
+                onClick={
+                  confirmTreatment
                 }
               >
-                Valider complètement
+                Valider et clôturer
               </button>
             </div>
           </div>
@@ -2177,7 +2137,6 @@ export default function BarPage() {
         }
 
         .cancelButton,
-        .partialValidateButton,
         .confirmButton {
           min-height: 42px;
           padding: 0 15px;
@@ -2191,12 +2150,6 @@ export default function BarPage() {
           border: 1px solid #d0d5dd;
           background: #fff;
           color: #344054;
-        }
-
-        .partialValidateButton {
-          border: 1px solid #dc6803;
-          background: #fffaeb;
-          color: #b54708;
         }
 
         .confirmButton {
@@ -2287,7 +2240,6 @@ export default function BarPage() {
           }
 
           .cancelButton,
-          .partialValidateButton,
           .confirmButton {
             width: 100%;
           }
