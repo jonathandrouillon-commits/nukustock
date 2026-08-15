@@ -123,6 +123,7 @@ const STOCK_SCREEN_COLUMNS = [
   { key: 'quantity', label: 'Disponible' },
   { key: 'price', label: 'Prix' },
   { key: 'value', label: 'Valeur' },
+  { key: 'transfer', label: 'Transfert' },
 ]
 
 const STOCK_SCREEN_ESSENTIAL = [
@@ -284,6 +285,14 @@ export default function Stocks() {
     useState(true)
   const [quickNote, setQuickNote] =
     useState('')
+
+  const [transferOpen, setTransferOpen] = useState(false)
+  const [transferProductId, setTransferProductId] = useState('')
+  const [transferLotId, setTransferLotId] = useState('')
+  const [transferFromLocation, setTransferFromLocation] = useState('')
+  const [transferToLocation, setTransferToLocation] = useState('')
+  const [transferQuantity, setTransferQuantity] = useState(1)
+
 
   const toggleStockPrintColumn = (
     key: StockPrintColumnKey
@@ -916,6 +925,153 @@ export default function Stocks() {
       quickNeedsRegularization
         ? `Entrée ajoutée : +${quantity} ${product.unit} de ${product.name} dans ${quickLocation}. Mouvement marqué À régulariser.`
         : `Entrée ajoutée : +${quantity} ${product.unit} de ${product.name} dans ${quickLocation}.`
+    )
+  }
+
+  const openTransfer = (product: any, lot: any, quantity: number) => {
+    if (!lot.location) {
+      window.alert('Ce stock n’a pas de lieu source.')
+      return
+    }
+    if (quantity <= 0) {
+      window.alert('Aucun stock disponible à transférer.')
+      return
+    }
+
+    setTransferProductId(product.id)
+    setTransferLotId(lot.id)
+    setTransferFromLocation(lot.location)
+    setTransferToLocation('')
+    setTransferQuantity(1)
+    setTransferOpen(true)
+  }
+
+  const saveTransfer = () => {
+    const product = items.find((item) => item.id === transferProductId)
+    if (!product) {
+      window.alert('Produit introuvable.')
+      return
+    }
+
+    const sourceIndex = product.lots.findIndex(
+      (lot) => lot.id === transferLotId
+    )
+    if (sourceIndex < 0) {
+      window.alert('Lot source introuvable.')
+      return
+    }
+
+    const sourceLot = product.lots[sourceIndex]
+    const available = Math.max(0, Number(sourceLot.quantity) || 0)
+    const quantity = Math.max(0, Number(transferQuantity) || 0)
+
+    if (!transferToLocation) {
+      window.alert('Choisis le lieu de destination.')
+      return
+    }
+    if (transferToLocation === transferFromLocation) {
+      window.alert('Le lieu de destination doit être différent du lieu source.')
+      return
+    }
+    if (quantity <= 0) {
+      window.alert('La quantité doit être supérieure à 0.')
+      return
+    }
+    if (quantity > available) {
+      window.alert(`Stock insuffisant. Disponible : ${available} ${product.unit || ''}.`)
+      return
+    }
+
+    const nextLots = product.lots.map((lot) => ({ ...lot }))
+    nextLots[sourceIndex] = {
+      ...nextLots[sourceIndex],
+      quantity: available - quantity,
+    }
+
+    const destinationIndex = nextLots.findIndex(
+      (lot, index) =>
+        index !== sourceIndex &&
+        lot.location === transferToLocation &&
+        (lot.lotNumber || '') === (sourceLot.lotNumber || '') &&
+        (lot.expiry || '') === (sourceLot.expiry || '')
+    )
+
+    if (destinationIndex >= 0) {
+      nextLots[destinationIndex] = {
+        ...nextLots[destinationIndex],
+        quantity:
+          Math.max(0, Number(nextLots[destinationIndex].quantity) || 0) +
+          quantity,
+      }
+    } else {
+      nextLots.push({
+        id: crypto.randomUUID(),
+        lotNumber: sourceLot.lotNumber || '',
+        expiry: sourceLot.expiry || '',
+        location: transferToLocation,
+        quantity,
+      })
+    }
+
+    saveProducts(
+      items.map((item) =>
+        item.id === product.id
+          ? { ...item, lots: nextLots }
+          : item
+      )
+    )
+
+    const transferReference =
+      `TRF-${Date.now().toString().slice(-8)}`
+
+    const createdAt =
+      new Date().toISOString()
+
+    const movements: StockMovement[] = [
+      {
+        id: crypto.randomUUID(),
+        createdAt,
+        type: 'TRANSFERT_SORTIE',
+        productId: product.id,
+        productName: product.name,
+        internalRef: product.internalRef,
+        quantity: -quantity,
+        fromLocation: transferFromLocation,
+        toLocation: transferToLocation,
+        lotNumber: sourceLot.lotNumber || undefined,
+        expiry: sourceLot.expiry || undefined,
+        referenceType: 'transfer',
+        referenceId: transferReference,
+        note: `Transfert de ${transferFromLocation} vers ${transferToLocation}`,
+        regularizationStatus: 'NON_REQUIS',
+      },
+      {
+        id: crypto.randomUUID(),
+        createdAt,
+        type: 'TRANSFERT_ENTREE',
+        productId: product.id,
+        productName: product.name,
+        internalRef: product.internalRef,
+        quantity,
+        fromLocation: transferFromLocation,
+        toLocation: transferToLocation,
+        lotNumber: sourceLot.lotNumber || undefined,
+        expiry: sourceLot.expiry || undefined,
+        referenceType: 'transfer',
+        referenceId: transferReference,
+        note: `Transfert de ${transferFromLocation} vers ${transferToLocation}`,
+        regularizationStatus: 'NON_REQUIS',
+      },
+    ]
+
+    saveStockMovements([
+      ...movements,
+      ...stockMovements,
+    ])
+
+    setTransferOpen(false)
+    window.alert(
+      `Transfert effectué : ${quantity} ${product.unit || ''} de ${product.name} vers ${transferToLocation}.`
     )
   }
 
@@ -1914,6 +2070,7 @@ export default function Stocks() {
               stockDisplay.isVisible('quantity') && '120px',
               stockDisplay.isVisible('price') && '120px',
               stockDisplay.isVisible('value') && '120px',
+              '120px',
             ].filter(Boolean).join(' ')
 
             const minWidth = Math.max(
@@ -2009,6 +2166,7 @@ export default function Stocks() {
                       Valeur{sortIndicator('value')}
                     </button>
                   )}
+                  <div className="screenOnly">Action</div>
                 </div>
 
                 {filteredRows.map(({ product, lot, quantity, value }, index) => (
@@ -2167,6 +2325,17 @@ export default function Stocks() {
                     {stockDisplay.isVisible('value') && (
                       <div>{value.toLocaleString('fr-FR')} XPF</div>
                     )}
+
+                    <div className="screenOnly">
+                      <button
+                        className="button small"
+                        type="button"
+                        disabled={quantity <= 0 || !lot.location}
+                        onClick={() => openTransfer(product, lot, quantity)}
+                      >
+                        Transférer
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -2337,6 +2506,106 @@ export default function Stocks() {
         </div>
       )}
 
+
+      {transferOpen && (() => {
+        const product = items.find((item) => item.id === transferProductId)
+        const sourceLot = product?.lots.find((lot) => lot.id === transferLotId)
+        const available = Math.max(0, Number(sourceLot?.quantity) || 0)
+
+        return (
+          <div
+            className="screenOnly"
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 1400,
+              background: 'rgba(15,23,42,.65)',
+              display: 'grid',
+              placeItems: 'center',
+              padding: 18,
+            }}
+            onMouseDown={(event) => {
+              if (event.currentTarget === event.target) setTransferOpen(false)
+            }}
+          >
+            <div
+              style={{
+                width: 'min(560px,100%)',
+                maxHeight: '92vh',
+                overflowY: 'auto',
+                background: '#fff',
+                color: '#101828',
+                borderRadius: 18,
+                padding: 24,
+                boxShadow: '0 25px 80px rgba(0,0,0,.30)',
+              }}
+            >
+              <h2 style={{ margin: 0 }}>Transférer le stock</h2>
+              <div style={{ marginTop: 6, color: '#667085', fontSize: 13 }}>
+                {product?.name || 'Produit'}
+              </div>
+
+              <div style={{ display: 'grid', gap: 14, marginTop: 20 }}>
+                <div style={{ padding: 12, borderRadius: 12, background: '#f8fafc', border: '1px solid #e5e7eb' }}>
+                  <strong>Lieu source :</strong> {transferFromLocation}<br />
+                  <strong>Disponible :</strong> {available} {product?.unit || ''}<br />
+                  <strong>DLUO / DLC :</strong>{' '}
+                  {sourceLot?.expiry
+                    ? new Date(`${sourceLot.expiry}T00:00:00`).toLocaleDateString('fr-FR')
+                    : 'Sans DLUO'}
+                  {sourceLot?.lotNumber ? <><br /><strong>Lot :</strong> {sourceLot.lotNumber}</> : null}
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: 6, fontSize: 12, fontWeight: 800 }}>
+                    Lieu destination
+                  </label>
+                  <select
+                    className="input"
+                    style={{ width: '100%' }}
+                    value={transferToLocation}
+                    onChange={(event) => setTransferToLocation(event.target.value)}
+                  >
+                    <option value="">Choisir un lieu</option>
+                    {quickEntryLocations
+                      .filter((location) => location !== transferFromLocation)
+                      .map((location) => (
+                        <option key={location} value={location}>{location}</option>
+                      ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: 6, fontSize: 12, fontWeight: 800 }}>
+                    Quantité à transférer
+                  </label>
+                  <input
+                    className="input"
+                    style={{ width: '100%' }}
+                    type="number"
+                    min="0.01"
+                    max={available}
+                    step="0.01"
+                    value={transferQuantity}
+                    onChange={(event) =>
+                      setTransferQuantity(Math.max(0, Number(event.target.value) || 0))
+                    }
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 22 }}>
+                <button className="button secondary" type="button" onClick={() => setTransferOpen(false)}>
+                  Annuler
+                </button>
+                <button className="button" type="button" onClick={saveTransfer}>
+                  Confirmer le transfert
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {quickEntryOpen && (
         <div
