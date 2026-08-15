@@ -4,10 +4,14 @@ import Link from 'next/link'
 import { useMemo, useState } from 'react'
 
 import {
-  moveProductStock,
   useProducts,
   useRequests,
+  useStockMovements,
 } from '@/lib/store'
+
+import {
+  decreaseProductStock,
+} from '@/lib/stock-engine'
 
 import type {
   InternalRequest,
@@ -87,6 +91,11 @@ export default function BarPage() {
     items: products,
     save: saveProducts,
   } = useProducts()
+
+  const {
+    items: stockMovements,
+    save: saveStockMovements,
+  } = useStockMovements()
 
   const [filter, setFilter] =
     useState<FilterMode>('A traiter')
@@ -663,6 +672,8 @@ export default function BarPage() {
     let nextProducts =
       products
 
+    const newMovements = []
+
     for (
       let index = 0;
       index < currentRequest.items.length;
@@ -689,12 +700,23 @@ export default function BarPage() {
       }
 
       const result =
-        moveProductStock(
+        decreaseProductStock(
           nextProducts,
           requestLine.productId,
           treatment.sourceLocation,
-          destination,
-          treatment.quantity
+          treatment.quantity,
+          {
+            type: 'REQUISITION',
+            fromLocation:
+              treatment.sourceLocation,
+            toLocation:
+              destination,
+            referenceType: 'request',
+            referenceId:
+              currentRequest.id,
+            note:
+              `Réquisition ${currentRequest.service}`,
+          }
         )
 
       if (!result.ok) {
@@ -707,6 +729,10 @@ export default function BarPage() {
 
       nextProducts =
         result.products
+
+      newMovements.push(
+        ...result.movements
+      )
     }
 
     const updatedRequests =
@@ -789,6 +815,14 @@ export default function BarPage() {
       )
 
     saveProducts(nextProducts)
+
+    if (newMovements.length > 0) {
+      saveStockMovements([
+        ...stockMovements,
+        ...newMovements,
+      ])
+    }
+
     saveRequests(updatedRequests)
 
     /*
