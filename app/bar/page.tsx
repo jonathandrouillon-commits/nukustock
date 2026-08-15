@@ -12,6 +12,7 @@ import {
 import type {
   InternalRequest,
   Product,
+  RequestLineTreatmentStatus,
 } from '@/lib/types'
 
 type FilterMode =
@@ -21,9 +22,11 @@ type FilterMode =
   | 'Livrées'
 
 type TreatmentLine = {
+  lineIndex: number
   productId: string
   sourceLocation: string
   quantity: number
+  status: RequestLineTreatmentStatus
 }
 
 function normalize(value: string) {
@@ -56,6 +59,24 @@ function statusClass(status: string) {
   return 'neutral'
 }
 
+function lineStatusLabel(
+  status?: RequestLineTreatmentStatus
+) {
+  if (status === 'fulfilled') {
+    return 'SERVI COMPLET'
+  }
+
+  if (status === 'partial') {
+    return 'PARTIEL'
+  }
+
+  if (status === 'out_of_stock') {
+    return 'OUT OF STOCK'
+  }
+
+  return 'À TRAITER'
+}
+
 export default function BarPage() {
   const {
     items: requests,
@@ -71,7 +92,7 @@ export default function BarPage() {
     useState<FilterMode>('A traiter')
 
   const [treatingId, setTreatingId] =
-    useState<string>('')
+    useState('')
 
   const [
     treatmentLines,
@@ -94,6 +115,14 @@ export default function BarPage() {
       [requests, treatingId]
     )
 
+  /*
+   * Une réquisition est encore à traiter
+   * tant qu'elle n'a pas stockAppliedAt.
+   *
+   * Même une réquisition PARTIELLE sera
+   * considérée comme terminée dès qu'elle
+   * aura été validée depuis Bar Nuku.
+   */
   const requestsToTreat =
     useMemo(
       () =>
@@ -108,12 +137,15 @@ export default function BarPage() {
 
   const filteredRequests =
     useMemo(() => {
-      const sorted = [...requests].sort(
-        (a, b) =>
-          String(b.createdAt).localeCompare(
-            String(a.createdAt)
-          )
-      )
+      const sorted =
+        [...requests].sort(
+          (a, b) =>
+            String(
+              b.createdAt
+            ).localeCompare(
+              String(a.createdAt)
+            )
+        )
 
       if (filter === 'Toutes') {
         return sorted
@@ -129,7 +161,8 @@ export default function BarPage() {
       if (filter === 'Partielles') {
         return sorted.filter(
           (request) =>
-            request.status === 'Partielle'
+            request.status ===
+            'Partielle'
         )
       }
 
@@ -149,13 +182,19 @@ export default function BarPage() {
         product.id === productId
     )
 
+  /*
+   * Liste les stocks disponibles
+   * du produit par lieu.
+   */
   const getLocationsForProduct = (
     productId: string
   ) => {
     const product =
       getProduct(productId)
 
-    if (!product) return []
+    if (!product) {
+      return []
+    }
 
     const quantities =
       new Map<string, number>()
@@ -168,7 +207,8 @@ export default function BarPage() {
 
       quantities.set(
         location,
-        (quantities.get(location) || 0) +
+        (quantities.get(location) ||
+          0) +
           Number(lot.quantity || 0)
       )
     })
@@ -183,6 +223,9 @@ export default function BarPage() {
         })
       )
       .sort((a, b) => {
+        /*
+         * Stock > 0 en premier.
+         */
         if (
           a.quantity > 0 &&
           b.quantity <= 0
@@ -215,15 +258,29 @@ export default function BarPage() {
     const target =
       normalize(location)
 
-    return getLocationsForProduct(
-      productId
-    ).find(
-      (item) =>
-        normalize(item.location) ===
-        target
-    )?.quantity || 0
+    return (
+      getLocationsForProduct(
+        productId
+      ).find(
+        (item) =>
+          normalize(
+            item.location
+          ) === target
+      )?.quantity || 0
+    )
   }
 
+  const getTreatmentLine = (
+    lineIndex: number
+  ) =>
+    treatmentLines.find(
+      (line) =>
+        line.lineIndex === lineIndex
+    )
+
+  /*
+   * Ouvre la réquisition.
+   */
   const openTreatment = (
     request: InternalRequest
   ) => {
@@ -232,42 +289,52 @@ export default function BarPage() {
 
     if (request.stockAppliedAt) {
       setError(
-        'Cette réquisition a déjà été appliquée au stock.'
+        'Cette réquisition est déjà traitée.'
       )
       return
     }
 
     const initial =
-      request.items.map((line) => {
-        const locations =
-          getLocationsForProduct(
-            line.productId
-          )
+      request.items.map(
+        (line, lineIndex) => {
+          const locations =
+            getLocationsForProduct(
+              line.productId
+            )
 
-        const firstWithStock =
-          locations.find(
-            (location) =>
-              location.quantity > 0
-          )
+          const firstWithStock =
+            locations.find(
+              (location) =>
+                location.quantity > 0
+            )
 
-        const requestedQuantity =
-          line.approved > 0
-            ? line.approved
-            : line.requested
+          return {
+            lineIndex,
 
-        return {
-          productId:
-            line.productId,
+            productId:
+              line.productId,
 
-          sourceLocation:
-            firstWithStock?.location ||
-            request.sourceLocation ||
-            '',
+            sourceLocation:
+              line.sourceLocation ||
+              firstWithStock
+                ?.location ||
+              request.sourceLocation ||
+              '',
 
-          quantity:
-            requestedQuantity,
+            /*
+             * On ne considère rien comme
+             * livré avant que le barman
+             * choisisse son action.
+             */
+            quantity:
+              line.delivered || 0,
+
+            status:
+              line.treatmentStatus ||
+              ('pending' as const),
+          }
         }
-      })
+      )
 
     setTreatmentLines(initial)
     setTreatingId(request.id)
@@ -280,13 +347,13 @@ export default function BarPage() {
   }
 
   const updateTreatment = (
-    productId: string,
+    lineIndex: number,
     patch: Partial<TreatmentLine>
   ) => {
     setTreatmentLines(
       (current) =>
         current.map((line) =>
-          line.productId === productId
+          line.lineIndex === lineIndex
             ? {
                 ...line,
                 ...patch,
@@ -296,59 +363,168 @@ export default function BarPage() {
     )
   }
 
-  const confirmTreatment = () => {
-    setError('')
-    setMessage('')
+  /*
+   * SERVI COMPLET
+   */
+  const setFull = (
+    lineIndex: number,
+    requested: number
+  ) => {
+    updateTreatment(
+      lineIndex,
+      {
+        quantity: requested,
+        status: 'fulfilled',
+      }
+    )
+  }
 
+  /*
+   * PARTIEL
+   */
+  const setPartial = (
+    lineIndex: number,
+    requested: number,
+    available: number
+  ) => {
+    const existing =
+      getTreatmentLine(lineIndex)
+
+    let quantity =
+      existing?.quantity || 0
+
+    /*
+     * Préremplit avec le stock disponible
+     * si cela constitue réellement un partiel.
+     */
+    if (
+      quantity <= 0 ||
+      quantity >= requested
+    ) {
+      quantity = Math.min(
+        available,
+        Math.max(
+          0,
+          requested - 1
+        )
+      )
+    }
+
+    updateTreatment(
+      lineIndex,
+      {
+        quantity,
+        status: 'partial',
+      }
+    )
+  }
+
+  /*
+   * OUT OF STOCK
+   *
+   * Aucun mouvement de stock.
+   * Quantité donnée = 0.
+   */
+  const setOutOfStock = (
+    lineIndex: number
+  ) => {
+    updateTreatment(
+      lineIndex,
+      {
+        quantity: 0,
+        status: 'out_of_stock',
+      }
+    )
+  }
+
+  /*
+   * Contrôle toutes les lignes
+   * avant l'application au stock.
+   */
+  const validateTreatmentLines = (
+    mode: 'complete' | 'partial'
+  ) => {
     if (!currentRequest) {
-      setError(
-        'Réquisition introuvable.'
-      )
-      return
+      return {
+        ok: false,
+        message:
+          'Réquisition introuvable.',
+      }
     }
 
-    if (currentRequest.stockAppliedAt) {
-      setError(
-        'Cette réquisition a déjà été traitée.'
-      )
-      return
+    if (
+      currentRequest.stockAppliedAt
+    ) {
+      return {
+        ok: false,
+        message:
+          'Cette réquisition est déjà traitée.',
+      }
     }
+
+    let hasNonFullLine = false
 
     for (
-      const requestLine of
-      currentRequest.items
+      let index = 0;
+      index <
+      currentRequest.items.length;
+      index += 1
     ) {
+      const requestLine =
+        currentRequest.items[index]
+
       const treatment =
-        treatmentLines.find(
-          (line) =>
-            line.productId ===
-            requestLine.productId
-        )
+        getTreatmentLine(index)
 
       if (!treatment) {
-        setError(
-          `Ligne introuvable pour ${requestLine.productName}.`
-        )
-        return
+        return {
+          ok: false,
+          message:
+            `Ligne introuvable pour ${requestLine.productName}.`,
+        }
       }
 
-      if (!treatment.sourceLocation) {
-        setError(
-          `Choisis le lieu source pour ${requestLine.productName}.`
-        )
-        return
+      const requested =
+        requestLine.approved > 0
+          ? requestLine.approved
+          : requestLine.requested
+
+      /*
+       * Toutes les lignes doivent avoir
+       * un choix explicite.
+       */
+      if (
+        treatment.status ===
+        'pending'
+      ) {
+        return {
+          ok: false,
+          message:
+            `Choisis Servi complet, Partiel ou Out of stock pour ${requestLine.productName}.`,
+        }
+      }
+
+      /*
+       * OUT OF STOCK :
+       * pas besoin de lieu source.
+       */
+      if (
+        treatment.status ===
+        'out_of_stock'
+      ) {
+        hasNonFullLine = true
+
+        continue
       }
 
       if (
-        !Number.isFinite(
-          treatment.quantity
-        ) ||
-        treatment.quantity < 0
+        !treatment.sourceLocation
       ) {
-        setError(
-          `Quantité invalide pour ${requestLine.productName}.`
-        )
-        return
+        return {
+          ok: false,
+          message:
+            `Choisis le lieu source pour ${requestLine.productName}.`,
+        }
       }
 
       const available =
@@ -358,67 +534,164 @@ export default function BarPage() {
         )
 
       if (
+        treatment.status ===
+        'fulfilled'
+      ) {
+        if (
+          treatment.quantity !==
+          requested
+        ) {
+          return {
+            ok: false,
+            message:
+              `${requestLine.productName} doit être servi à ${requested} pour être marqué Servi complet.`,
+          }
+        }
+      }
+
+      if (
+        treatment.status ===
+        'partial'
+      ) {
+        hasNonFullLine = true
+
+        if (
+          treatment.quantity <= 0
+        ) {
+          return {
+            ok: false,
+            message:
+              `${requestLine.productName} : pour une quantité de 0, utilise Out of stock.`,
+          }
+        }
+
+        if (
+          treatment.quantity >=
+          requested
+        ) {
+          return {
+            ok: false,
+            message:
+              `${requestLine.productName} : une quantité partielle doit être inférieure à ${requested}.`,
+          }
+        }
+      }
+
+      if (
         treatment.quantity >
         available
       ) {
-        setError(
-          `${requestLine.productName} : stock insuffisant à ${treatment.sourceLocation}. Disponible : ${available}, sortie demandée : ${treatment.quantity}.`
-        )
-        return
+        return {
+          ok: false,
+          message:
+            `${requestLine.productName} : stock insuffisant à ${treatment.sourceLocation}. Disponible : ${available}, sortie : ${treatment.quantity}.`,
+        }
       }
-
-      const maxRequested =
-        requestLine.approved > 0
-          ? requestLine.approved
-          : requestLine.requested
 
       if (
         treatment.quantity >
-        maxRequested
+        requested
       ) {
-        setError(
-          `${requestLine.productName} : la quantité sortie ne peut pas dépasser ${maxRequested}.`
-        )
-        return
+        return {
+          ok: false,
+          message:
+            `${requestLine.productName} : maximum autorisé ${requested}.`,
+        }
       }
     }
 
+    if (
+      mode === 'complete' &&
+      hasNonFullLine
+    ) {
+      return {
+        ok: false,
+        message:
+          'Une ou plusieurs lignes sont partielles ou Out of stock. Utilise « Valider partiellement et clôturer ».',
+      }
+    }
+
+    if (
+      mode === 'partial' &&
+      !hasNonFullLine
+    ) {
+      return {
+        ok: false,
+        message:
+          'Toutes les lignes sont servies complètement. Utilise « Valider complètement ».',
+      }
+    }
+
+    return {
+      ok: true,
+      message: '',
+    }
+  }
+
+  /*
+   * Applique réellement les sorties
+   * de stock puis clôture la demande.
+   */
+  const confirmTreatment = (
+    mode:
+      | 'complete'
+      | 'partial'
+  ) => {
+    setError('')
+    setMessage('')
+
+    const validation =
+      validateTreatmentLines(mode)
+
+    if (!validation.ok) {
+      setError(
+        validation.message
+      )
+      return
+    }
+
+    if (!currentRequest) {
+      return
+    }
+
+    const timestamp =
+      new Date().toISOString()
+
+    const destination =
+      currentRequest
+        .destinationLocation ||
+      'Destination'
+
+    /*
+     * On travaille d'abord sur une copie.
+     * Rien n'est enregistré tant que toutes
+     * les sorties ne sont pas valides.
+     */
     let nextProducts =
       products
 
-    let hasPartial = false
-
-    const destination =
-      currentRequest.destinationLocation ||
-      'Destination'
-
     for (
-      const requestLine of
-      currentRequest.items
+      let index = 0;
+      index <
+      currentRequest.items.length;
+      index += 1
     ) {
+      const requestLine =
+        currentRequest.items[index]
+
       const treatment =
-        treatmentLines.find(
-          (line) =>
-            line.productId ===
-            requestLine.productId
-        )
+        getTreatmentLine(index)
 
       if (!treatment) continue
 
-      const requested =
-        requestLine.approved > 0
-          ? requestLine.approved
-          : requestLine.requested
-
+      /*
+       * OUT OF STOCK :
+       * zéro sortie de stock.
+       */
       if (
-        treatment.quantity <
-        requested
-      ) {
-        hasPartial = true
-      }
-
-      if (
-        treatment.quantity === 0
+        treatment.status ===
+        'out_of_stock' ||
+        treatment.quantity <= 0
       ) {
         continue
       }
@@ -437,6 +710,7 @@ export default function BarPage() {
           result.message ||
             `Impossible de sortir ${requestLine.productName}.`
         )
+
         return
       }
 
@@ -444,9 +718,9 @@ export default function BarPage() {
         result.products
     }
 
-    const timestamp =
-      new Date().toISOString()
-
+    /*
+     * Mise à jour de la réquisition.
+     */
     const updatedRequests =
       requests.map(
         (request) => {
@@ -459,19 +733,58 @@ export default function BarPage() {
 
           const updatedItems =
             request.items.map(
-              (requestLine) => {
+              (
+                requestLine,
+                index
+              ) => {
                 const treatment =
-                  treatmentLines.find(
-                    (line) =>
-                      line.productId ===
-                      requestLine.productId
+                  getTreatmentLine(
+                    index
                   )
+
+                if (!treatment) {
+                  return requestLine
+                }
 
                 return {
                   ...requestLine,
+
+                  /*
+                   * approved reste la
+                   * quantité approuvée.
+                   */
                   approved:
-                    treatment?.quantity ||
-                    0,
+                    requestLine.approved,
+
+                  /*
+                   * Quantité réellement
+                   * remise.
+                   */
+                  delivered:
+                    treatment.quantity,
+
+                  sourceLocation:
+                    treatment.status ===
+                    'out_of_stock'
+                      ? requestLine
+                          .sourceLocation
+                      : treatment
+                          .sourceLocation,
+
+                  treatmentStatus:
+                    treatment.status,
+
+                  treatedAt:
+                    timestamp,
+
+                  treatmentNote:
+                    treatment.status ===
+                    'out_of_stock'
+                      ? 'OUT OF STOCK'
+                      : treatment.status ===
+                        'partial'
+                      ? 'Servi partiellement'
+                      : 'Servi complètement',
                 }
               }
             )
@@ -479,20 +792,25 @@ export default function BarPage() {
           return {
             ...request,
 
+            /*
+             * Résultat métier.
+             */
             status:
-              hasPartial
-                ? ('Partielle' as const)
-                : ('Livrée' as const),
+              mode === 'complete'
+                ? ('Livrée' as const)
+                : ('Partielle' as const),
 
+            /*
+             * IMPORTANT :
+             *
+             * Les deux modes sont considérés
+             * comme TRAITÉS définitivement.
+             */
             deliveredAt:
-              hasPartial
-                ? request.deliveredAt
-                : timestamp,
+              timestamp,
 
             stockAppliedAt:
-              hasPartial
-                ? undefined
-                : timestamp,
+              timestamp,
 
             items:
               updatedItems,
@@ -501,13 +819,20 @@ export default function BarPage() {
       )
 
     saveProducts(nextProducts)
-    saveRequests(updatedRequests)
 
-    setMessage(
-      hasPartial
-        ? `Réquisition ${currentRequest.id} traitée partiellement.`
-        : `Réquisition ${currentRequest.id} livrée. Stock mis à jour.`
+    saveRequests(
+      updatedRequests
     )
+
+    if (mode === 'complete') {
+      setMessage(
+        `Réquisition ${currentRequest.id} livrée complètement et clôturée.`
+      )
+    } else {
+      setMessage(
+        `Réquisition ${currentRequest.id} traitée partiellement et clôturée.`
+      )
+    }
 
     setTreatingId('')
     setTreatmentLines([])
@@ -528,7 +853,9 @@ export default function BarPage() {
               NUKUTEPIPI
             </span>
 
-            <h1>Bar Nuku</h1>
+            <h1>
+              Bar Nuku
+            </h1>
 
             <p>
               Portail de l’équipe Bar
@@ -573,6 +900,7 @@ export default function BarPage() {
             <strong>
               Planning
             </strong>
+
             <span>
               Planning de l’équipe
             </span>
@@ -593,6 +921,7 @@ export default function BarPage() {
             <strong>
               SET UP
             </strong>
+
             <span>
               Fiches des bars
             </span>
@@ -614,13 +943,14 @@ export default function BarPage() {
             </h2>
 
             <p>
-              Consulter et traiter les
-              demandes reçues.
+              Consulter, préparer et
+              clôturer les demandes.
             </p>
           </div>
 
           <div className="requestCounter">
             {requestsToTreat.length}
+
             <span>
               à traiter
             </span>
@@ -662,8 +992,8 @@ export default function BarPage() {
               </strong>
 
               <span>
-                Aucune demande dans cette
-                catégorie.
+                Aucune demande dans
+                cette catégorie.
               </span>
             </div>
           ) : (
@@ -733,19 +1063,32 @@ export default function BarPage() {
 
                   <div className="requestLines">
                     {request.items.map(
-                      (line) => (
+                      (
+                        line,
+                        index
+                      ) => (
                         <div
                           className="requestLine"
-                          key={
-                            line.productId
-                          }
+                          key={`${line.productId}-${index}`}
                         >
-                          <div>
+                          <div className="requestProductName">
                             <strong>
                               {
                                 line.productName
                               }
                             </strong>
+
+                            {line.treatmentStatus &&
+                              line.treatmentStatus !==
+                                'pending' && (
+                                <span
+                                  className={`miniLineStatus ${line.treatmentStatus}`}
+                                >
+                                  {lineStatusLabel(
+                                    line.treatmentStatus
+                                  )}
+                                </span>
+                              )}
                           </div>
 
                           <div className="quantities">
@@ -758,13 +1101,13 @@ export default function BarPage() {
                               </b>
                             </span>
 
-                            {line.approved >
-                              0 && (
+                            {typeof line.delivered ===
+                              'number' && (
                               <span>
-                                Validé
+                                Donné
                                 <b>
                                   {
-                                    line.approved
+                                    line.delivered
                                   }
                                 </b>
                               </span>
@@ -792,7 +1135,7 @@ export default function BarPage() {
                       </button>
                     ) : (
                       <div className="treatedLabel">
-                        ✓ Réquisition traitée
+                        ✓ Demande traitée
                       </div>
                     )}
                   </div>
@@ -817,10 +1160,8 @@ export default function BarPage() {
                 </h2>
 
                 <p>
-                  {
-                    currentRequest.service
-                  }{' '}
-                  →{' '}
+                  {currentRequest.service}
+                  {' → '}
                   {currentRequest.destinationLocation ||
                     'Destination non définie'}
                 </p>
@@ -837,14 +1178,21 @@ export default function BarPage() {
               </button>
             </div>
 
+            <div className="modalHelp">
+              Pour chaque produit,
+              indique ce qui a réellement
+              été remis au service.
+            </div>
+
             <div className="modalBody">
               {currentRequest.items.map(
-                (requestLine) => {
+                (
+                  requestLine,
+                  lineIndex
+                ) => {
                   const treatment =
-                    treatmentLines.find(
-                      (line) =>
-                        line.productId ===
-                        requestLine.productId
+                    getTreatmentLine(
+                      lineIndex
                     )
 
                   const locations =
@@ -867,12 +1215,17 @@ export default function BarPage() {
                       ? requestLine.approved
                       : requestLine.requested
 
+                  const isOut =
+                    treatment?.status ===
+                    'out_of_stock'
+
                   return (
                     <div
-                      className="treatmentProduct"
-                      key={
-                        requestLine.productId
-                      }
+                      className={`treatmentProduct ${
+                        treatment?.status ||
+                        'pending'
+                      }`}
+                      key={`${requestLine.productId}-${lineIndex}`}
                     >
                       <div className="productHeader">
                         <div>
@@ -893,118 +1246,208 @@ export default function BarPage() {
                         </span>
                       </div>
 
-                      <label>
-                        <span>
-                          Lieu de stock
-                          source
-                        </span>
-
-                        <select
-                          value={
-                            treatment?.sourceLocation ||
-                            ''
+                      <div className="lineActionButtons">
+                        <button
+                          type="button"
+                          className={
+                            treatment?.status ===
+                            'fulfilled'
+                              ? 'lineAction full active'
+                              : 'lineAction full'
                           }
-                          onChange={(
-                            event
-                          ) =>
-                            updateTreatment(
-                              requestLine.productId,
-                              {
-                                sourceLocation:
-                                  event
-                                    .target
-                                    .value,
-                              }
+                          onClick={() =>
+                            setFull(
+                              lineIndex,
+                              requested
                             )
                           }
                         >
-                          <option value="">
-                            Choisir un lieu
-                          </option>
+                          ✓ Servi complet
+                        </button>
 
-                          {locations.map(
-                            (
-                              location
-                            ) => (
-                              <option
-                                key={
-                                  location.location
-                                }
-                                value={
-                                  location.location
-                                }
-                              >
-                                {
-                                  location.location
-                                }{' '}
-                                —{' '}
-                                {
-                                  location.quantity
-                                }{' '}
-                                disponible
-                              </option>
+                        <button
+                          type="button"
+                          className={
+                            treatment?.status ===
+                            'partial'
+                              ? 'lineAction partialButton active'
+                              : 'lineAction partialButton'
+                          }
+                          onClick={() =>
+                            setPartial(
+                              lineIndex,
+                              requested,
+                              available
                             )
-                          )}
-                        </select>
-                      </label>
+                          }
+                        >
+                          ◐ Partiel
+                        </button>
 
-                      <div className="availability">
-                        <span>
-                          Stock disponible
-                        </span>
-
-                        <strong>
-                          {available}
-                        </strong>
+                        <button
+                          type="button"
+                          className={
+                            treatment?.status ===
+                            'out_of_stock'
+                              ? 'lineAction out active'
+                              : 'lineAction out'
+                          }
+                          onClick={() =>
+                            setOutOfStock(
+                              lineIndex
+                            )
+                          }
+                        >
+                          OUT OF STOCK
+                        </button>
                       </div>
 
-                      <label>
-                        <span>
-                          Quantité à sortir
-                        </span>
+                      {!isOut && (
+                        <>
+                          <label>
+                            <span>
+                              Lieu de stock
+                              source
+                            </span>
 
-                        <input
-                          type="number"
-                          min={0}
-                          max={Math.min(
-                            requested,
-                            available
-                          )}
-                          value={
-                            treatment?.quantity ??
-                            0
-                          }
-                          onChange={(
-                            event
-                          ) =>
-                            updateTreatment(
-                              requestLine.productId,
-                              {
-                                quantity:
-                                  Math.max(
-                                    0,
-                                    Number(
+                            <select
+                              value={
+                                treatment?.sourceLocation ||
+                                ''
+                              }
+                              onChange={(
+                                event
+                              ) =>
+                                updateTreatment(
+                                  lineIndex,
+                                  {
+                                    sourceLocation:
                                       event
                                         .target
-                                        .value
-                                    ) ||
-                                      0
-                                  ),
+                                        .value,
+                                  }
+                                )
                               }
-                            )
-                          }
-                        />
-                      </label>
+                            >
+                              <option value="">
+                                Choisir un lieu
+                              </option>
 
-                      {treatment &&
-                        treatment.quantity <
-                          requested && (
-                          <div className="partialInfo">
-                            Cette ligne sera
-                            traitée
-                            partiellement.
+                              {locations.map(
+                                (
+                                  location
+                                ) => (
+                                  <option
+                                    key={
+                                      location.location
+                                    }
+                                    value={
+                                      location.location
+                                    }
+                                  >
+                                    {
+                                      location.location
+                                    }{' '}
+                                    —{' '}
+                                    {
+                                      location.quantity
+                                    }{' '}
+                                    disponible
+                                  </option>
+                                )
+                              )}
+                            </select>
+                          </label>
+
+                          <div className="availability">
+                            <span>
+                              Stock disponible
+                            </span>
+
+                            <strong>
+                              {available}
+                            </strong>
                           </div>
-                        )}
+                        </>
+                      )}
+
+                      {treatment?.status ===
+                        'partial' && (
+                        <label>
+                          <span>
+                            Quantité réellement
+                            donnée
+                          </span>
+
+                          <input
+                            type="number"
+                            min={1}
+                            max={Math.max(
+                              1,
+                              Math.min(
+                                requested -
+                                  1,
+                                available
+                              )
+                            )}
+                            value={
+                              treatment.quantity
+                            }
+                            onChange={(
+                              event
+                            ) =>
+                              updateTreatment(
+                                lineIndex,
+                                {
+                                  quantity:
+                                    Math.max(
+                                      0,
+                                      Number(
+                                        event
+                                          .target
+                                          .value
+                                      ) ||
+                                        0
+                                    ),
+                                }
+                              )
+                            }
+                          />
+                        </label>
+                      )}
+
+                      {treatment?.status ===
+                        'fulfilled' && (
+                        <div className="resultInfo fullInfo">
+                          ✓ Quantité donnée :{' '}
+                          <strong>
+                            {requested}
+                          </strong>
+                        </div>
+                      )}
+
+                      {treatment?.status ===
+                        'partial' && (
+                        <div className="resultInfo partialInfo">
+                          Quantité donnée :{' '}
+                          <strong>
+                            {
+                              treatment.quantity
+                            }
+                          </strong>{' '}
+                          / {requested}
+                        </div>
+                      )}
+
+                      {isOut && (
+                        <div className="resultInfo outInfo">
+                          OUT OF STOCK —
+                          quantité donnée :{' '}
+                          <strong>
+                            0
+                          </strong>
+                        </div>
+                      )}
                     </div>
                   )
                 }
@@ -1024,12 +1467,27 @@ export default function BarPage() {
 
               <button
                 type="button"
-                className="confirmButton"
-                onClick={
-                  confirmTreatment
+                className="partialValidateButton"
+                onClick={() =>
+                  confirmTreatment(
+                    'partial'
+                  )
                 }
               >
-                Valider la sortie
+                Valider partiellement
+                et clôturer
+              </button>
+
+              <button
+                type="button"
+                className="confirmButton"
+                onClick={() =>
+                  confirmTreatment(
+                    'complete'
+                  )
+                }
+              >
+                Valider complètement
               </button>
             </div>
           </div>
@@ -1085,9 +1543,6 @@ export default function BarPage() {
           height: 76px;
           border-radius: 18px;
           object-fit: cover;
-          box-shadow:
-            0 0 0 1px
-            rgba(255,255,255,.12);
         }
 
         .eyebrow,
@@ -1115,15 +1570,13 @@ export default function BarPage() {
           align-items: center;
           gap: 8px;
           padding: 10px 14px;
-          border:
-            1px solid
+          border: 1px solid
             rgba(255,255,255,.12);
           border-radius: 999px;
           background:
             rgba(255,255,255,.07);
           font-size: 12px;
           font-weight: 800;
-          white-space: nowrap;
         }
 
         .statusDot {
@@ -1183,7 +1636,6 @@ export default function BarPage() {
           place-items: center;
           background: #f4f0ff;
           color: #7c3aed;
-          font-size: 19px;
         }
 
         .quickCard div {
@@ -1201,10 +1653,6 @@ export default function BarPage() {
           font-size: 10px;
         }
 
-        .quickCard b {
-          color: #98a2b3;
-        }
-
         .requestSection {
           padding: 22px;
           border: 1px solid #e4e7ec;
@@ -1214,7 +1662,6 @@ export default function BarPage() {
 
         .sectionHeader {
           display: flex;
-          align-items: flex-start;
           justify-content: space-between;
           gap: 16px;
         }
@@ -1243,7 +1690,6 @@ export default function BarPage() {
 
         .requestCounter span {
           display: block;
-          margin-top: 1px;
           font-size: 8px;
           text-transform: uppercase;
         }
@@ -1289,7 +1735,6 @@ export default function BarPage() {
           display: flex;
           justify-content: space-between;
           gap: 12px;
-          align-items: flex-start;
         }
 
         .requestId {
@@ -1316,7 +1761,8 @@ export default function BarPage() {
           color: #175cd3;
         }
 
-        .requestStatus.validated {
+        .requestStatus.validated,
+        .requestStatus.delivered {
           background: #ecfdf3;
           color: #067647;
         }
@@ -1329,11 +1775,6 @@ export default function BarPage() {
         .requestStatus.partial {
           background: #fffaeb;
           color: #b54708;
-        }
-
-        .requestStatus.delivered {
-          background: #ecfdf3;
-          color: #067647;
         }
 
         .requestStatus.neutral {
@@ -1360,7 +1801,6 @@ export default function BarPage() {
         .requestMeta small {
           color: #98a2b3;
           font-size: 8px;
-          text-transform: uppercase;
         }
 
         .requestMeta strong {
@@ -1375,19 +1815,43 @@ export default function BarPage() {
         .requestLine {
           padding: 9px 0;
           display: flex;
-          align-items: center;
           justify-content: space-between;
           gap: 10px;
           border-bottom:
             1px solid #f2f4f7;
         }
 
-        .requestLine:last-child {
-          border-bottom: 0;
+        .requestProductName {
+          display: flex;
+          flex-direction: column;
+          gap: 5px;
         }
 
         .requestLine strong {
           font-size: 11px;
+        }
+
+        .miniLineStatus {
+          width: fit-content;
+          padding: 3px 6px;
+          border-radius: 6px;
+          font-size: 7px;
+          font-weight: 900;
+        }
+
+        .miniLineStatus.fulfilled {
+          background: #ecfdf3;
+          color: #067647;
+        }
+
+        .miniLineStatus.partial {
+          background: #fffaeb;
+          color: #b54708;
+        }
+
+        .miniLineStatus.out_of_stock {
+          background: #fef3f2;
+          color: #b42318;
         }
 
         .quantities {
@@ -1415,20 +1879,16 @@ export default function BarPage() {
           justify-content: flex-end;
         }
 
-        .treatButton,
-        .confirmButton {
+        .treatButton {
+          min-height: 40px;
+          padding: 0 16px;
           border: 0;
           border-radius: 11px;
           background: #7c3aed;
           color: #fff;
           cursor: pointer;
-          font-weight: 900;
-        }
-
-        .treatButton {
-          min-height: 40px;
-          padding: 0 16px;
           font-size: 11px;
+          font-weight: 900;
         }
 
         .treatedLabel {
@@ -1442,18 +1902,7 @@ export default function BarPage() {
           display: flex;
           flex-direction: column;
           align-items: center;
-          text-align: center;
           color: #667085;
-        }
-
-        .emptyState strong {
-          color: #344054;
-          font-size: 15px;
-        }
-
-        .emptyState span {
-          margin-top: 5px;
-          font-size: 11px;
         }
 
         .modalBackdrop {
@@ -1467,16 +1916,14 @@ export default function BarPage() {
         }
 
         .treatmentModal {
-          width: min(720px,100%);
-          max-height: calc(100dvh - 40px);
+          width: min(760px,100%);
+          max-height:
+            calc(100dvh - 40px);
           overflow: hidden;
           border-radius: 20px;
           display: flex;
           flex-direction: column;
           background: #fff;
-          box-shadow:
-            0 30px 80px
-            rgba(15,23,42,.30);
         }
 
         .modalHeader {
@@ -1484,14 +1931,14 @@ export default function BarPage() {
           display: flex;
           justify-content: space-between;
           gap: 15px;
-          border-bottom: 1px solid #eaecf0;
+          border-bottom:
+            1px solid #eaecf0;
         }
 
         .modalHeader span {
           color: #7c3aed;
           font-size: 9px;
           font-weight: 900;
-          letter-spacing: .1em;
         }
 
         .modalHeader h2 {
@@ -1515,6 +1962,15 @@ export default function BarPage() {
           font-size: 22px;
         }
 
+        .modalHelp {
+          padding: 10px 20px;
+          background: #f9fafb;
+          border-bottom:
+            1px solid #eaecf0;
+          color: #667085;
+          font-size: 10px;
+        }
+
         .modalBody {
           padding: 16px 20px;
           overflow-y: auto;
@@ -1528,9 +1984,20 @@ export default function BarPage() {
           background: #fcfcfd;
         }
 
+        .treatmentProduct.fulfilled {
+          border-color: #abefc6;
+        }
+
+        .treatmentProduct.partial {
+          border-color: #fedf89;
+        }
+
+        .treatmentProduct.out_of_stock {
+          border-color: #fecdca;
+        }
+
         .productHeader {
           display: flex;
-          align-items: center;
           justify-content: space-between;
           gap: 10px;
         }
@@ -1559,6 +2026,47 @@ export default function BarPage() {
           font-weight: 900;
         }
 
+        .lineActionButtons {
+          margin-top: 14px;
+          display: grid;
+          grid-template-columns:
+            repeat(3,1fr);
+          gap: 7px;
+        }
+
+        .lineAction {
+          min-height: 38px;
+          padding: 6px 8px;
+          border: 1px solid #d0d5dd;
+          border-radius: 9px;
+          background: #fff;
+          cursor: pointer;
+          font-size: 9px;
+          font-weight: 900;
+        }
+
+        .lineAction.full.active {
+          border-color: #079455;
+          background: #ecfdf3;
+          color: #067647;
+        }
+
+        .lineAction.partialButton.active {
+          border-color: #dc6803;
+          background: #fffaeb;
+          color: #b54708;
+        }
+
+        .lineAction.out {
+          color: #b42318;
+        }
+
+        .lineAction.out.active {
+          border-color: #d92d20;
+          background: #fef3f2;
+          color: #b42318;
+        }
+
         .treatmentProduct label {
           margin-top: 13px;
           display: flex;
@@ -1582,7 +2090,6 @@ export default function BarPage() {
           border-radius: 10px;
           background: #fff;
           color: #101828;
-          outline: none;
         }
 
         .availability {
@@ -1590,23 +2097,31 @@ export default function BarPage() {
           padding: 8px 10px;
           border-radius: 9px;
           display: flex;
-          align-items: center;
           justify-content: space-between;
           background: #f2f4f7;
         }
 
-        .availability strong {
-          font-size: 14px;
+        .resultInfo {
+          margin-top: 9px;
+          padding: 8px 10px;
+          border-radius: 8px;
+          font-size: 9px;
+          font-weight: 700;
+        }
+
+        .fullInfo {
+          background: #ecfdf3;
+          color: #067647;
         }
 
         .partialInfo {
-          margin-top: 8px;
-          padding: 7px 9px;
-          border-radius: 8px;
           background: #fffaeb;
           color: #b54708;
-          font-size: 9px;
-          font-weight: 700;
+        }
+
+        .outInfo {
+          background: #fef3f2;
+          color: #b42318;
         }
 
         .modalFooter {
@@ -1618,18 +2133,32 @@ export default function BarPage() {
         }
 
         .cancelButton,
+        .partialValidateButton,
         .confirmButton {
           min-height: 42px;
-          padding: 0 16px;
+          padding: 0 15px;
+          border-radius: 11px;
+          cursor: pointer;
+          font-size: 10px;
+          font-weight: 900;
         }
 
         .cancelButton {
           border: 1px solid #d0d5dd;
-          border-radius: 11px;
           background: #fff;
           color: #344054;
-          cursor: pointer;
-          font-weight: 800;
+        }
+
+        .partialValidateButton {
+          border: 1px solid #dc6803;
+          background: #fffaeb;
+          color: #b54708;
+        }
+
+        .confirmButton {
+          border: 0;
+          background: #7c3aed;
+          color: #fff;
         }
 
         @media (max-width: 760px) {
@@ -1639,8 +2168,8 @@ export default function BarPage() {
 
           .barHero {
             padding: 17px;
-            align-items: flex-start;
             flex-direction: column;
+            align-items: flex-start;
           }
 
           .barLogo {
@@ -1648,12 +2177,9 @@ export default function BarPage() {
             height: 58px;
           }
 
-          .barHero h1 {
-            font-size: 25px;
-          }
-
           .quickLinks {
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns:
+              1fr 1fr;
           }
 
           .requestSection {
@@ -1661,11 +2187,11 @@ export default function BarPage() {
           }
 
           .requestMeta {
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns:
+              1fr 1fr;
           }
 
           .requestLine {
-            align-items: flex-start;
             flex-direction: column;
           }
 
@@ -1675,10 +2201,6 @@ export default function BarPage() {
 
           .quantities span {
             flex: 1;
-          }
-
-          .requestActions {
-            justify-content: stretch;
           }
 
           .treatButton {
@@ -1693,11 +2215,16 @@ export default function BarPage() {
           .treatmentModal {
             width: 100%;
             max-height: 94dvh;
-            border-radius: 20px 20px 0 0;
+            border-radius:
+              20px 20px 0 0;
           }
 
           .modalBody {
             padding: 13px;
+          }
+
+          .lineActionButtons {
+            grid-template-columns: 1fr;
           }
 
           .modalFooter {
@@ -1710,11 +2237,15 @@ export default function BarPage() {
                   safe-area-inset-bottom
                 )
               );
+            display: grid;
+            grid-template-columns:
+              1fr;
           }
 
           .cancelButton,
+          .partialValidateButton,
           .confirmButton {
-            flex: 1;
+            width: 100%;
           }
         }
       `}</style>
