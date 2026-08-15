@@ -1,0 +1,23 @@
+{
+  "name": "Bar Nuku",
+  "short_name": "Bar Nuku",
+  "description": "Portail de l'équipe Bar de Nukutepipi",
+  "start_url": "/bar",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0c1525",
+  "theme_color": "#7c3aed",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/bar-nuku-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/bar-nuku-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

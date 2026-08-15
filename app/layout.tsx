@@ -1,67 +1,53 @@
-import type {
-  Metadata,
-  Viewport,
-} from 'next'
-
-import { headers } from 'next/headers'
-
+import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
-import AuthGate from '@/components/auth-gate'
+import { AppShell } from '@/components/app-shell'
+import { PwaRegister } from '@/components/pwa-register'
 
-function normalizeHost(host: string) {
-  return host
-    .toLowerCase()
-    .split(',')[0]
-    .trim()
-    .split(':')[0]
-}
+export const metadata: Metadata = {
+  title: {
+    default: 'NukuStock',
+    template: '%s | NukuStock',
+  },
+  description: 'Gestion des stocks Nukutepipi',
 
-export async function generateMetadata(): Promise<Metadata> {
-  const headersList = await headers()
+  manifest: '/manifest.webmanifest',
 
-  const host = normalizeHost(
-    headersList.get('x-forwarded-host') ||
-    headersList.get('host') ||
-    ''
-  )
+  icons: {
+    icon: [
+      {
+        url: '/bar-nuku-192.png',
+        sizes: '192x192',
+        type: 'image/png',
+      },
+      {
+        url: '/bar-nuku-512.png',
+        sizes: '512x512',
+        type: 'image/png',
+      },
+    ],
+    apple: [
+      {
+        url: '/bar-nuku-192.png',
+        sizes: '192x192',
+        type: 'image/png',
+      },
+    ],
+  },
 
-  const isRequisition =
-    host ===
-    'requisitionnuku.fenuaprobartender.com'
-
-  return {
-    title: isRequisition
-      ? 'Réquisitions Nuku'
-      : 'NukuStock Back Office',
-
-    applicationName: isRequisition
-      ? 'Réquisitions'
-      : 'NukuStock Back Office',
-
-    description: isRequisition
-      ? 'Réquisitions internes Nukutepipi'
-      : 'Gestion des stocks et approvisionnements de Nukutepipi',
-
-    manifest: isRequisition
-      ? '/manifest-requisition.webmanifest'
-      : '/manifest-nukustock.webmanifest',
-
-    appleWebApp: {
-      capable: true,
-      title: isRequisition
-        ? 'Réquisitions'
-        : 'NukuStock Back Office',
-      statusBarStyle: 'default',
-    },
-  }
+  appleWebApp: {
+    capable: true,
+    title: 'Bar Nuku',
+    statusBarStyle: 'black-translucent',
+  },
 }
 
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
+  maximumScale: 1,
   viewportFit: 'cover',
-  themeColor: '#0b1220',
+  themeColor: '#7c3aed',
 }
 
 export default function RootLayout({
@@ -72,9 +58,11 @@ export default function RootLayout({
   return (
     <html lang="fr">
       <body>
-        <AuthGate>
+        <PwaRegister />
+
+        <AppShell>
           {children}
-        </AuthGate>
+        </AppShell>
       </body>
     </html>
   )
