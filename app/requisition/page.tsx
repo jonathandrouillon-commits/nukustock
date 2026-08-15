@@ -82,6 +82,17 @@ const BUNGALOW_ALLOWED_PRODUCT_NAMES = [
   'Evian',
 ] as const
 
+const SPECIAL_REQUEST_MARKER =
+  '[DEMANDE SPÉCIALE BUNGALOW]'
+
+function cleanSpecialRequestMarker(
+  value: string | null | undefined
+) {
+  return (value || '')
+    .replace(SPECIAL_REQUEST_MARKER, '')
+    .trim()
+}
+
 function normalizeName(value: string) {
   return value
     .normalize('NFD')
@@ -719,8 +730,24 @@ export default function RequisitionPage() {
     setRequestedFor(
       request.requested_for
     )
+    const requestDestinationName =
+      locationsById.get(
+        request.destination_location_id
+      ) || ''
+
+    setSpecialRequest(
+      isBungalowRestricted(
+        requestDestinationName
+      ) &&
+      (request.notes || '').includes(
+        SPECIAL_REQUEST_MARKER
+      )
+    )
+
     setNotes(
-      request.notes || ''
+      cleanSpecialRequestMarker(
+        request.notes
+      )
     )
 
     const existingLines =
@@ -877,6 +904,16 @@ export default function RequisitionPage() {
         }
       }
 
+      const persistedNotes =
+        specialRequest
+          ? [
+              SPECIAL_REQUEST_MARKER,
+              notes.trim(),
+            ]
+              .filter(Boolean)
+              .join(' ')
+          : notes.trim() || null
+
       setSaving(true)
 
       try {
@@ -914,8 +951,7 @@ export default function RequisitionPage() {
               requested_for:
                 requestedFor,
               notes:
-                notes.trim() ||
-                null,
+                persistedNotes,
               status:
                 'submitted',
             })
@@ -1014,8 +1050,7 @@ export default function RequisitionPage() {
               status:
                 'submitted',
               notes:
-                notes.trim() ||
-                null,
+                persistedNotes,
               requested_by:
                 userId,
             })

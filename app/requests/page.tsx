@@ -89,6 +89,42 @@ type SourceChoice = {
   sourceLocation: string
 }
 
+const BUNGALOW_ALLOWED_PRODUCT_NAMES = [
+  'Hinano Blonde', 'Hinano Ambré', 'Heineken', 'Corona', 'Hoa',
+  'Coca', 'Coca Zero', 'Sprite', 'Tonic', 'Rotui Mangue',
+  'Rotui Ananas', 'Vals', 'Evian',
+] as const
+
+function normalizeProductName(value: string) {
+  return value.normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+function isBungalowRestricted(locationName: string) {
+  const normalized = normalizeProductName(locationName)
+  if (normalized === 'bungalow infini') return true
+  const match = normalized.match(/^bungalow\s+(\d+)$/)
+  if (!match) return false
+  const number = Number(match[1])
+  return number >= 0 && number <= 15
+}
+
+function isAllowedBungalowProduct(productName: string) {
+  const name = normalizeProductName(productName)
+  const rules = [
+    /^hinano blonde(?:\s|$)/, /^hinano ambre(?:\s|$)/,
+    /^heineken(?:\s|$)/, /^corona(?:\s|$)/, /^hoa(?:\s|$)/,
+    /^coca cola zero(?:\s|$)/, /^coca zero(?:\s|$)/,
+    /^coca cola(?:\s|$)/, /^coca(?:\s|$)/, /^sprite(?:\s|$)/,
+    /^tonic(?:\s|$)/, /^rotui mangue(?:\s|$)/,
+    /^rotui ananas(?:\s|$)/, /^vals(?:\s|$)/, /^evian(?:\s|$)/,
+  ]
+  return rules.some((rule) => rule.test(name))
+}
+
 function normalizeLocation(
   value: string
 ) {
@@ -216,6 +252,12 @@ export default function Requests() {
       [centralLocations]
     )
 
+  const [
+    specialRequest,
+    setSpecialRequest,
+  ] = useState(false)
+
+
   const [open, setOpen] =
     useState(false)
 
@@ -272,6 +314,20 @@ export default function Requests() {
     setDestination,
   ] = useState('')
 
+  const bungalowRestricted =
+    isBungalowRestricted(destination)
+
+  const availableProducts =
+    useMemo(
+      () =>
+        bungalowRestricted && !specialRequest
+          ? products.filter((product) =>
+              isAllowedBungalowProduct(product.name)
+            )
+          : products,
+      [products, bungalowRestricted, specialRequest]
+    )
+
   const [lines, setLines] =
     useState<NewLine[]>([
       {
@@ -296,7 +352,7 @@ export default function Requests() {
       ...lines,
       {
         productId:
-          products[0]?.id ||
+          availableProducts[0]?.id ||
           '',
         qty: 1,
       },
@@ -341,16 +397,23 @@ export default function Requests() {
         'Activités'
     )
 
-    setDestination(
-      allKnownLocations[0] ||
-        ''
-    )
+    const firstDestination =
+      allKnownLocations[0] || ''
+
+    setDestination(firstDestination)
+    setSpecialRequest(false)
+
+    const firstProducts =
+      isBungalowRestricted(firstDestination)
+        ? products.filter((product) =>
+            isAllowedBungalowProduct(product.name)
+          )
+        : products
 
     setLines([
       {
         productId:
-          products[0]?.id ||
-          '',
+          firstProducts[0]?.id || '',
         qty: 1,
       },
     ])
@@ -385,10 +448,23 @@ export default function Requests() {
     setDepartment(
       request.service
     )
-    setDestination(
-      request.destinationLocation ||
-        ''
+    const editDestination =
+      request.destinationLocation || ''
+
+    setDestination(editDestination)
+
+    setSpecialRequest(
+      isBungalowRestricted(editDestination) &&
+      request.items.some((item) => {
+        const product = products.find(
+          (p) => p.id === item.productId
+        )
+        return product
+          ? !isAllowedBungalowProduct(product.name)
+          : false
+      })
     )
+
     setLines(
       request.items.map(
         (item) => ({
@@ -425,6 +501,27 @@ export default function Requests() {
         'Ajoute au moins un produit avec une quantité supérieure à 0.'
       )
       return
+    }
+
+    if (bungalowRestricted && !specialRequest) {
+      const unauthorized = clean
+        .map((line) =>
+          products.find(
+            (product) => product.id === line.productId
+          )
+        )
+        .filter(
+          (product) =>
+            product &&
+            !isAllowedBungalowProduct(product.name)
+        )
+
+      if (unauthorized.length) {
+        setError(
+          `Pour ${destination}, seuls les produits autorisés Bungalow peuvent être demandés.`
+        )
+        return
+      }
     }
 
     const existing =
@@ -1539,11 +1636,43 @@ export default function Requests() {
                   value={
                     destination
                   }
-                  onChange={(e) =>
-                    setDestination(
+                  onChange={(e) => {
+                    const nextDestination =
                       e.target.value
+
+                    setDestination(nextDestination)
+
+                    const nextProducts =
+                      specialRequest ||
+                      !isBungalowRestricted(nextDestination)
+                        ? products
+                        : products.filter(
+                            (product) =>
+                              isAllowedBungalowProduct(
+                                product.name
+                              )
+                          )
+
+                    const allowedIds =
+                      new Set(
+                        nextProducts.map(
+                          (product) => product.id
+                        )
+                      )
+
+                    setLines(
+                      (current) =>
+                        current.map(
+                          (line) => ({
+                            ...line,
+                            productId:
+                              allowedIds.has(line.productId)
+                                ? line.productId
+                                : nextProducts[0]?.id || '',
+                          })
+                        )
                     )
-                  }
+                  }}
                 >
                   <option value="">
                     Choisir le lieu de destination
@@ -1572,6 +1701,105 @@ export default function Requests() {
 
               </div>
             </div>
+
+            {bungalowRestricted && (
+              <div
+                style={{
+                  marginTop: 18,
+                  padding: 14,
+                  borderRadius: 14,
+                  border: specialRequest
+                    ? '1px solid #86efac'
+                    : '1px solid #fed7aa',
+                  background: specialRequest
+                    ? '#f0fdf4'
+                    : '#fff7ed',
+                }}
+              >
+                <label
+                  style={{
+                    display: 'flex',
+                    gap: 10,
+                    alignItems: 'flex-start',
+                    cursor: 'pointer',
+                    fontWeight: 800,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={specialRequest}
+                    onChange={(event) => {
+                      const checked = event.target.checked
+                      setSpecialRequest(checked)
+
+                      if (checked) return
+
+                      const allowed =
+                        products.filter(
+                          (product) =>
+                            isAllowedBungalowProduct(
+                              product.name
+                            )
+                        )
+
+                      const allowedIds =
+                        new Set(
+                          allowed.map(
+                            (product) => product.id
+                          )
+                        )
+
+                      setLines(
+                        (current) =>
+                          current.map(
+                            (line) => ({
+                              ...line,
+                              productId:
+                                allowedIds.has(line.productId)
+                                  ? line.productId
+                                  : allowed[0]?.id || '',
+                            })
+                          )
+                      )
+                    }}
+                    style={{
+                      width: 18,
+                      height: 18,
+                      marginTop: 1,
+                    }}
+                  />
+                  <span>
+                    Demande spéciale
+                    <span
+                      style={{
+                        display: 'block',
+                        marginTop: 4,
+                        color: '#667085',
+                        fontSize: 12,
+                        fontWeight: 500,
+                      }}
+                    >
+                      {specialRequest
+                        ? 'Toute la liste produits est débloquée.'
+                        : `Pour ${destination}, seuls les produits autorisés Bungalow sont disponibles.`}
+                    </span>
+                  </span>
+                </label>
+
+                {!specialRequest && (
+                  <div
+                    style={{
+                      marginTop: 10,
+                      color: '#9a3412',
+                      fontSize: 11,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {BUNGALOW_ALLOWED_PRODUCT_NAMES.join(' · ')}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div
               style={{
@@ -1779,7 +2007,7 @@ export default function Requests() {
                               Choisir un produit
                             </option>
 
-                            {[...products]
+                            {[...availableProducts]
                               .sort(
                                 (
                                   a,
