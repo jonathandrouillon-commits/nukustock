@@ -963,10 +963,75 @@ function BarPlanningPage() {
     })
   }
 
+  const openWeek = (
+    targetWeekStart: string,
+    options?: {
+      saveCurrent?: boolean
+    }
+  ) => {
+    if (
+      options?.saveCurrent !== false
+    ) {
+      saveCurrentPlanning(false)
+    }
+
+    const savedWeek =
+      savedPlannings.find(
+        item =>
+          item.weekStart ===
+          targetWeekStart
+      )
+
+    if (savedWeek) {
+      loadSavedPlanning(savedWeek)
+      return
+    }
+
+    setWeekStart(targetWeekStart)
+    setCurrentSavedPlanningId(null)
+
+    // Nouvelle semaine : on garde l'équipe,
+    // mais on ne réutilise pas les horaires
+    // de la semaine précédente.
+    setPlanning({})
+    setSpecialDayInfo({})
+    setWeeklySignatures({})
+    setPlanningView('planning')
+  }
+
   const changeWeek = (offset: number) => {
-    const d = new Date(`${weekStart}T12:00:00`)
-    d.setDate(d.getDate() + offset * 7)
-    setWeekStart(isoDate(d))
+    const d =
+      new Date(
+        `${weekStart}T12:00:00`
+      )
+
+    d.setDate(
+      d.getDate() +
+        offset * 7
+    )
+
+    openWeek(
+      isoDate(d)
+    )
+  }
+
+  const createNewPlanning = () => {
+    const confirmed =
+      window.confirm(
+        'Créer un nouveau planning pour cette semaine ? Le planning actuel sera sauvegardé avant de repartir sur une grille vide.'
+      )
+
+    if (!confirmed) {
+      return
+    }
+
+    saveCurrentPlanning(false)
+
+    setCurrentSavedPlanningId(null)
+    setPlanning({})
+    setSpecialDayInfo({})
+    setWeeklySignatures({})
+    setPlanningView('planning')
   }
 
   const copyPreviousWeek = () => {
@@ -1338,7 +1403,9 @@ function BarPlanningPage() {
     return isoDate(end)
   }
 
-  const saveCurrentPlanning = () => {
+  const saveCurrentPlanning = (
+    showConfirmation = true
+  ) => {
     const now = new Date().toISOString()
     const existing =
       currentSavedPlanningId
@@ -1433,7 +1500,12 @@ function BarPlanningPage() {
     })
 
     setCurrentSavedPlanningId(id)
-    window.alert('Planning sauvegardé.')
+
+    if (showConfirmation) {
+      window.alert(
+        'Planning sauvegardé.'
+      )
+    }
   }
 
   const loadSavedPlanning = (saved: SavedPlanning) => {
@@ -1611,7 +1683,9 @@ function BarPlanningPage() {
               planningView === 'dashboard') && (
               <button
                 className="btn primary"
-                onClick={saveCurrentPlanning}
+                onClick={() =>
+                  saveCurrentPlanning()
+                }
               >
                 Sauvegarder planning
               </button>
@@ -2172,10 +2246,12 @@ function BarPlanningPage() {
                 type="date"
                 value={weekStart}
                 onChange={e =>
-                  setWeekStart(
+                  openWeek(
                     isoDate(
                       mondayOf(
-                        new Date(`${e.target.value}T12:00:00`)
+                        new Date(
+                          `${e.target.value}T12:00:00`
+                        )
                       )
                     )
                   )
@@ -2195,12 +2271,24 @@ function BarPlanningPage() {
                 type="button"
                 className="btn"
                 onClick={() =>
-                  setWeekStart(
-                    isoDate(mondayOf(new Date()))
+                  openWeek(
+                    isoDate(
+                      mondayOf(
+                        new Date()
+                      )
+                    )
                   )
                 }
               >
                 Cette semaine
+              </button>
+
+              <button
+                type="button"
+                className="btn primary"
+                onClick={createNewPlanning}
+              >
+                + Nouveau planning
               </button>
 
               <button
