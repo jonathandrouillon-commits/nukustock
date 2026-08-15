@@ -66,6 +66,83 @@ type DraftLine = {
   quantity: number
 }
 
+const BUNGALOW_ALLOWED_PRODUCT_NAMES = [
+  'Hinano Blonde',
+  'Hinano Ambré',
+  'Heineken',
+  'Corona',
+  'Hoa',
+  'Coca',
+  'Coca Zero',
+  'Sprite',
+  'Tonic',
+  'Rotui Mangue',
+  'Rotui Ananas',
+  'Vals',
+  'Evian',
+] as const
+
+function normalizeName(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+function isBungalowRestricted(
+  locationName: string
+) {
+  const normalized =
+    normalizeName(locationName)
+
+  if (normalized === 'bungalow infini') {
+    return true
+  }
+
+  const match =
+    normalized.match(
+      /^bungalow\s+(\d+)$/
+    )
+
+  if (!match) {
+    return false
+  }
+
+  const number = Number(match[1])
+
+  return number >= 0 && number <= 15
+}
+
+function isAllowedBungalowProduct(
+  productName: string
+) {
+  const name = normalizeName(productName)
+
+  const rules = [
+    /^hinano blonde(?:\s|$)/,
+    /^hinano ambre(?:\s|$)/,
+    /^heineken(?:\s|$)/,
+    /^corona(?:\s|$)/,
+    /^hoa(?:\s|$)/,
+    /^coca cola zero(?:\s|$)/,
+    /^coca zero(?:\s|$)/,
+    /^coca cola(?:\s|$)/,
+    /^coca(?:\s|$)/,
+    /^sprite(?:\s|$)/,
+    /^tonic(?:\s|$)/,
+    /^rotui mangue(?:\s|$)/,
+    /^rotui ananas(?:\s|$)/,
+    /^vals(?:\s|$)/,
+    /^evian(?:\s|$)/,
+  ]
+
+  return rules.some((rule) =>
+    rule.test(name)
+  )
+}
+
 function today() {
   return new Date()
     .toISOString()
@@ -115,6 +192,11 @@ export default function RequisitionPage() {
     saving,
     setSaving,
   ] = useState(false)
+  const [
+    specialRequest,
+    setSpecialRequest,
+  ] = useState(false)
+
 
   const [
     message,
@@ -273,6 +355,51 @@ export default function RequisitionPage() {
         ),
       [locations]
     )
+
+  const selectedDestinationName =
+    locationsById.get(destinationId) || ''
+
+  const bungalowRestricted =
+    isBungalowRestricted(
+      selectedDestinationName
+    )
+
+  const availableProducts =
+    useMemo(
+      () =>
+        bungalowRestricted &&
+        !specialRequest
+          ? products.filter(
+              (product) =>
+                isAllowedBungalowProduct(
+                  product.name
+                )
+            )
+          : products,
+      [
+        products,
+        bungalowRestricted,
+        specialRequest,
+      ]
+    )
+
+  const productsForLocationId = (
+    locationId: string
+  ) => {
+    const locationName =
+      locationsById.get(locationId) || ''
+
+    return isBungalowRestricted(
+      locationName
+    )
+      ? products.filter(
+          (product) =>
+            isAllowedBungalowProduct(
+              product.name
+            )
+        )
+      : products
+  }
 
   const loadData =
     async () => {
@@ -531,20 +658,28 @@ export default function RequisitionPage() {
           departments[0]?.id ||
           ''
       )
+      const firstLocationId =
+        locations[0]?.id || ''
+
+      const firstProducts =
+        productsForLocationId(
+          firstLocationId
+        )
+
       setDestinationId(
-        locations[0]?.id ||
-          ''
+        firstLocationId
       )
       setRequestedFor(
         today()
       )
       setNotes('')
+      setSpecialRequest(false)
       setLines([
         {
           id:
             crypto.randomUUID(),
           product_id:
-            products[0]?.id ||
+            firstProducts[0]?.id ||
             '',
           quantity: 1,
         },
@@ -633,7 +768,7 @@ export default function RequisitionPage() {
           id:
             crypto.randomUUID(),
           product_id:
-            products[0]?.id ||
+            availableProducts[0]?.id ||
             '',
           quantity: 1,
         },
@@ -713,6 +848,33 @@ export default function RequisitionPage() {
           'Ajoute au moins un produit.'
         )
         return
+      }
+
+      if (
+        bungalowRestricted &&
+        !specialRequest
+      ) {
+        const unauthorized =
+          cleanLines
+            .map((line) =>
+              productsById.get(
+                line.product_id
+              )
+            )
+            .filter(
+              (product) =>
+                product &&
+                !isAllowedBungalowProduct(
+                  product.name
+                )
+            )
+
+        if (unauthorized.length) {
+          setError(
+            `Pour ${selectedDestinationName}, seuls les produits autorisés pour les Bungalows peuvent être demandés.`
+          )
+          return
+        }
       }
 
       setSaving(true)
@@ -1272,11 +1434,46 @@ export default function RequisitionPage() {
 
                     <select
                       value={destinationId}
-                      onChange={(event) =>
-                        setDestinationId(
+                      onChange={(event) => {
+                        const nextDestinationId =
                           event.target.value
+
+                        setDestinationId(
+                          nextDestinationId
                         )
-                      }
+
+                        const nextProducts =
+                          specialRequest
+                            ? products
+                            : productsForLocationId(
+                                nextDestinationId
+                              )
+
+                        const allowedIds =
+                          new Set(
+                            nextProducts.map(
+                              (product) =>
+                                product.id
+                            )
+                          )
+
+                        setLines(
+                          (current) =>
+                            current.map(
+                              (line) => ({
+                                ...line,
+                                product_id:
+                                  allowedIds.has(
+                                    line.product_id
+                                  )
+                                    ? line.product_id
+                                    : nextProducts[0]
+                                        ?.id ||
+                                      '',
+                              })
+                            )
+                        )
+                      }}
                       style={styles.input}
                     >
                       <option value="">
@@ -1341,6 +1538,155 @@ export default function RequisitionPage() {
                   />
                 </label>
               </section>
+
+              {bungalowRestricted && (
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 10,
+                    marginTop: 14,
+                    marginBottom: 12,
+                    padding: 12,
+                    borderRadius: 12,
+                    border: specialRequest
+                      ? '1px solid #86efac'
+                      : '1px solid #d0d5dd',
+                    background: specialRequest
+                      ? '#f0fdf4'
+                      : '#ffffff',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={specialRequest}
+                    onChange={(event) => {
+                      const checked =
+                        event.target.checked
+
+                      setSpecialRequest(
+                        checked
+                      )
+
+                      if (checked) {
+                        return
+                      }
+
+                      const allowedIds =
+                        new Set(
+                          products
+                            .filter(
+                              (product) =>
+                                isAllowedBungalowProduct(
+                                  product.name
+                                )
+                            )
+                            .map(
+                              (product) =>
+                                product.id
+                            )
+                        )
+
+                      const firstAllowed =
+                        products.find(
+                          (product) =>
+                            isAllowedBungalowProduct(
+                              product.name
+                            )
+                        )
+
+                      setLines(
+                        (current) =>
+                          current.map(
+                            (line) => ({
+                              ...line,
+                              product_id:
+                                allowedIds.has(
+                                  line.product_id
+                                )
+                                  ? line.product_id
+                                  : firstAllowed
+                                      ?.id ||
+                                    '',
+                            })
+                          )
+                      )
+                    }}
+                    style={{
+                      marginTop: 2,
+                      width: 18,
+                      height: 18,
+                      flex: '0 0 auto',
+                    }}
+                  />
+
+                  <span>
+                    <strong>
+                      Demande spéciale
+                    </strong>
+                    <span
+                      style={{
+                        display: 'block',
+                        marginTop: 3,
+                        color: '#667085',
+                        fontSize: 11,
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      Cocher pour débloquer exceptionnellement toute la liste des produits pour ce bungalow.
+                    </span>
+                  </span>
+                </label>
+              )}
+
+              {bungalowRestricted &&
+                !specialRequest && (
+                <div
+                  style={{
+                    marginTop: 14,
+                    marginBottom: 14,
+                    padding: 12,
+                    borderRadius: 12,
+                    background: '#fff7ed',
+                    border: '1px solid #fed7aa',
+                    color: '#9a3412',
+                    fontSize: 12,
+                    lineHeight: 1.45,
+                  }}
+                >
+                  <strong>
+                    Produits autorisés pour {selectedDestinationName}
+                  </strong>
+                  <div style={{ marginTop: 4 }}>
+                    {BUNGALOW_ALLOWED_PRODUCT_NAMES.join(' · ')}
+                  </div>
+                </div>
+              )}
+
+              {bungalowRestricted &&
+                specialRequest && (
+                  <div
+                    style={{
+                      marginTop: 12,
+                      marginBottom: 14,
+                      padding: 12,
+                      borderRadius: 12,
+                      background: '#f0fdf4',
+                      border: '1px solid #86efac',
+                      color: '#166534',
+                      fontSize: 12,
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    <strong>
+                      Demande spéciale activée
+                    </strong>
+                    <div style={{ marginTop: 4 }}>
+                      Toute la liste produits est disponible pour cette réquisition.
+                    </div>
+                  </div>
+                )}
 
               <section className="requisition-products-section" style={styles.productsSection}>
                 <div className="requisition-lines-header" style={styles.linesHeader}>
@@ -1431,7 +1777,7 @@ export default function RequisitionPage() {
                                   Choisir un produit
                                 </option>
 
-                                {products.map(
+                                {availableProducts.map(
                                   (product) => (
                                     <option
                                       key={product.id}
