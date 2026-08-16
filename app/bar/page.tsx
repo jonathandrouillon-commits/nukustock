@@ -1,7 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { useEffect, useMemo, useState } from 'react'
 
 import {
   useProducts,
@@ -82,6 +83,16 @@ function lineStatusLabel(
 }
 
 export default function BarPage() {
+  const searchParams =
+    useSearchParams()
+
+  const requestedRequestId =
+    searchParams.get('request') || ''
+
+  const fromBackoffice =
+    searchParams.get('from') ===
+    'backoffice'
+
   const {
     items: requests,
     save: saveRequests,
@@ -356,6 +367,41 @@ export default function BarPage() {
     setTreatingId(request.id)
     setTreatmentOpen(true)
   }
+
+  /*
+   * Si le back-office ouvre /bar?request=...
+   * on ouvre automatiquement exactement
+   * la même fenêtre de traitement que Bar Nuku.
+   */
+  useEffect(() => {
+    if (
+      !requestedRequestId ||
+      treatmentOpen
+    ) {
+      return
+    }
+
+    const request =
+      requests.find(
+        (item) =>
+          item.id ===
+          requestedRequestId
+      )
+
+    if (
+      !request ||
+      request.stockAppliedAt
+    ) {
+      return
+    }
+
+    openTreatment(request)
+  }, [
+    requestedRequestId,
+    requests,
+    treatmentOpen,
+  ])
+
 
   const closeTreatment = () => {
     setTreatmentOpen(false)
@@ -1627,6 +1673,32 @@ export default function BarPage() {
           margin: 6px 0 0;
           color: #cbd5e1;
           font-size: 13px;
+        }
+
+        .heroRight {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+        }
+
+        .backOfficeLink {
+          display: inline-flex;
+          align-items: center;
+          min-height: 36px;
+          padding: 0 12px;
+          border: 1px solid rgba(255,255,255,.14);
+          border-radius: 999px;
+          background: rgba(255,255,255,.06);
+          color: #fff;
+          text-decoration: none;
+          font-size: 11px;
+          font-weight: 800;
+        }
+
+        .backOfficeLink:hover {
+          background: rgba(255,255,255,.12);
         }
 
         .status {
