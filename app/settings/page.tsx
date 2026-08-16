@@ -88,6 +88,22 @@ const SETTINGS_SECTION_LABELS:
   users: 'Gestion des utilisateurs',
 }
 
+type WeightDisplaySettings = {
+  unitWeight: boolean
+  caseWeight: boolean
+  totalWeight: boolean
+}
+
+const WEIGHT_DISPLAY_SETTINGS_KEY =
+  'nukustock_weight_display_v1'
+
+const DEFAULT_WEIGHT_DISPLAY_SETTINGS:
+  WeightDisplaySettings = {
+  unitWeight: true,
+  caseWeight: true,
+  totalWeight: true,
+}
+
 function SettingsSectionFrame({
   sectionKey,
   title,
@@ -308,6 +324,13 @@ export default function Settings() {
     DEFAULT_SETTINGS_SECTION_STATE
   )
 
+  const [
+    weightDisplay,
+    setWeightDisplay,
+  ] = useState<WeightDisplaySettings>(
+    DEFAULT_WEIGHT_DISPLAY_SETTINGS
+  )
+
   useEffect(() => {
     try {
       const visibleRaw = localStorage.getItem(
@@ -335,6 +358,48 @@ export default function Settings() {
       // Garde les réglages par défaut.
     }
   }, [])
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(
+        WEIGHT_DISPLAY_SETTINGS_KEY
+      )
+
+      if (raw) {
+        setWeightDisplay({
+          ...DEFAULT_WEIGHT_DISPLAY_SETTINGS,
+          ...JSON.parse(raw),
+        })
+      }
+    } catch {
+      // Garde les réglages d'affichage des poids par défaut.
+    }
+  }, [])
+
+  const updateWeightDisplay = (
+    key: keyof WeightDisplaySettings,
+    visible: boolean
+  ) => {
+    setWeightDisplay((current) => {
+      const next = {
+        ...current,
+        [key]: visible,
+      }
+
+      localStorage.setItem(
+        WEIGHT_DISPLAY_SETTINGS_KEY,
+        JSON.stringify(next)
+      )
+
+      window.dispatchEvent(
+        new CustomEvent('nukustock-weight-display-change', {
+          detail: next,
+        })
+      )
+
+      return next
+    })
+  }
 
   const updateSectionVisibility = (
     key: SettingsSectionKey,
@@ -1735,6 +1800,143 @@ export default function Settings() {
                 }}
               >
                 {SETTINGS_SECTION_LABELS[key]}
+              </span>
+            </label>
+          ))}
+        </div>
+      </Card>
+
+      <div style={{ height: 16 }} />
+
+      <Card>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div>
+            <h2 style={{ margin: 0 }}>
+              Affichage des poids
+            </h2>
+            <p
+              className="muted"
+              style={{ margin: '5px 0 0' }}
+            >
+              Choisis les informations de poids à afficher dans NukuStock.
+              Ces préférences sont mémorisées sur cet appareil.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            className="button secondary small"
+            onClick={() => {
+              setWeightDisplay(
+                DEFAULT_WEIGHT_DISPLAY_SETTINGS
+              )
+              localStorage.setItem(
+                WEIGHT_DISPLAY_SETTINGS_KEY,
+                JSON.stringify(
+                  DEFAULT_WEIGHT_DISPLAY_SETTINGS
+                )
+              )
+              window.dispatchEvent(
+                new CustomEvent(
+                  'nukustock-weight-display-change',
+                  {
+                    detail:
+                      DEFAULT_WEIGHT_DISPLAY_SETTINGS,
+                  }
+                )
+              )
+            }}
+          >
+            Tout afficher
+          </button>
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns:
+              'repeat(auto-fit,minmax(220px,1fr))',
+            gap: 8,
+            marginTop: 14,
+          }}
+        >
+          {[
+            {
+              key: 'unitWeight' as const,
+              title: 'Poids unitaire',
+              description:
+                'Liquide + bouteille ou canette.',
+            },
+            {
+              key: 'caseWeight' as const,
+              title: 'Poids conditionnement',
+              description:
+                'Poids du carton ou conditionnement complet.',
+            },
+            {
+              key: 'totalWeight' as const,
+              title: 'Poids total',
+              description:
+                'Quantité × poids unitaire lorsque la quantité est disponible.',
+            },
+          ].map((option) => (
+            <label
+              key={option.key}
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 10,
+                minHeight: 70,
+                padding: '12px 12px',
+                border: '1px solid #e5e7eb',
+                borderRadius: 10,
+                cursor: 'pointer',
+                background: weightDisplay[option.key]
+                  ? '#f8fafc'
+                  : '#fff',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={weightDisplay[option.key]}
+                onChange={(event) =>
+                  updateWeightDisplay(
+                    option.key,
+                    event.target.checked
+                  )
+                }
+                style={{ marginTop: 2 }}
+              />
+
+              <span>
+                <span
+                  style={{
+                    display: 'block',
+                    fontWeight: 800,
+                    fontSize: 12,
+                  }}
+                >
+                  {option.title}
+                </span>
+                <span
+                  style={{
+                    display: 'block',
+                    marginTop: 3,
+                    color: '#667085',
+                    fontSize: 11,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {option.description}
+                </span>
               </span>
             </label>
           ))}
