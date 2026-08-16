@@ -22,6 +22,7 @@ import {
 
 type ImportKind =
   | 'products'
+  | 'weights'
   | 'suppliers'
   | 'locations'
 
@@ -293,6 +294,11 @@ export default function ImportExportPage() {
       null
     )
 
+  const weightsInput =
+    useRef<HTMLInputElement>(
+      null
+    )
+
   const suppliersInput =
     useRef<HTMLInputElement>(
       null
@@ -330,6 +336,15 @@ export default function ImportExportPage() {
       kind === 'products'
     ) {
       productsInput
+        .current
+        ?.click()
+      return
+    }
+
+    if (
+      kind === 'weights'
+    ) {
+      weightsInput
         .current
         ?.click()
       return
@@ -929,6 +944,114 @@ export default function ImportExportPage() {
             Error
             ? caughtError.message
             : "Erreur pendant l'import des produits."
+        )
+      } finally {
+        setBusy('')
+      }
+    }
+
+  const importWeights =
+    async (
+      event:
+        ChangeEvent<HTMLInputElement>
+    ) => {
+      const file =
+        event.target.files?.[0]
+
+      event.target.value = ''
+
+      if (!file) return
+
+      setBusy('weights')
+      setMessage('')
+      setError('')
+
+      try {
+        const {
+          data: {
+            session,
+          },
+        } =
+          await supabase.auth
+            .getSession()
+
+        if (
+          !session
+            ?.access_token
+        ) {
+          throw new Error(
+            'Session administrateur introuvable. Reconnecte-toi.'
+          )
+        }
+
+        const formData =
+          new FormData()
+
+        formData.append(
+          'file',
+          file
+        )
+
+        const response =
+          await fetch(
+            '/api/admin/import-product-weights',
+            {
+              method: 'POST',
+              headers: {
+                Authorization:
+                  `Bearer ${session.access_token}`,
+              },
+              body: formData,
+            }
+          )
+
+        const data =
+          await response.json()
+
+        if (!response.ok) {
+          throw new Error(
+            data.error ||
+              'Import des poids impossible.'
+          )
+        }
+
+        const parts = [
+          `${data.updated || 0} produit(s) mis à jour`,
+        ]
+
+        if (data.notFound) {
+          parts.push(
+            `${data.notFound} introuvable(s)`
+          )
+        }
+
+        if (data.ignored) {
+          parts.push(
+            `${data.ignored} ligne(s) ignorée(s)`
+          )
+        }
+
+        if (data.failed) {
+          parts.push(
+            `${data.failed} erreur(s)`
+          )
+        }
+
+        setMessage(
+          `Import poids terminé : ${parts.join(' · ')}.`
+        )
+      } catch (
+        caughtError
+      ) {
+        console.error(
+          'Import poids produits :',
+          caughtError
+        )
+
+        setError(
+          caughtError instanceof Error
+            ? caughtError.message
+            : "Erreur pendant l'import des poids produits."
         )
       } finally {
         setBusy('')
@@ -1713,6 +1836,18 @@ export default function ImportExportPage() {
       />
 
       <input
+        ref={weightsInput}
+        type="file"
+        accept=".xlsx,.xls,.xlsm"
+        style={{
+          display: 'none',
+        }}
+        onChange={
+          importWeights
+        }
+      />
+
+      <input
         ref={suppliersInput}
         type="file"
         accept=".xlsx,.xls,.xlsm"
@@ -1790,7 +1925,7 @@ export default function ImportExportPage() {
         style={{
           display: 'grid',
           gridTemplateColumns:
-            'repeat(3,minmax(0,1fr))',
+            'repeat(4,minmax(0,1fr))',
           gap: 16,
         }}
       >
@@ -1862,6 +1997,79 @@ export default function ImportExportPage() {
                 'products'
                   ? 'Import en cours...'
                   : 'Importer Produits'}
+              </button>
+            </div>
+          </div>
+        </Card>
+
+        <Card>
+          <div
+            style={{
+              minHeight: 235,
+              display: 'flex',
+              flexDirection:
+                'column',
+            }}
+          >
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 900,
+                letterSpacing:
+                  '.05em',
+                color: '#667085',
+              }}
+            >
+              POIDS PRODUITS
+            </div>
+
+            <h2
+              style={{
+                margin:
+                  '8px 0 8px',
+              }}
+            >
+              Importer les poids
+            </h2>
+
+            <p
+              className="muted"
+              style={{
+                margin: 0,
+                lineHeight: 1.5,
+              }}
+            >
+              Met à jour uniquement le poids
+              unitaire plein et le poids du
+              conditionnement complet à partir
+              de la référence interne.
+            </p>
+
+            <div
+              style={{
+                marginTop: 'auto',
+                paddingTop: 22,
+              }}
+            >
+              <button
+                type="button"
+                className="button"
+                style={{
+                  width: '100%',
+                }}
+                disabled={
+                  busy !== ''
+                }
+                onClick={() =>
+                  startImport(
+                    'weights'
+                  )
+                }
+              >
+                {busy ===
+                'weights'
+                  ? 'Import en cours...'
+                  : 'Importer les poids'}
               </button>
             </div>
           </div>
