@@ -3180,10 +3180,11 @@ export default function Inventory() {
             background:
               'rgba(0,0,0,.68)',
             display: 'flex',
-            alignItems: 'center',
+            alignItems: 'flex-start',
             justifyContent:
               'center',
-            padding: 20,
+            padding: '28px 20px',
+            overflowY: 'auto',
             zIndex: 999,
           }}
         >
@@ -3191,10 +3192,12 @@ export default function Inventory() {
             className="inventoryCreateModal"
             style={{
               width:
-                'min(620px, 100%)',
+                'min(920px, 100%)',
+              maxHeight: 'calc(100vh - 56px)',
+              overflowY: 'auto',
               background: '#111827',
               borderRadius: 18,
-              padding: 24,
+              padding: 28,
               boxShadow:
                 '0 25px 80px rgba(0,0,0,.45)',
             }}
@@ -3242,8 +3245,9 @@ export default function Inventory() {
               style={{
                 display: 'grid',
                 gridTemplateColumns:
-                  '1fr 1fr',
-                gap: 16,
+                  'repeat(2,minmax(0,1fr))',
+                columnGap: 18,
+                rowGap: 16,
               }}
             >
               <div
@@ -3640,6 +3644,47 @@ export default function Inventory() {
       )}
 
       <style jsx global>{`
+        .inventoryCreateModal {
+          scrollbar-width: thin;
+        }
+
+        @media (min-width: 1100px) {
+          .inventoryCreateModal {
+            width: min(920px, calc(100vw - 80px)) !important;
+          }
+
+          .inventoryPurposeGrid {
+            grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+          }
+
+          .inventoryEntryModeGrid {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          }
+        }
+
+        @media (max-width: 767px) {
+          .inventoryCreateBackdrop {
+            padding: 10px !important;
+          }
+
+          .inventoryCreateModal {
+            width: 100% !important;
+            max-height: calc(100vh - 20px) !important;
+            padding: 18px !important;
+            border-radius: 14px !important;
+          }
+
+          .inventoryCreateGrid {
+            grid-template-columns: 1fr !important;
+          }
+
+          .inventoryPurposeGrid,
+          .inventoryEntryModeGrid {
+            grid-template-columns: 1fr !important;
+          }
+        }
+
+
         @media (max-width: 767px) {
           .inventoryCreateBackdrop {
             align-items: stretch !important;
