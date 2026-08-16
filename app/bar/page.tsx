@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
+import PwaInstallButton from '@/components/pwa-install-button'
 import { useEffect, useMemo, useState } from 'react'
 
 import {
@@ -1699,6 +1700,36 @@ export default function BarPage() {
 
         .backOfficeLink:hover {
           background: rgba(255,255,255,.12);
+        }
+
+        .pwaInstallButton,
+        .pwaInstalled {
+          min-height: 36px;
+          padding: 0 13px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 999px;
+          font-size: 11px;
+          font-weight: 900;
+          white-space: nowrap;
+        }
+
+        .pwaInstallButton {
+          border: 1px solid #a78bfa;
+          background: #7c3aed;
+          color: #fff;
+          cursor: pointer;
+        }
+
+        .pwaInstallButton:hover {
+          background: #6d28d9;
+        }
+
+        .pwaInstalled {
+          border: 1px solid #6ce9a6;
+          background: #ecfdf3;
+          color: #027a48;
         }
 
         .status {

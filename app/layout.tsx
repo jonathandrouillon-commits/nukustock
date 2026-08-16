@@ -1,55 +1,115 @@
-import type { Metadata, Viewport } from 'next'
+import type {
+  Metadata,
+  Viewport,
+} from 'next'
+
+import { headers } from 'next/headers'
+
 import './globals.css'
 
-import { AppShell } from '@/components/app-shell'
-import { PwaRegister } from '@/components/pwa-register'
+import AuthGate from '@/components/auth-gate'
 
-export const metadata: Metadata = {
-  title: {
-    default: 'NukuStock',
-    template: '%s | NukuStock',
-  },
+function normalizeHost(host: string) {
+  return host
+    .toLowerCase()
+    .split(',')[0]
+    .trim()
+    .split(':')[0]
+}
 
-  description: 'Gestion des stocks Nukutepipi',
+export async function generateMetadata(): Promise<Metadata> {
+  const headersList =
+    await headers()
 
-  manifest: '/manifest.webmanifest',
+  const host = normalizeHost(
+    headersList.get(
+      'x-forwarded-host'
+    ) ||
+      headersList.get('host') ||
+      ''
+  )
 
-  icons: {
-    icon: [
-      {
-        url: '/bar-nuku-192.png',
-        sizes: '192x192',
-        type: 'image/png',
+  const isRequisition =
+    host ===
+    'requisitionnuku.fenuaprobartender.com'
+
+  const isBarNuku =
+    host ===
+    'barnuku.fenuaprobartender.com'
+
+  if (isBarNuku) {
+    return {
+      title: 'Bar Nuku',
+      applicationName: 'Bar Nuku',
+      description:
+        'Portail de l’équipe Bar de Nukutepipi',
+      manifest:
+        '/manifest-bar.webmanifest',
+      icons: {
+        icon: [
+          {
+            url: '/bar-nuku-192.png',
+            sizes: '192x192',
+            type: 'image/png',
+          },
+          {
+            url: '/bar-nuku-512.png',
+            sizes: '512x512',
+            type: 'image/png',
+          },
+        ],
+        apple:
+          '/bar-nuku-192.png',
       },
-      {
-        url: '/bar-nuku-512.png',
-        sizes: '512x512',
-        type: 'image/png',
+      appleWebApp: {
+        capable: true,
+        title: 'Bar Nuku',
+        statusBarStyle:
+          'black-translucent',
       },
-    ],
+    }
+  }
 
-    apple: [
-      {
-        url: '/bar-nuku-192.png',
-        sizes: '192x192',
-        type: 'image/png',
+  if (isRequisition) {
+    return {
+      title: 'Réquisitions Nuku',
+      applicationName:
+        'Réquisitions',
+      description:
+        'Réquisitions internes Nukutepipi',
+      manifest:
+        '/manifest-requisition.webmanifest',
+      appleWebApp: {
+        capable: true,
+        title: 'Réquisitions',
+        statusBarStyle: 'default',
       },
-    ],
-  },
+    }
+  }
 
-  appleWebApp: {
-    capable: true,
-    title: 'Bar Nuku',
-    statusBarStyle: 'black-translucent',
-  },
+  return {
+    title:
+      'NukuStock Back Office',
+    applicationName:
+      'NukuStock Back Office',
+    description:
+      'Gestion des stocks et approvisionnements de Nukutepipi',
+    manifest:
+      '/manifest-nukustock.webmanifest',
+    appleWebApp: {
+      capable: true,
+      title:
+        'NukuStock Back Office',
+      statusBarStyle: 'default',
+    },
+  }
 }
 
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
   viewportFit: 'cover',
-  themeColor: '#7c3aed',
+  themeColor: '#0b1220',
 }
 
 export default function RootLayout({
@@ -60,11 +120,9 @@ export default function RootLayout({
   return (
     <html lang="fr">
       <body>
-        <PwaRegister />
-
-        <AppShell>
+        <AuthGate>
           {children}
-        </AppShell>
+        </AuthGate>
       </body>
     </html>
   )
