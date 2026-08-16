@@ -2010,7 +2010,8 @@ export default function BarPage() {
         }
 
         .treatmentProduct.out_of_stock {
-          border-color: #fecdca;
+          border-color: #6ce9a6;
+          background: #f6fef9;
         }
 
         .productHeader {
@@ -2079,9 +2080,9 @@ export default function BarPage() {
         }
 
         .lineAction.out.active {
-          border-color: #d92d20;
-          background: #fef3f2;
-          color: #b42318;
+          border-color: #12b76a;
+          background: #ecfdf3;
+          color: #027a48;
         }
 
         .treatmentProduct label {
@@ -2137,8 +2138,8 @@ export default function BarPage() {
         }
 
         .outInfo {
-          background: #fef3f2;
-          color: #b42318;
+          background: #ecfdf3;
+          color: #027a48;
         }
 
         .modalFooter {
