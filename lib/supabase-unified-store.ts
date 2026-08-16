@@ -1051,9 +1051,29 @@ async function syncRequests(requests: InternalRequest[]) {
   const reqByNumber = new Map((existingRequests || []).map((x: any) => [x.request_number, x]))
 
   for (const request of requests) {
-    const departmentId = depByName.get(String(request.service || '').trim().toLowerCase())
-    const destinationId = locByName.get(String(request.destinationLocation || '').trim().toLowerCase())
-    if (!departmentId || !destinationId) continue
+    const departmentId = depByName.get(
+      String(request.service || '')
+        .trim()
+        .toLowerCase()
+    )
+
+    const destinationId = locByName.get(
+      String(request.destinationLocation || '')
+        .trim()
+        .toLowerCase()
+    )
+
+    if (!departmentId) {
+      throw new Error(
+        `Département introuvable dans Supabase pour la réquisition ${request.id} : ${request.service || '—'}`
+      )
+    }
+
+    if (!destinationId) {
+      throw new Error(
+        `Lieu de destination introuvable dans Supabase pour la réquisition ${request.id} : ${request.destinationLocation || '—'}`
+      )
+    }
 
     const existing: any = reqByNumber.get(request.id)
     const dbId = existing?.id || uuid()
@@ -1154,7 +1174,10 @@ export function useUnifiedRequests() {
       setItems(remote)
       writeCache(REQUEST_CACHE_KEY, remote)
     } catch (error) {
-      console.error('NukuStock requests Supabase:', error)
+      console.error(
+        'NukuStock requests Supabase:',
+        error
+      )
     }
   }, [])
 
@@ -1165,10 +1188,49 @@ export function useUnifiedRequests() {
       void reload()
     }
 
-    window.addEventListener('focus', onFocus)
+    window.addEventListener(
+      'focus',
+      onFocus
+    )
+
+    const requestsChannel =
+      supabase
+        .channel(
+          'nukustock-internal-requests-realtime'
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'internal_requests',
+          },
+          () => {
+            void reload()
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'internal_request_lines',
+          },
+          () => {
+            void reload()
+          }
+        )
+        .subscribe()
 
     return () => {
-      window.removeEventListener('focus', onFocus)
+      window.removeEventListener(
+        'focus',
+        onFocus
+      )
+
+      void supabase.removeChannel(
+        requestsChannel
+      )
     }
   }, [reload])
 
