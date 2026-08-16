@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import PwaInstallButton from '@/components/pwa-install-button'
+import BarPushNotifications from '@/components/bar-push-notifications'
 import { useEffect, useMemo, useState } from 'react'
 
 import {
@@ -990,6 +991,8 @@ export default function BarPage() {
         </div>
       )}
 
+      <BarPushNotifications />
+
       <section className="quickLinks">
         <Link
           href="/planning-bar"
@@ -1771,6 +1774,62 @@ export default function BarPage() {
           background: #fef3f2;
           border: 1px solid #fecdca;
           color: #b42318;
+        }
+
+        .barPushBox,
+        .barPushEnabled,
+        .barPushDenied {
+          max-width: 1100px;
+          margin: 0 auto 16px;
+          padding: 12px 14px;
+          border-radius: 14px;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+
+        .barPushBox {
+          border: 1px solid #d6bbfb;
+          background: #f4f3ff;
+        }
+
+        .barPushEnabled {
+          border: 1px solid #abefc6;
+          background: #ecfdf3;
+          color: #027a48;
+          font-weight: 800;
+        }
+
+        .barPushDenied {
+          border: 1px solid #fecdca;
+          background: #fef3f2;
+          color: #b42318;
+          font-size: 11px;
+          font-weight: 800;
+        }
+
+        .barPushButton {
+          min-height: 38px;
+          padding: 0 14px;
+          border: 1px solid #7c3aed;
+          border-radius: 10px;
+          background: #7c3aed;
+          color: #fff;
+          font: inherit;
+          font-size: 11px;
+          font-weight: 900;
+          cursor: pointer;
+        }
+
+        .barPushButton:disabled {
+          opacity: .6;
+          cursor: wait;
+        }
+
+        .barPushBox small,
+        .barPushEnabled small {
+          font-size: 10px;
         }
 
         .quickLinks {
