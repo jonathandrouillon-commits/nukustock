@@ -28,6 +28,9 @@ const PRODUCT_SCREEN_COLUMNS = [
   { key: 'locations', label: 'Lieux de stockage' },
   { key: 'mini', label: 'Mini' },
   { key: 'price', label: 'Prix' },
+  { key: 'unitWeight', label: 'Poids unitaire' },
+  { key: 'caseWeight', label: 'Poids conditionnement' },
+  { key: 'totalWeight', label: 'Poids total stock' },
   { key: 'actions', label: 'Actions' },
 ]
 
@@ -43,6 +46,19 @@ const PRODUCT_SCREEN_ESSENTIAL = [
   'price',
   'actions',
 ]
+
+function formatWeightKg(value: number | null | undefined) {
+  const numeric = Number(value || 0)
+
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return '—'
+  }
+
+  return `${numeric.toLocaleString('fr-FR', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 3,
+  })} kg`
+}
 
 function cleanRefPart(value: string) {
   const cleaned = value
@@ -1655,6 +1671,9 @@ export default function Products() {
               productDisplay.isVisible('locations') && '210px',
               productDisplay.isVisible('mini') && '80px',
               productDisplay.isVisible('price') && '110px',
+              productDisplay.isVisible('unitWeight') && '125px',
+              productDisplay.isVisible('caseWeight') && '165px',
+              productDisplay.isVisible('totalWeight') && '145px',
               productDisplay.isVisible('actions') && '100px',
             ].filter(Boolean).join(' ')
 
@@ -1684,6 +1703,9 @@ export default function Products() {
                   {productDisplay.isVisible('locations') && <div>Lieux de stockage</div>}
                   {productDisplay.isVisible('mini') && <div>Mini</div>}
                   {productDisplay.isVisible('price') && <div>Prix</div>}
+                  {productDisplay.isVisible('unitWeight') && <div>Poids unitaire</div>}
+                  {productDisplay.isVisible('caseWeight') && <div>Poids conditionnement</div>}
+                  {productDisplay.isVisible('totalWeight') && <div>Poids total stock</div>}
                   {productDisplay.isVisible('actions') && <div></div>}
                 </div>
 
@@ -1890,6 +1912,41 @@ export default function Products() {
                       {productDisplay.isVisible('price') && (
                         <div>{Number(p.purchasePrice || 0).toLocaleString('fr-FR')} XPF</div>
                       )}
+
+                      {productDisplay.isVisible('unitWeight') && (
+                        <div style={{ fontWeight: 700 }}>
+                          {formatWeightKg(p.netUnitWeightKg)}
+                        </div>
+                      )}
+
+                      {productDisplay.isVisible('caseWeight') && (
+                        <div style={{ fontWeight: 700 }}>
+                          {formatWeightKg(p.caseWeightKg)}
+                        </div>
+                      )}
+
+                      {productDisplay.isVisible('totalWeight') && (
+                        <div>
+                          <strong>
+                            {formatWeightKg(
+                              qty * Number(p.netUnitWeightKg || 0)
+                            )}
+                          </strong>
+                          {qty > 0 && Number(p.netUnitWeightKg || 0) > 0 && (
+                            <div
+                              style={{
+                                marginTop: 3,
+                                fontSize: 10,
+                                opacity: 0.6,
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {qty} × {formatWeightKg(p.netUnitWeightKg)}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {productDisplay.isVisible('actions') && (
                         <div>
                           <button
