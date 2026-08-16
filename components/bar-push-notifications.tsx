@@ -11,68 +11,82 @@ type PermissionState =
   | 'enabled'
 
 function urlBase64ToUint8Array(base64String: string) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
-  const base64 = (base64String + padding)
-    .replace(/-/g, '+')
-    .replace(/_/g, '/')
+  const padding =
+    '='.repeat((4 - (base64String.length % 4)) % 4)
 
-  const rawData = window.atob(base64)
+  const base64 =
+    (base64String + padding)
+      .replace(/-/g, '+')
+      .replace(/_/g, '/')
+
+  const rawData =
+    window.atob(base64)
 
   return Uint8Array.from(
-    [...rawData].map((character) => character.charCodeAt(0))
+    [...rawData].map(
+      (character) =>
+        character.charCodeAt(0)
+    )
   )
+}
+
+function arrayBuffersEqual(
+  first: ArrayBuffer | null,
+  second: Uint8Array
+) {
+  if (!first) return false
+
+  const firstArray =
+    new Uint8Array(first)
+
+  if (
+    firstArray.length !==
+    second.length
+  ) {
+    return false
+  }
+
+  for (
+    let index = 0;
+    index < firstArray.length;
+    index += 1
+  ) {
+    if (
+      firstArray[index] !==
+      second[index]
+    ) {
+      return false
+    }
+  }
+
+  return true
 }
 
 export default function BarPushNotifications() {
   const [state, setState] =
-    useState<PermissionState>('default')
+    useState<PermissionState>(
+      'default'
+    )
+
   const [loading, setLoading] =
     useState(false)
+
   const [message, setMessage] =
     useState('')
 
-  useEffect(() => {
-    if (
-      !('serviceWorker' in navigator) ||
-      !('PushManager' in window) ||
-      !('Notification' in window)
-    ) {
-      setState('unsupported')
-      return
-    }
-
-    if (Notification.permission === 'denied') {
-      setState('denied')
-      return
-    }
-
-    if (Notification.permission === 'granted') {
-      void navigator.serviceWorker
-        .getRegistration('/')
-        .then(async (registration) => {
-          if (!registration) {
-            setState('granted')
-            return
-          }
-
-          const subscription =
-            await registration.pushManager.getSubscription()
-
-          setState(subscription ? 'enabled' : 'granted')
-        })
-      return
-    }
-
-    setState('default')
-  }, [])
-
-  const enableNotifications = async () => {
-    setLoading(true)
-    setMessage('')
-
-    try {
+  /**
+   * Crée ou récupère l'abonnement Push
+   * et l'enregistre systématiquement
+   * dans Supabase.
+   */
+  const syncPushSubscription =
+    async (
+      requestPermission:
+        boolean
+    ) => {
       const publicKey =
-        process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
+        process.env
+          .NEXT_PUBLIC_VAPID_PUBLIC_KEY
 
       if (!publicKey) {
         throw new Error(
@@ -80,44 +94,130 @@ export default function BarPushNotifications() {
         )
       }
 
-      const permission =
-        await Notification.requestPermission()
+      /**
+       * Permission navigateur
+       */
+      let permission =
+        Notification.permission
 
-      if (permission !== 'granted') {
+      if (
+        permission ===
+          'default' &&
+        requestPermission
+      ) {
+        permission =
+          await Notification
+            .requestPermission()
+      }
+
+      if (
+        permission !==
+        'granted'
+      ) {
         setState(
-          permission === 'denied'
+          permission ===
+            'denied'
             ? 'denied'
             : 'default'
         )
-        setMessage(
+
+        throw new Error(
           'Autorisation de notification non accordée.'
         )
-        return
       }
 
+      /**
+       * Service Worker
+       */
       const registration =
-        await navigator.serviceWorker.register(
-          '/bar-sw.js',
-          { scope: '/' }
+        await navigator
+          .serviceWorker
+          .register(
+            '/bar-sw.js',
+            {
+              scope: '/',
+            }
+          )
+
+      await navigator
+        .serviceWorker
+        .ready
+
+      const vapidKey =
+        urlBase64ToUint8Array(
+          publicKey
         )
 
-      await navigator.serviceWorker.ready
-
+      /**
+       * Subscription existante Chrome
+       */
       let subscription =
-        await registration.pushManager.getSubscription()
+        await registration
+          .pushManager
+          .getSubscription()
 
-      if (!subscription) {
-        subscription =
-          await registration.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey:
-              urlBase64ToUint8Array(publicKey),
-          })
+      /**
+       * IMPORTANT :
+       * si l'ancienne subscription
+       * utilise une ancienne clé VAPID,
+       * on la supprime.
+       */
+      if (subscription) {
+        const existingKey =
+          subscription.options
+            .applicationServerKey
+
+        const sameKey =
+          arrayBuffersEqual(
+            existingKey,
+            vapidKey
+          )
+
+        if (!sameKey) {
+          console.log(
+            'Ancienne clé VAPID détectée : suppression de la subscription.'
+          )
+
+          await subscription
+            .unsubscribe()
+
+          subscription = null
+        }
       }
 
+      /**
+       * Nouvelle subscription
+       */
+      if (!subscription) {
+        subscription =
+          await registration
+            .pushManager
+            .subscribe({
+              userVisibleOnly:
+                true,
+
+              applicationServerKey:
+                vapidKey,
+            })
+      }
+
+      /**
+       * Utilisateur Supabase
+       */
       const {
-        data: { user },
-      } = await supabase.auth.getUser()
+        data: {
+          user,
+        },
+        error:
+          userError,
+      } =
+        await supabase
+          .auth
+          .getUser()
+
+      if (userError) {
+        throw userError
+      }
 
       if (!user) {
         throw new Error(
@@ -125,56 +225,235 @@ export default function BarPushNotifications() {
         )
       }
 
-      const { error } = await supabase
-        .from('bar_push_subscriptions')
-        .upsert(
-          {
-            user_id: user.id,
-            endpoint: subscription.endpoint,
-            subscription: subscription.toJSON(),
-            channel: 'bar_nuku',
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'endpoint' }
+      /**
+       * Réenregistrement
+       * systématique dans Supabase.
+       *
+       * Même si Chrome dit déjà
+       * "notifications actives",
+       * on remet la ligne en base.
+       */
+      const {
+        error:
+          subscriptionError,
+      } =
+        await supabase
+          .from(
+            'bar_push_subscriptions'
+          )
+          .upsert(
+            {
+              user_id:
+                user.id,
+
+              endpoint:
+                subscription.endpoint,
+
+              subscription:
+                subscription.toJSON(),
+
+              channel:
+                'bar_nuku',
+
+              updated_at:
+                new Date()
+                  .toISOString(),
+            },
+            {
+              onConflict:
+                'endpoint',
+            }
+          )
+
+      if (
+        subscriptionError
+      ) {
+        console.error(
+          'Erreur enregistrement subscription Supabase:',
+          subscriptionError
         )
 
-      if (error) throw error
+        throw subscriptionError
+      }
 
-      setState('enabled')
-      setMessage(
-        'Notifications Bar Nuku activées.'
-      )
-    } catch (caughtError) {
-      console.error(
-        'Activation notifications Bar Nuku:',
-        caughtError
+      console.log(
+        'Subscription Bar Nuku enregistrée:',
+        subscription.endpoint
       )
 
-      setMessage(
-        caughtError instanceof Error
-          ? caughtError.message
-          : 'Impossible d’activer les notifications.'
+      setState(
+        'enabled'
       )
-    } finally {
-      setLoading(false)
+
+      return subscription
     }
+
+  /**
+   * Au chargement :
+   *
+   * si Chrome autorise déjà
+   * les notifications, on resynchronise
+   * automatiquement Supabase.
+   */
+  useEffect(() => {
+    const initialize =
+      async () => {
+        if (
+          !(
+            'serviceWorker' in
+            navigator
+          ) ||
+          !(
+            'PushManager' in
+            window
+          ) ||
+          !(
+            'Notification' in
+            window
+          )
+        ) {
+          setState(
+            'unsupported'
+          )
+
+          return
+        }
+
+        if (
+          Notification
+            .permission ===
+          'denied'
+        ) {
+          setState(
+            'denied'
+          )
+
+          return
+        }
+
+        if (
+          Notification
+            .permission ===
+          'granted'
+        ) {
+          try {
+            setLoading(
+              true
+            )
+
+            await syncPushSubscription(
+              false
+            )
+
+            setMessage(
+              'Notifications Bar Nuku actives.'
+            )
+          } catch (
+            caughtError
+          ) {
+            console.error(
+              'Synchronisation notifications Bar Nuku:',
+              caughtError
+            )
+
+            setState(
+              'granted'
+            )
+
+            setMessage(
+              caughtError instanceof
+                Error
+                ? caughtError.message
+                : 'Impossible de synchroniser les notifications.'
+            )
+          } finally {
+            setLoading(
+              false
+            )
+          }
+
+          return
+        }
+
+        setState(
+          'default'
+        )
+      }
+
+    void initialize()
+  }, [])
+
+  /**
+   * Bouton activation
+   */
+  const enableNotifications =
+    async () => {
+      setLoading(true)
+      setMessage('')
+
+      try {
+        await syncPushSubscription(
+          true
+        )
+
+        setMessage(
+          'Notifications Bar Nuku activées.'
+        )
+      } catch (
+        caughtError
+      ) {
+        console.error(
+          'Activation notifications Bar Nuku:',
+          caughtError
+        )
+
+        setMessage(
+          caughtError instanceof
+            Error
+            ? caughtError.message
+            : 'Impossible d’activer les notifications.'
+        )
+      } finally {
+        setLoading(
+          false
+        )
+      }
+    }
+
+  if (
+    state ===
+    'unsupported'
+  ) {
+    return null
   }
 
-  if (state === 'unsupported') return null
-
-  if (state === 'enabled') {
+  if (
+    state ===
+    'enabled'
+  ) {
     return (
       <div className="barPushEnabled">
-        <span>🔔 Notifications actives</span>
-        {message && <small>{message}</small>}
+        <span>
+          🔔 Notifications actives
+        </span>
+
+        {message && (
+          <small>
+            {message}
+          </small>
+        )}
       </div>
     )
   }
 
-  if (state === 'denied') {
+  if (
+    state ===
+    'denied'
+  ) {
     return (
       <div className="barPushDenied">
-        Notifications bloquées dans le navigateur.
+        Notifications bloquées
+        dans le navigateur.
       </div>
     )
   }
@@ -184,15 +463,23 @@ export default function BarPushNotifications() {
       <button
         type="button"
         className="barPushButton"
-        onClick={enableNotifications}
-        disabled={loading}
+        onClick={
+          enableNotifications
+        }
+        disabled={
+          loading
+        }
       >
         {loading
           ? 'Activation...'
           : '🔔 Activer les notifications'}
       </button>
 
-      {message && <small>{message}</small>}
+      {message && (
+        <small>
+          {message}
+        </small>
+      )}
     </div>
   )
 }

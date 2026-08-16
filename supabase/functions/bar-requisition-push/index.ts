@@ -19,34 +19,66 @@ const supabase = createClient(
 )
 
 webpush.setVapidDetails(
-  Deno.env.get('VAPID_SUBJECT') || 'mailto:admin@example.com',
+  Deno.env.get('VAPID_SUBJECT') ||
+    'mailto:admin@example.com',
   Deno.env.get('VAPID_PUBLIC_KEY')!,
   Deno.env.get('VAPID_PRIVATE_KEY')!
 )
 
-Deno.serve(async (request) => {
+Deno.serve(async (request: Request) => {
   try {
+    /*
+     * --------------------------------------------------
+     * 1. Vérification du secret webhook
+     * --------------------------------------------------
+     */
+
     const expectedSecret =
-      Deno.env.get('BAR_PUSH_WEBHOOK_SECRET')!
+      Deno.env.get(
+        'BAR_PUSH_WEBHOOK_SECRET'
+      ) || ''
 
     const incomingSecret =
-      request.headers.get('x-bar-push-secret')
+      request.headers.get(
+        'x-bar-push-secret'
+      ) || ''
 
     if (
       !expectedSecret ||
       incomingSecret !== expectedSecret
     ) {
-      return new Response('Unauthorized', {
-        status: 401,
-      })
+      console.error(
+        'Webhook secret invalide'
+      )
+
+      return new Response(
+        'Unauthorized',
+        {
+          status: 401,
+        }
+      )
     }
 
+    /*
+     * --------------------------------------------------
+     * 2. Lecture du payload
+     * --------------------------------------------------
+     */
+
     const payload =
-      (await request.json()) as WebhookPayload
+      (await request.json()) as
+        WebhookPayload
+
+    console.log(
+      'Webhook reçu:',
+      payload.type,
+      payload.table
+    )
 
     if (
       payload.type !== 'INSERT' ||
-      payload.table !== 'internal_requests'
+      payload.table !==
+        'internal_requests'
     ) {
       return Response.json({
         ok: true,
@@ -54,129 +86,375 @@ Deno.serve(async (request) => {
       })
     }
 
-    const record = payload.record
+    const record =
+      payload.record
 
-    let departmentName = 'Service'
-    let destinationName = ''
+    /*
+     * --------------------------------------------------
+     * 3. Département
+     * --------------------------------------------------
+     */
 
-    if (record.department_id) {
-      const { data } = await supabase
-        .from('departments')
-        .select('name')
-        .eq('id', record.department_id)
-        .maybeSingle()
+    let departmentName =
+      'Service'
 
-      if (data?.name) {
-        departmentName = data.name
-      }
-    }
+    if (
+      record.department_id
+    ) {
+      const {
+        data,
+        error,
+      } =
+        await supabase
+          .from('departments')
+          .select('name')
+          .eq(
+            'id',
+            record.department_id
+          )
+          .maybeSingle()
 
-    if (record.destination_location_id) {
-      const { data } = await supabase
-        .from('storage_locations')
-        .select('name')
-        .eq(
-          'id',
-          record.destination_location_id
+      if (error) {
+        console.error(
+          'Erreur département:',
+          error
         )
-        .maybeSingle()
+      }
 
       if (data?.name) {
-        destinationName = data.name
+        departmentName =
+          data.name
       }
     }
 
-    const { count: lineCount } =
+    /*
+     * --------------------------------------------------
+     * 4. Destination
+     * --------------------------------------------------
+     */
+
+    let destinationName =
+      ''
+
+    if (
+      record
+        .destination_location_id
+    ) {
+      const {
+        data,
+        error,
+      } =
+        await supabase
+          .from(
+            'storage_locations'
+          )
+          .select('name')
+          .eq(
+            'id',
+            record
+              .destination_location_id
+          )
+          .maybeSingle()
+
+      if (error) {
+        console.error(
+          'Erreur destination:',
+          error
+        )
+      }
+
+      if (data?.name) {
+        destinationName =
+          data.name
+      }
+    }
+
+    /*
+     * --------------------------------------------------
+     * 5. Nombre de produits
+     * --------------------------------------------------
+     */
+
+    const {
+      count: lineCount,
+      error: lineCountError,
+    } =
       await supabase
-        .from('internal_request_lines')
-        .select('id', {
-          count: 'exact',
-          head: true,
-        })
-        .eq('request_id', record.id)
+        .from(
+          'internal_request_lines'
+        )
+        .select(
+          'id',
+          {
+            count: 'exact',
+            head: true,
+          }
+        )
+        .eq(
+          'request_id',
+          record.id
+        )
+
+    if (lineCountError) {
+      console.error(
+        'Erreur comptage lignes:',
+        lineCountError
+      )
+    }
+
+    /*
+     * --------------------------------------------------
+     * 6. Abonnements Bar Nuku
+     * --------------------------------------------------
+     */
 
     const {
       data: subscriptions,
-      error: subscriptionsError,
-    } = await supabase
-      .from('bar_push_subscriptions')
-      .select('id, endpoint, subscription')
-      .eq('channel', 'bar_nuku')
+      error:
+        subscriptionsError,
+    } =
+      await supabase
+        .from(
+          'bar_push_subscriptions'
+        )
+        .select(
+          `
+            id,
+            user_id,
+            endpoint,
+            subscription,
+            channel
+          `
+        )
+        .eq(
+          'channel',
+          'bar_nuku'
+        )
 
-    if (subscriptionsError) {
+    if (
+      subscriptionsError
+    ) {
+      console.error(
+        'Erreur abonnements:',
+        subscriptionsError
+      )
+
       throw subscriptionsError
     }
 
-    const requestNumber =
-      record.request_number || record.id
+    console.log(
+      'Bar subscriptions found:',
+      subscriptions?.length ??
+        0
+    )
 
-    const body = [
+    console.log(
+      'Subscriptions:',
+      (
+        subscriptions || []
+      ).map((item) => ({
+        id: item.id,
+        userId:
+          item.user_id,
+        channel:
+          item.channel,
+        endpoint:
+          item.endpoint
+            ?.slice(0, 70),
+      }))
+    )
+
+    /*
+     * --------------------------------------------------
+     * 7. Message
+     * --------------------------------------------------
+     */
+
+    const requestNumber =
+      record.request_number ||
+      record.id
+
+    const bodyParts = [
       `${requestNumber} · ${departmentName}`,
       destinationName
         ? `Destination : ${destinationName}`
         : '',
-      typeof lineCount === 'number'
-        ? `${lineCount} produit${lineCount > 1 ? 's' : ''}`
+      typeof lineCount ===
+        'number'
+        ? `${lineCount} produit${
+            lineCount > 1
+              ? 's'
+              : ''
+          }`
         : '',
-    ]
-      .filter(Boolean)
-      .join(' · ')
+    ].filter(Boolean)
+
+    const body =
+      bodyParts.join(' · ')
 
     const notification =
       JSON.stringify({
         title:
           'Nouvelle réquisition Bar Nuku',
         body,
-        requestId: record.id,
+        requestId:
+          record.id,
         requestNumber,
       })
 
+    /*
+     * --------------------------------------------------
+     * 8. Envoi Push
+     * --------------------------------------------------
+     */
+
     let sent = 0
     let removed = 0
+    let failed = 0
 
-    for (const row of subscriptions || []) {
+    const failures: Array<{
+      id: string
+      statusCode?: number
+      message: string
+    }> = []
+
+    for (
+      const row of
+        subscriptions || []
+    ) {
       try {
-        await webpush.sendNotification(
-          row.subscription,
-          notification
+        console.log(
+          'Envoi push vers:',
+          row.id
         )
 
-        sent += 1
-      } catch (error: any) {
-        const statusCode =
-          Number(
-            error?.statusCode ||
-              error?.status
+        await webpush
+          .sendNotification(
+            row.subscription,
+            notification
           )
 
+        sent += 1
+
+        console.log(
+          'Push envoyé:',
+          row.id
+        )
+      } catch (
+        caughtError: any
+      ) {
+        failed += 1
+
+        const statusCode =
+          Number(
+            caughtError
+              ?.statusCode ||
+              caughtError
+                ?.status ||
+              0
+          )
+
+        const message =
+          caughtError
+            ?.body ||
+          caughtError
+            ?.message ||
+          String(
+            caughtError
+          )
+
+        console.error(
+          'Push failed:',
+          {
+            subscriptionId:
+              row.id,
+            endpoint:
+              row.endpoint,
+            statusCode,
+            message,
+          }
+        )
+
+        failures.push({
+          id: row.id,
+          statusCode:
+            statusCode ||
+            undefined,
+          message,
+        })
+
+        /*
+         * Subscription expirée :
+         * on la supprime.
+         */
         if (
           statusCode === 404 ||
           statusCode === 410
         ) {
-          await supabase
-            .from('bar_push_subscriptions')
-            .delete()
-            .eq('id', row.id)
+          const {
+            error:
+              deleteError,
+          } =
+            await supabase
+              .from(
+                'bar_push_subscriptions'
+              )
+              .delete()
+              .eq(
+                'id',
+                row.id
+              )
 
-          removed += 1
-          continue
+          if (
+            deleteError
+          ) {
+            console.error(
+              'Erreur suppression subscription:',
+              deleteError
+            )
+          } else {
+            removed += 1
+          }
         }
-
-        console.error(
-          'Push failed:',
-          row.endpoint,
-          error
-        )
       }
     }
 
+    /*
+     * --------------------------------------------------
+     * 9. Résultat
+     * --------------------------------------------------
+     */
+
+    console.log(
+      'Résultat push:',
+      {
+        requestId:
+          record.id,
+        subscriptionsFound:
+          subscriptions?.length ??
+          0,
+        sent,
+        failed,
+        removed,
+      }
+    )
+
     return Response.json({
       ok: true,
-      requestId: record.id,
+      requestId:
+        record.id,
+      requestNumber,
+      subscriptionsFound:
+        subscriptions?.length ??
+        0,
       sent,
+      failed,
       removed,
+      failures,
     })
-  } catch (caughtError) {
+  } catch (
+    caughtError
+  ) {
     console.error(
       'bar-requisition-push:',
       caughtError
@@ -186,11 +464,16 @@ Deno.serve(async (request) => {
       {
         ok: false,
         error:
-          caughtError instanceof Error
+          caughtError instanceof
+          Error
             ? caughtError.message
-            : String(caughtError),
+            : String(
+                caughtError
+              ),
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     )
   }
 })
