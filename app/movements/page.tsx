@@ -1,1007 +1,2676 @@
 'use client'
 
-import {
-  useMemo,
-  useState,
-} from 'react'
+import { useMemo, useState, type CSSProperties } from 'react'
+import { Page, Card, Badge } from '@/components/ui'
+import { useMasterData, useProducts, useStockMovements } from '@/lib/store'
+import * as XLSX from 'xlsx'
+import { jsPDF } from 'jspdf'
+import { autoTable } from 'jspdf-autotable'
+import { QRCodeSVG } from 'qrcode.react'
+import QRCode from 'qrcode'
+import { ColumnVisibility, useColumnVisibility } from '@/components/column-visibility'
+import type { StockMovement } from '@/lib/types'
 
-import {
-  Badge,
-  Card,
-  Page,
-} from '@/components/ui'
-
-import {
-  useProducts,
-  useStockMovements,
-} from '@/lib/store'
-
-import type {
-  StockMovement,
-  StockMovementType,
-  StockRegularizationStatus,
-} from '@/lib/types'
-
-type MovementFilter =
+type QuantityFilter =
   | 'Tous'
-  | StockMovementType
+  | 'Rupture'
+  | '1-10'
+  | '11-50'
+  | '51-100'
+  | '100+'
+  | 'Sous minimum'
 
-const movementLabels:
-  Record<
-    StockMovementType,
-    string
-  > = {
-  ENTREE_PRODUIT:
-    'Entrée produit',
-  REQUISITION:
-    'Réquisition',
-  TRANSFERT_SORTIE:
-    'Transfert - sortie',
-  TRANSFERT_ENTREE:
-    'Transfert - entrée',
-  RECEPTION_COMMANDE:
-    'Réception fournisseur',
-  AJUSTEMENT_INVENTAIRE:
-    'Ajustement inventaire',
-  CORRECTION_MANUELLE:
-    'Correction manuelle',
-}
+type ExpiryFilter =
+  | 'Toutes'
+  | 'Périmé'
+  | "Moins d'un mois"
+  | 'De 1 à 3 mois'
+  | 'De 3 à 6 mois'
+  | 'De 6 mois à 1 an'
+  | "+ d'un an"
+  | 'Sans DLUO'
 
-function getMovementTone(
-  movement: StockMovement
-):
-  | 'good'
-  | 'warn'
-  | 'danger'
-  | 'info'
-  | 'neutral' {
-  if (
-    movement.type ===
-      'RECEPTION_COMMANDE' ||
-    movement.type ===
-      'TRANSFERT_ENTREE' ||
-    movement.type ===
-      'ENTREE_PRODUIT'
-  ) {
-    return 'good'
-  }
+type ZoneFilter =
+  | 'All'
+  | 'Beverage'
+  | 'Food'
+  | 'Matériel & Accessoires'
 
-  if (
-    movement.type ===
-      'REQUISITION' ||
-    movement.type ===
-      'TRANSFERT_SORTIE'
-  ) {
-    return 'warn'
-  }
+type SortKey =
+  | 'product'
+  | 'category'
+  | 'subcategory'
+  | 'supplier'
+  | 'location'
+  | 'expiry'
+  | 'quantity'
+  | 'price'
+  | 'value'
 
-  if (
-    movement.type ===
-      'AJUSTEMENT_INVENTAIRE'
-  ) {
-    return movement.quantity < 0
-      ? 'danger'
-      : 'info'
-  }
+type SortDirection = 'asc' | 'desc'
 
-  return 'neutral'
-}
-
-function formatQuantity(
+type StockRow = {
+  product: any
+  lot: any
+  quantity: number
   value: number
-) {
-  const prefix =
-    value > 0 ? '+' : ''
-
-  return `${prefix}${value.toLocaleString(
-    'fr-FR'
-  )}`
+  expiryPriority: string
 }
 
-export default function StockMovementsPage() {
+type StockPrintColumnKey =
+  | 'qrProduct'
+  | 'qrCategory'
+  | 'qrSubcategory'
+  | 'qrLocation'
+  | 'reference'
+  | 'product'
+  | 'category'
+  | 'subcategory'
+  | 'supplier'
+  | 'location'
+  | 'lot'
+  | 'expiry'
+  | 'quantity'
+  | 'unit'
+  | 'price'
+  | 'value'
+
+const STOCK_PRINT_COLUMNS: {
+  key: StockPrintColumnKey
+  label: string
+}[] = [
+  { key: 'qrProduct', label: 'QR Produit' },
+  { key: 'qrCategory', label: 'QR Catégorie' },
+  { key: 'qrSubcategory', label: 'QR Sous-catégorie' },
+  { key: 'qrLocation', label: 'QR Lieu' },
+  { key: 'reference', label: 'Référence' },
+  { key: 'product', label: 'Produit' },
+  { key: 'category', label: 'Catégorie' },
+  { key: 'subcategory', label: 'Sous-catégorie' },
+  { key: 'supplier', label: 'Fournisseur' },
+  { key: 'location', label: 'Lieu' },
+  { key: 'lot', label: 'Lot' },
+  { key: 'expiry', label: 'DLUO / DLC' },
+  { key: 'quantity', label: 'Quantité disponible' },
+  { key: 'unit', label: 'Unité' },
+  { key: 'price', label: 'Prix unitaire' },
+  { key: 'value', label: 'Valeur' },
+]
+
+const DEFAULT_STOCK_PRINT_COLUMNS: StockPrintColumnKey[] = [
+  'reference',
+  'product',
+  'location',
+  'expiry',
+  'quantity',
+  'unit',
+]
+
+const STOCK_SCREEN_COLUMNS = [
+  { key: 'reference', label: 'Référence' },
+  { key: 'photo', label: 'Photo' },
+  { key: 'qrProduct', label: 'QR Produit', qr: true },
+  { key: 'product', label: 'Produit' },
+  { key: 'zone', label: 'Zone' },
+  { key: 'category', label: 'Catégorie' },
+  { key: 'qrCategory', label: 'QR Catégorie', qr: true },
+  { key: 'subcategory', label: 'Sous-catégorie' },
+  { key: 'qrSubcategory', label: 'QR Sous-catégorie', qr: true },
+  { key: 'location', label: 'Lieu' },
+  { key: 'qrLocation', label: 'QR Lieu', qr: true },
+  { key: 'lot', label: 'Lot' },
+  { key: 'expiry', label: 'DLUO / DLC' },
+  { key: 'quantity', label: 'Disponible' },
+  { key: 'price', label: 'Prix' },
+  { key: 'value', label: 'Valeur' },
+  { key: 'unitWeight', label: 'Poids unitaire' },
+  { key: 'caseWeight', label: 'Poids conditionnement' },
+  { key: 'totalWeight', label: 'Poids total stock' },
+  { key: 'transfer', label: 'Transfert' },
+]
+
+const STOCK_SCREEN_ESSENTIAL = [
+  'reference',
+  'photo',
+  'qrProduct',
+  'product',
+  'category',
+  'subcategory',
+  'location',
+  'expiry',
+  'quantity',
+]
+
+function formatWeightKg(value: number | null | undefined) {
+  const numeric = Number(value || 0)
+
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return '—'
+  }
+
+  return `${numeric.toLocaleString('fr-FR', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 3,
+  })} kg`
+}
+
+function normalizeZoneText(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+}
+
+function detectProductZone(product: any): ZoneFilter {
+  const explicitZone = String(
+    product.zone ||
+      product.family ||
+      product.inventoryScope ||
+      ''
+  ).trim()
+
+  if (
+    explicitZone === 'Beverage' ||
+    explicitZone === 'Food' ||
+    explicitZone === 'Matériel & Accessoires'
+  ) {
+    return explicitZone
+  }
+
+  const text = normalizeZoneText(
+    `${product.category || ''} ${product.subcategory || ''} ${
+      product.name || ''
+    }`
+  )
+
+  const foodWords = [
+    'food',
+    'aliment',
+    'epicerie',
+    'fruit',
+    'legume',
+    'viande',
+    'poisson',
+    'produit frais',
+    'surgele',
+    'cuisine',
+  ]
+
+  const materialWords = [
+    'materiel',
+    'accessoire',
+    'verrerie',
+    'verre',
+    'equipement',
+    'ustensile',
+    'barware',
+    'assiette',
+    'couvert',
+  ]
+
+  if (
+    foodWords.some((word) =>
+      text.includes(word)
+    )
+  ) {
+    return 'Food'
+  }
+
+  if (
+    materialWords.some((word) =>
+      text.includes(word)
+    )
+  ) {
+    return 'Matériel & Accessoires'
+  }
+
+  return 'Beverage'
+}
+
+function getProductPhoto(product: any) {
+  return (
+    product.photoUrl ||
+    product.photo_url ||
+    product.photo ||
+    product.imageUrl ||
+    product.image_url ||
+    ''
+  )
+}
+
+export default function Stocks() {
+  const { items, save: saveProducts } = useProducts()
+  const { items: masterData } = useMasterData()
   const {
-    items: movements,
-    save: saveMovements,
+    items: stockMovements,
+    save: saveStockMovements,
   } = useStockMovements()
 
-  const {
-    items: products,
-    save: saveProducts,
-  } = useProducts()
+  const [search, setSearch] = useState('')
+  const [categoryFilter, setCategoryFilter] =
+    useState('Toutes')
+  const [subcategoryFilter, setSubcategoryFilter] =
+    useState('Toutes')
+  const [supplierFilter, setSupplierFilter] =
+    useState('Tous')
+  const [locationFilter, setLocationFilter] =
+    useState('Tous')
 
-  const [
-    typeFilter,
-    setTypeFilter,
-  ] =
-    useState<MovementFilter>(
-      'Tous'
+  const [zoneFilter, setZoneFilter] =
+    useState<ZoneFilter>('All')
+
+  const [quantityFilter, setQuantityFilter] =
+    useState<QuantityFilter>('Tous')
+
+  const [expiryFilter, setExpiryFilter] =
+    useState<ExpiryFilter>('Toutes')
+
+  const [sortKey, setSortKey] =
+    useState<SortKey>('product')
+
+  const [sortDirection, setSortDirection] =
+    useState<SortDirection>('asc')
+
+  const stockDisplay = useColumnVisibility(
+    'nukustock_display_stocks_v1',
+    STOCK_SCREEN_ESSENTIAL
+  )
+
+  const [printColumnsOpen, setPrintColumnsOpen] =
+    useState(false)
+
+  const [stockPrintColumns, setStockPrintColumns] =
+    useState<StockPrintColumnKey[]>(
+      DEFAULT_STOCK_PRINT_COLUMNS
     )
 
-  const [
-    productFilter,
-    setProductFilter,
-  ] = useState('Tous')
-
-  const [
-    locationFilter,
-    setLocationFilter,
-  ] = useState('Tous')
-
-  const [
-    dateFrom,
-    setDateFrom,
-  ] = useState('')
-
-  const [
-    dateTo,
-    setDateTo,
-  ] = useState('')
-
-  const [
-    regularizationFilter,
-    setRegularizationFilter,
-  ] = useState<
-    'Tous' | StockRegularizationStatus
-  >('Tous')
-
-  const [
-    regularizeMovementId,
-    setRegularizeMovementId,
-  ] = useState('')
-
-  const [regSupplier, setRegSupplier] =
+  const [quickEntryOpen, setQuickEntryOpen] =
+    useState(false)
+  const [quickProductId, setQuickProductId] =
     useState('')
-  const [regQuote, setRegQuote] =
+  const [quickQuantity, setQuickQuantity] =
+    useState(1)
+  const [quickLocation, setQuickLocation] =
     useState('')
-  const [regBc, setRegBc] =
+  const [quickLotNumber, setQuickLotNumber] =
     useState('')
-  const [regInvoice, setRegInvoice] =
+  const [quickExpiry, setQuickExpiry] =
     useState('')
-  const [regUnitPrice, setRegUnitPrice] =
-    useState('')
-  const [regNote, setRegNote] =
+  const [quickNeedsRegularization, setQuickNeedsRegularization] =
+    useState(true)
+  const [quickNote, setQuickNote] =
     useState('')
 
-  const locations =
-    useMemo(() => {
-      const values =
-        new Set<string>()
+  const [transferOpen, setTransferOpen] = useState(false)
+  const [transferProductId, setTransferProductId] = useState('')
+  const [transferLotId, setTransferLotId] = useState('')
+  const [transferFromLocation, setTransferFromLocation] = useState('')
+  const [transferToLocation, setTransferToLocation] = useState('')
+  const [transferQuantity, setTransferQuantity] = useState(1)
 
-      movements.forEach(
-        (movement) => {
-          if (
-            movement.fromLocation
-          ) {
-            values.add(
-              movement.fromLocation
+
+  const toggleStockPrintColumn = (
+    key: StockPrintColumnKey
+  ) => {
+    setStockPrintColumns((current) =>
+      current.includes(key)
+        ? current.filter((item) => item !== key)
+        : [...current, key]
+    )
+  }
+
+  const getExpiryPriority = (
+    expiryDate: string
+  ) => {
+    if (!expiryDate) {
+      return 'Sans DLUO'
+    }
+
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    const target = new Date(
+      `${expiryDate}T00:00:00`
+    )
+    target.setHours(0, 0, 0, 0)
+
+    const days =
+      (target.getTime() -
+        today.getTime()) /
+      (1000 * 60 * 60 * 24)
+
+    if (days < 0) return 'Périmé'
+    if (days < 30) {
+      return "Moins d'un mois"
+    }
+    if (days < 90) {
+      return 'De 1 à 3 mois'
+    }
+    if (days < 180) {
+      return 'De 3 à 6 mois'
+    }
+    if (days < 365) {
+      return 'De 6 mois à 1 an'
+    }
+
+    return "+ d'un an"
+  }
+
+  const getExpiryTone = (
+    expiryDate: string
+  ):
+    | 'danger'
+    | 'warn'
+    | 'good'
+    | 'neutral'
+    | 'info' => {
+    const priority =
+      getExpiryPriority(expiryDate)
+
+    if (
+      priority === 'Périmé' ||
+      priority === "Moins d'un mois"
+    ) {
+      return 'danger'
+    }
+
+    if (
+      priority === 'De 1 à 3 mois' ||
+      priority === 'De 3 à 6 mois'
+    ) {
+      return 'warn'
+    }
+
+    if (
+      priority === 'De 6 mois à 1 an'
+    ) {
+      return 'info'
+    }
+
+    if (priority === "+ d'un an") {
+      return 'good'
+    }
+
+    return 'neutral'
+  }
+
+  const categories = useMemo(
+    () =>
+      [
+        ...new Set(
+          items
+            .map((product) =>
+              product.category
             )
+            .filter(Boolean)
+        ),
+      ].sort((a, b) =>
+        a.localeCompare(b, 'fr')
+      ),
+    [items]
+  )
+
+  const subcategories = useMemo(
+    () =>
+      [
+        ...new Set(
+          items
+            .filter(
+              (product) =>
+                categoryFilter ===
+                  'Toutes' ||
+                product.category ===
+                  categoryFilter
+            )
+            .map((product) =>
+              product.subcategory
+            )
+            .filter(Boolean)
+        ),
+      ].sort((a, b) =>
+        a.localeCompare(b, 'fr')
+      ),
+    [items, categoryFilter]
+  )
+
+  const suppliers = useMemo(
+    () =>
+      [
+        ...new Set(
+          items
+            .map((product) =>
+              product.mainSupplier
+            )
+            .filter(Boolean)
+        ),
+      ].sort((a, b) =>
+        a.localeCompare(b, 'fr')
+      ),
+    [items]
+  )
+
+
+  const locations = useMemo(
+    () =>
+      [
+        ...new Set(
+          items.flatMap((product) =>
+            product.lots
+              .map((lot) => lot.location)
+              .filter(Boolean)
+          )
+        ),
+      ].sort((a, b) =>
+        a.localeCompare(b, 'fr')
+      ),
+    [items]
+  )
+
+  const allRows =
+    useMemo<StockRow[]>(() => {
+      return items.flatMap(
+        (product) => {
+          /*
+           * Même si un produit n'a aucun lot,
+           * on l'affiche avec un stock à zéro.
+           */
+          if (!product.lots.length) {
+            return [
+              {
+                product,
+                lot: {
+                  id: `empty-${product.id}`,
+                  lotNumber: '',
+                  expiry: '',
+                  location: '',
+                  quantity: 0,
+                },
+                quantity: 0,
+                value: 0,
+                expiryPriority:
+                  'Sans DLUO',
+              },
+            ]
+          }
+
+          return product.lots.map(
+            (lot) => {
+              const quantity = Math.max(
+                0,
+                Number(
+                  lot.quantity
+                ) || 0
+              )
+
+              return {
+                product,
+                lot,
+                quantity,
+                value:
+                  quantity *
+                  Math.max(
+                    0,
+                    Number(
+                      product.purchasePrice
+                    ) || 0
+                  ),
+                expiryPriority:
+                  getExpiryPriority(
+                    lot.expiry
+                  ),
+              }
+            }
+          )
+        }
+      )
+    }, [items])
+
+  const matchesQuantityFilter = (
+    quantity: number,
+    minStock: number
+  ) => {
+    switch (quantityFilter) {
+      case 'Rupture':
+        return quantity === 0
+
+      case '1-10':
+        return (
+          quantity >= 1 &&
+          quantity <= 10
+        )
+
+      case '11-50':
+        return (
+          quantity >= 11 &&
+          quantity <= 50
+        )
+
+      case '51-100':
+        return (
+          quantity >= 51 &&
+          quantity <= 100
+        )
+
+      case '100+':
+        return quantity > 100
+
+      case 'Sous minimum':
+        return quantity < minStock
+
+      default:
+        return true
+    }
+  }
+
+  const filteredRows = useMemo(
+    () => {
+      const query = search
+        .trim()
+        .toLowerCase()
+
+      const rows = allRows.filter(
+        ({
+          product,
+          lot,
+          quantity,
+          expiryPriority,
+        }) => {
+          const haystack =
+            `${product.internalRef || ''} ${
+              product.name || ''
+            } ${
+              product.category || ''
+            } ${
+              product.subcategory || ''
+            } ${
+              product.mainSupplier || ''
+            } ${lot.location || ''} ${
+              lot.lotNumber || ''
+            }`
+              .toLowerCase()
+
+          if (
+            query &&
+            !haystack.includes(query)
+          ) {
+            return false
           }
 
           if (
-            movement.toLocation
+            zoneFilter !== 'All' &&
+            detectProductZone(product) !== zoneFilter
           ) {
-            values.add(
-              movement.toLocation
-            )
+            return false
           }
+
+          if (
+            categoryFilter !==
+              'Toutes' &&
+            product.category !==
+              categoryFilter
+          ) {
+            return false
+          }
+
+          if (
+            subcategoryFilter !==
+              'Toutes' &&
+            product.subcategory !==
+              subcategoryFilter
+          ) {
+            return false
+          }
+
+          if (
+            supplierFilter !==
+              'Tous' &&
+            product.mainSupplier !==
+              supplierFilter
+          ) {
+            return false
+          }
+
+          if (
+            locationFilter !==
+              'Tous' &&
+            lot.location !==
+              locationFilter
+          ) {
+            return false
+          }
+
+          if (
+            expiryFilter !==
+              'Toutes' &&
+            expiryPriority !==
+              expiryFilter
+          ) {
+            return false
+          }
+
+          if (
+            !matchesQuantityFilter(
+              quantity,
+              Math.max(
+                0,
+                Number(
+                  product.minStock
+                ) || 0
+              )
+            )
+          ) {
+            return false
+          }
+
+          return true
         }
       )
 
-      return [
-        ...values,
-      ].sort((a, b) =>
-        a.localeCompare(
-          b,
-          'fr',
-          {
-            numeric: true,
-            sensitivity:
-              'base',
+      return [...rows].sort(
+        (a, b) => {
+          const getValue = (
+            row: StockRow
+          ) => {
+            switch (sortKey) {
+              case 'category':
+                return (
+                  row.product
+                    .category || ''
+                )
+
+              case 'subcategory':
+                return (
+                  row.product
+                    .subcategory || ''
+                )
+
+              case 'supplier':
+                return (
+                  row.product
+                    .mainSupplier || ''
+                )
+
+              case 'location':
+                return (
+                  row.lot.location || ''
+                )
+
+              case 'expiry':
+                return (
+                  row.lot.expiry ||
+                  '9999-12-31'
+                )
+
+              case 'quantity':
+                return row.quantity
+
+              case 'price':
+                return (
+                  Number(
+                    row.product
+                      .purchasePrice
+                  ) || 0
+                )
+
+              case 'value':
+                return row.value
+
+              case 'product':
+              default:
+                return (
+                  row.product.name ||
+                  ''
+                )
+            }
           }
-        )
+
+          const av = getValue(a)
+          const bv = getValue(b)
+
+          const result =
+            typeof av === 'number' &&
+            typeof bv === 'number'
+              ? av - bv
+              : String(
+                  av
+                ).localeCompare(
+                  String(bv),
+                  'fr'
+                )
+
+          return sortDirection ===
+            'asc'
+            ? result
+            : -result
+        }
       )
-    }, [movements])
-
-  const filtered =
-    useMemo(() => {
-      const fromTime =
-        dateFrom
-          ? new Date(
-              `${dateFrom}T00:00:00`
-            ).getTime()
-          : null
-
-      const toTime =
-        dateTo
-          ? new Date(
-              `${dateTo}T23:59:59`
-            ).getTime()
-          : null
-
-      return [
-        ...movements,
-      ]
-        .filter(
-          (movement) => {
-            if (
-              typeFilter !==
-                'Tous' &&
-              movement.type !==
-                typeFilter
-            ) {
-              return false
-            }
-
-            if (
-              productFilter !==
-                'Tous' &&
-              movement.productId !==
-                productFilter
-            ) {
-              return false
-            }
-
-            if (
-              locationFilter !==
-                'Tous' &&
-              movement.fromLocation !==
-                locationFilter &&
-              movement.toLocation !==
-                locationFilter
-            ) {
-              return false
-            }
-
-            const time =
-              new Date(
-                movement.createdAt
-              ).getTime()
-
-            if (
-              fromTime !== null &&
-              time < fromTime
-            ) {
-              return false
-            }
-
-            if (
-              toTime !== null &&
-              time > toTime
-            ) {
-              return false
-            }
-
-            if (
-              regularizationFilter !==
-                'Tous' &&
-              (movement.regularizationStatus ||
-                'NON_REQUIS') !==
-                regularizationFilter
-            ) {
-              return false
-            }
-
-            return true
-          }
-        )
-        .sort(
-          (a, b) =>
-            new Date(
-              b.createdAt
-            ).getTime() -
-            new Date(
-              a.createdAt
-            ).getTime()
-        )
-    }, [
-      movements,
-      typeFilter,
-      productFilter,
+    },
+    [
+      allRows,
+      search,
+      zoneFilter,
+      categoryFilter,
+      subcategoryFilter,
+      supplierFilter,
       locationFilter,
-      dateFrom,
-      dateTo,
-      regularizationFilter,
-    ])
+      quantityFilter,
+      expiryFilter,
+      sortKey,
+      sortDirection,
+    ]
+  )
 
-  const totalEntries =
-    filtered
-      .filter(
-        (movement) =>
-          movement.quantity > 0
-      )
-      .reduce(
-        (sum, movement) =>
-          sum +
-          movement.quantity,
-        0
-      )
-
-  const totalOutputs =
-    Math.abs(
-      filtered
-        .filter(
-          (movement) =>
-            movement.quantity < 0
-        )
-        .reduce(
-          (
-            sum,
-            movement
-          ) =>
-            sum +
-            movement.quantity,
-          0
-        )
-    )
-
-  const resetFilters = () => {
-    setTypeFilter('Tous')
-    setProductFilter(
-      'Tous'
-    )
-    setLocationFilter(
-      'Tous'
-    )
-    setDateFrom('')
-    setDateTo('')
-    setRegularizationFilter('Tous')
-  }
-
-  const movementToRegularize =
-    movements.find(
-      (movement) =>
-        movement.id ===
-        regularizeMovementId
-    )
-
-  const regularizationGroup =
-    useMemo(() => {
-      if (!movementToRegularize) {
-        return []
-      }
-
-      const reference =
-        movementToRegularize.referenceId
-
-      if (!reference) {
-        return [
-          movementToRegularize,
-        ]
-      }
-
-      return movements.filter(
-        (movement) =>
-          movement.referenceId ===
-            reference &&
-          movement.type ===
-            'ENTREE_PRODUIT'
-      )
-    }, [
-      movements,
-      movementToRegularize,
-    ])
-
-  const openRegularization = (
-    movement: StockMovement
-  ) => {
-    setRegularizeMovementId(movement.id)
-    setRegSupplier(
-      movement.supplierName || ''
-    )
-    setRegQuote(
-      movement.quoteNumber || ''
-    )
-    setRegBc(
-      movement.purchaseOrderNumber || ''
-    )
-    setRegInvoice(
-      movement.invoiceNumber || ''
-    )
-    setRegUnitPrice(
-      movement.unitPrice !== undefined
-        ? String(movement.unitPrice)
-        : ''
-    )
-    setRegNote(
-      movement.specialNote ||
-        movement.note ||
-        ''
-    )
-  }
-
-  const saveRegularization = () => {
-    if (!movementToRegularize) return
-
-    const parsedPrice =
-      regUnitPrice.trim() === ''
-        ? undefined
-        : Math.max(
-            0,
-            Number(regUnitPrice) || 0
+  const filteredProductIds =
+    useMemo(
+      () =>
+        new Set(
+          filteredRows.map(
+            (row) =>
+              row.product.id
           )
-
-    const now =
-      new Date().toISOString()
-
-    const groupIds =
-      new Set(
-        regularizationGroup.map(
-          (movement) =>
-            movement.id
-        )
-      )
-
-    saveMovements(
-      movements.map((movement) =>
-        groupIds.has(
-          movement.id
-        )
-          ? {
-              ...movement,
-              regularizationStatus:
-                'REGULARISE',
-              regularizedAt: now,
-              supplierName:
-                regSupplier.trim() ||
-                undefined,
-              quoteNumber:
-                regQuote.trim() ||
-                undefined,
-              purchaseOrderNumber:
-                regBc.trim() ||
-                undefined,
-              invoiceNumber:
-                regInvoice.trim() ||
-                undefined,
-              unitPrice:
-                regularizationGroup.length ===
-                  1
-                  ? parsedPrice
-                  : movement.unitPrice,
-              specialNote:
-                regNote.trim() ||
-                undefined,
-              note:
-                regNote.trim() ||
-                movement.note,
-            }
-          : movement
-      )
+        ),
+      [filteredRows]
     )
 
-    if (
-      regularizationGroup.length ===
-        1 &&
-      parsedPrice !== undefined &&
-      parsedPrice >= 0
-    ) {
-      saveProducts(
-        products.map((product) =>
-          product.id ===
-          movementToRegularize.productId
-            ? {
-                ...product,
-                purchasePrice:
-                  parsedPrice,
-                priceUpdatedAt:
-                  now,
-                mainSupplier:
-                  regSupplier.trim() ||
-                  product.mainSupplier,
-              }
-            : product
+  const totalQty =
+    filteredRows.reduce(
+      (sum, row) =>
+        sum + row.quantity,
+      0
+    )
+
+  const totalValue =
+    filteredRows.reduce(
+      (sum, row) =>
+        sum + row.value,
+      0
+    )
+
+  const expiredCount =
+    filteredRows.filter(
+      (row) =>
+        row.expiryPriority ===
+        'Périmé'
+    ).length
+
+  const underOneMonthCount =
+    filteredRows.filter(
+      (row) =>
+        row.expiryPriority ===
+        "Moins d'un mois"
+    ).length
+
+  const quickEntryLocations = useMemo(
+    () =>
+      masterData
+        .filter(
+          (item) =>
+            item.type === 'location' &&
+            item.active !== false
         )
-      )
+        .map((item) => item.name)
+        .sort((a, b) =>
+          a.localeCompare(b, 'fr', {
+            numeric: true,
+            sensitivity: 'base',
+          })
+        ),
+    [masterData]
+  )
+
+  const resetQuickEntry = () => {
+    setQuickProductId('')
+    setQuickQuantity(1)
+    setQuickLocation('')
+    setQuickLotNumber('')
+    setQuickExpiry('')
+    setQuickNeedsRegularization(true)
+    setQuickNote('')
+  }
+
+  const saveQuickEntry = () => {
+    const product = items.find(
+      (item) => item.id === quickProductId
+    )
+
+    if (!product) {
+      window.alert('Choisis un produit.')
+      return
     }
 
-    setRegularizeMovementId('')
+    const quantity = Math.max(
+      0,
+      Number(quickQuantity) || 0
+    )
+
+    if (quantity <= 0) {
+      window.alert(
+        'La quantité doit être supérieure à 0.'
+      )
+      return
+    }
+
+    if (!quickLocation) {
+      window.alert('Choisis un lieu de stockage.')
+      return
+    }
+
+    const sameLotIndex = product.lots.findIndex(
+      (lot) =>
+        lot.location === quickLocation &&
+        (lot.lotNumber || '') ===
+          quickLotNumber.trim() &&
+        (lot.expiry || '') === quickExpiry
+    )
+
+    const nextLots = product.lots.map(
+      (lot) => ({ ...lot })
+    )
+
+    if (sameLotIndex >= 0) {
+      nextLots[sameLotIndex] = {
+        ...nextLots[sameLotIndex],
+        quantity:
+          Math.max(
+            0,
+            Number(
+              nextLots[sameLotIndex].quantity
+            ) || 0
+          ) + quantity,
+      }
+    } else {
+      nextLots.push({
+        id: crypto.randomUUID(),
+        lotNumber: quickLotNumber.trim(),
+        expiry: quickExpiry,
+        location: quickLocation,
+        quantity,
+      })
+    }
+
+    saveProducts(
+      items.map((item) =>
+        item.id === product.id
+          ? {
+              ...item,
+              lots: nextLots,
+            }
+          : item
+      )
+    )
+
+    const now = new Date().toISOString()
+
+    const movement: StockMovement = {
+      id: crypto.randomUUID(),
+      createdAt: now,
+      type: 'ENTREE_PRODUIT',
+      productId: product.id,
+      productName: product.name,
+      internalRef: product.internalRef,
+      quantity,
+      toLocation: quickLocation,
+      lotNumber:
+        quickLotNumber.trim() || undefined,
+      expiry: quickExpiry || undefined,
+      referenceType: 'product',
+      referenceId: `RAP-${Date.now()
+        .toString()
+        .slice(-8)}`,
+      note:
+        quickNote.trim() ||
+        'Entrée rapide de stock',
+      specialNote:
+        quickNote.trim() || undefined,
+      regularizationStatus:
+        quickNeedsRegularization
+          ? 'A_REGULARISER'
+          : 'NON_REQUIS',
+    }
+
+    saveStockMovements([
+      movement,
+      ...stockMovements,
+    ])
+
+    setQuickEntryOpen(false)
+    resetQuickEntry()
 
     window.alert(
-      `${
-        movementToRegularize.referenceId ||
-        'Entrée'
-      } régularisée : ${
-        regularizationGroup.length
-      } ligne(s). Le stock n’a pas été ajouté une seconde fois.`
+      quickNeedsRegularization
+        ? `Entrée ajoutée : +${quantity} ${product.unit} de ${product.name} dans ${quickLocation}. Mouvement marqué À régulariser.`
+        : `Entrée ajoutée : +${quantity} ${product.unit} de ${product.name} dans ${quickLocation}.`
     )
   }
 
-  const exportCsv = () => {
-    const rows = [
-      [
-        'Date',
-        'Type',
-        'Référence',
-        'Produit',
-        'Quantité',
-        'Lieu source',
-        'Lieu destination',
-        'Lot',
-        'DLUO/DLC',
-        'Référence opération',
-        'Utilisateur',
-        'Statut régularisation',
-        'Fournisseur',
-        'Devis',
-        'BC',
-        'Facture',
-        'Prix unitaire',
-        'Note',
+  const openTransfer = (product: any, lot: any, quantity: number) => {
+    if (!lot.location) {
+      window.alert('Ce stock n’a pas de lieu source.')
+      return
+    }
+    if (quantity <= 0) {
+      window.alert('Aucun stock disponible à transférer.')
+      return
+    }
+
+    setTransferProductId(product.id)
+    setTransferLotId(lot.id)
+    setTransferFromLocation(lot.location)
+    setTransferToLocation('')
+    setTransferQuantity(1)
+    setTransferOpen(true)
+  }
+
+  const saveTransfer = () => {
+    const product = items.find((item) => item.id === transferProductId)
+    if (!product) {
+      window.alert('Produit introuvable.')
+      return
+    }
+
+    const sourceIndex = product.lots.findIndex(
+      (lot) => lot.id === transferLotId
+    )
+    if (sourceIndex < 0) {
+      window.alert('Lot source introuvable.')
+      return
+    }
+
+    const sourceLot = product.lots[sourceIndex]
+    const available = Math.max(0, Number(sourceLot.quantity) || 0)
+    const quantity = Math.max(0, Number(transferQuantity) || 0)
+
+    if (!transferToLocation) {
+      window.alert('Choisis le lieu de destination.')
+      return
+    }
+    if (transferToLocation === transferFromLocation) {
+      window.alert('Le lieu de destination doit être différent du lieu source.')
+      return
+    }
+    if (quantity <= 0) {
+      window.alert('La quantité doit être supérieure à 0.')
+      return
+    }
+    if (quantity > available) {
+      window.alert(`Stock insuffisant. Disponible : ${available} ${product.unit || ''}.`)
+      return
+    }
+
+    const nextLots = product.lots.map((lot) => ({ ...lot }))
+    nextLots[sourceIndex] = {
+      ...nextLots[sourceIndex],
+      quantity: available - quantity,
+    }
+
+    const destinationIndex = nextLots.findIndex(
+      (lot, index) =>
+        index !== sourceIndex &&
+        lot.location === transferToLocation &&
+        (lot.lotNumber || '') === (sourceLot.lotNumber || '') &&
+        (lot.expiry || '') === (sourceLot.expiry || '')
+    )
+
+    if (destinationIndex >= 0) {
+      nextLots[destinationIndex] = {
+        ...nextLots[destinationIndex],
+        quantity:
+          Math.max(0, Number(nextLots[destinationIndex].quantity) || 0) +
+          quantity,
+      }
+    } else {
+      nextLots.push({
+        id: crypto.randomUUID(),
+        lotNumber: sourceLot.lotNumber || '',
+        expiry: sourceLot.expiry || '',
+        location: transferToLocation,
+        quantity,
+      })
+    }
+
+    saveProducts(
+      items.map((item) =>
+        item.id === product.id
+          ? { ...item, lots: nextLots }
+          : item
+      )
+    )
+
+    const transferReference =
+      `TRF-${Date.now().toString().slice(-8)}`
+
+    const createdAt =
+      new Date().toISOString()
+
+    const movements: StockMovement[] = [
+      {
+        id: crypto.randomUUID(),
+        createdAt,
+        type: 'TRANSFERT_SORTIE',
+        productId: product.id,
+        productName: product.name,
+        internalRef: product.internalRef,
+        quantity: -quantity,
+        fromLocation: transferFromLocation,
+        toLocation: transferToLocation,
+        lotNumber: sourceLot.lotNumber || undefined,
+        expiry: sourceLot.expiry || undefined,
+        referenceType: 'transfer',
+        referenceId: transferReference,
+        note: `Transfert de ${transferFromLocation} vers ${transferToLocation}`,
+        regularizationStatus: 'NON_REQUIS',
+      },
+      {
+        id: crypto.randomUUID(),
+        createdAt,
+        type: 'TRANSFERT_ENTREE',
+        productId: product.id,
+        productName: product.name,
+        internalRef: product.internalRef,
+        quantity,
+        fromLocation: transferFromLocation,
+        toLocation: transferToLocation,
+        lotNumber: sourceLot.lotNumber || undefined,
+        expiry: sourceLot.expiry || undefined,
+        referenceType: 'transfer',
+        referenceId: transferReference,
+        note: `Transfert de ${transferFromLocation} vers ${transferToLocation}`,
+        regularizationStatus: 'NON_REQUIS',
+      },
+    ]
+
+    saveStockMovements([
+      ...movements,
+      ...stockMovements,
+    ])
+
+    setTransferOpen(false)
+    window.alert(
+      `Transfert effectué : ${quantity} ${product.unit || ''} de ${product.name} vers ${transferToLocation}.`
+    )
+  }
+
+  const resetFilters = () => {
+    setSearch('')
+    setCategoryFilter('Toutes')
+    setSubcategoryFilter('Toutes')
+    setSupplierFilter('Tous')
+    setLocationFilter('Tous')
+    setZoneFilter('All')
+    setQuantityFilter('Tous')
+    setExpiryFilter('Toutes')
+  }
+
+  const toggleSort = (
+    key: SortKey
+  ) => {
+    if (sortKey === key) {
+      setSortDirection(
+        (current) =>
+          current === 'asc'
+            ? 'desc'
+            : 'asc'
+      )
+      return
+    }
+
+    setSortKey(key)
+    setSortDirection('asc')
+  }
+
+  const sortIndicator = (
+    key: SortKey
+  ) =>
+    sortKey === key
+      ? sortDirection === 'asc'
+        ? ' ▲'
+        : ' ▼'
+      : ''
+
+  const getExportRows = () =>
+    filteredRows.map(
+      ({
+        product,
+        lot,
+        quantity,
+        value,
+      }) => ({
+        Référence:
+          product.internalRef || '',
+        Produit: product.name || '',
+        Zone:
+          detectProductZone(product),
+        Catégorie:
+          product.category || '',
+        'Sous-catégorie':
+          product.subcategory || '',
+        Marque:
+          product.brand || '',
+        Fournisseur:
+          product.mainSupplier || '',
+        Lieu:
+          lot.location || '',
+        Lot:
+          lot.lotNumber || '',
+        'DLUO / DLC':
+          lot.expiry
+            ? new Date(
+                `${lot.expiry}T00:00:00`
+              ).toLocaleDateString(
+                'fr-FR'
+              )
+            : 'Sans DLUO',
+        Disponible: quantity,
+        Unité:
+          product.unit || '',
+        'Prix unitaire XPF':
+          Math.max(
+            0,
+            Number(
+              product.purchasePrice
+            ) || 0
+          ),
+        'Valeur XPF': value,
+      })
+    )
+
+  const exportExcel = () => {
+    const rows = getExportRows()
+
+    const worksheet =
+      XLSX.utils.json_to_sheet(
+        rows
+      )
+
+    worksheet['!cols'] = [
+      { wch: 20 },
+      { wch: 32 },
+      { wch: 24 },
+      { wch: 20 },
+      { wch: 22 },
+      { wch: 18 },
+      { wch: 24 },
+      { wch: 22 },
+      { wch: 18 },
+      { wch: 16 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 18 },
+      { wch: 18 },
+    ]
+
+    const workbook =
+      XLSX.utils.book_new()
+
+    XLSX.utils.book_append_sheet(
+      workbook,
+      worksheet,
+      'Stock disponible'
+    )
+
+    XLSX.writeFile(
+      workbook,
+      `NukuStock-Stock-${new Date()
+        .toISOString()
+        .slice(0, 10)}.xlsx`
+    )
+  }
+
+  const exportPdf = () => {
+    const doc = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: 'a4',
+    })
+
+    doc.setFontSize(17)
+    doc.text(
+      'NUKUTEPIPI - NukuStock',
+      12,
+      13
+    )
+
+    doc.setFontSize(12)
+    doc.text(
+      `État du stock disponible - Zone : ${zoneFilter}`,
+      12,
+      19
+    )
+
+    doc.setFontSize(8)
+    doc.text(
+      `Édité le ${new Date().toLocaleDateString(
+        'fr-FR'
+      )} - ${filteredProductIds.size} référence(s) - ${totalQty.toLocaleString(
+        'fr-FR'
+      )} unité(s)`,
+      12,
+      24
+    )
+
+    autoTable(doc, {
+      startY: 29,
+
+      head: [
+        [
+          'Référence',
+          'Produit',
+          'Catégorie',
+          'Sous-cat.',
+          'Lieu',
+          'DLUO/DLC',
+          'Disponible',
+          'Prix XPF',
+          'Valeur XPF',
+        ],
       ],
 
-      ...filtered.map(
-        (movement) => [
-          new Date(
-            movement.createdAt
+      body: filteredRows.map(
+        ({
+          product,
+          lot,
+          quantity,
+          value,
+        }) => [
+          product.internalRef ||
+            '',
+          product.name || '',
+          product.category ||
+            '',
+          product.subcategory ||
+            '',
+          lot.location ||
+            'Non affecté',
+          lot.expiry
+            ? new Date(
+                `${lot.expiry}T00:00:00`
+              ).toLocaleDateString(
+                'fr-FR'
+              )
+            : 'Sans DLUO',
+          `${quantity} ${
+            product.unit || ''
+          }`,
+          Math.max(
+            0,
+            Number(
+              product.purchasePrice
+            ) || 0
           ).toLocaleString(
             'fr-FR'
           ),
-
-          movementLabels[
-            movement.type
-          ],
-
-          movement.internalRef ||
-            '',
-
-          movement.productName,
-
-          movement.quantity,
-
-          movement.fromLocation ||
-            '',
-
-          movement.toLocation ||
-            '',
-
-          movement.lotNumber ||
-            '',
-
-          movement.expiry ||
-            '',
-
-          movement.referenceId ||
-            '',
-
-          movement.user ||
-            '',
-
-          movement.regularizationStatus ||
-            'NON_REQUIS',
-
-          movement.supplierName ||
-            '',
-
-          movement.quoteNumber ||
-            '',
-
-          movement.purchaseOrderNumber ||
-            '',
-
-          movement.invoiceNumber ||
-            '',
-
-          movement.unitPrice ??
-            '',
-
-          movement.specialNote ||
-            movement.note ||
-            '',
+          value.toLocaleString(
+            'fr-FR'
+          ),
         ]
       ),
-    ]
 
-    const escapeCsv = (
-      value: unknown
-    ) =>
-      `"${String(
-        value ?? ''
-      ).replaceAll(
-        '"',
-        '""'
-      )}"`
+      styles: {
+        fontSize: 6.5,
+        cellPadding: 1.5,
+        overflow: 'linebreak',
+      },
 
-    const csv =
-      '\ufeff' +
-      rows
-        .map((row) =>
-          row
-            .map(escapeCsv)
-            .join(';')
-        )
-        .join('\n')
+      headStyles: {
+        fontStyle: 'bold',
+      },
 
-    const blob =
-      new Blob(
-        [csv],
-        {
-          type:
-            'text/csv;charset=utf-8',
-        }
-      )
+      margin: {
+        left: 7,
+        right: 7,
+      },
+    })
 
-    const url =
-      URL.createObjectURL(
-        blob
-      )
-
-    const link =
-      document.createElement(
-        'a'
-      )
-
-    link.href = url
-
-    link.download =
-      `NukuStock-Mouvements-${new Date()
+    doc.save(
+      `NukuStock-Stock-${new Date()
         .toISOString()
-        .slice(
+        .slice(0, 10)}.pdf`
+    )
+  }
+
+  const getStockPrintValue = (
+    key: StockPrintColumnKey,
+    row: StockRow
+  ) => {
+    const { product, lot, quantity, value } = row
+
+    switch (key) {
+      case 'qrProduct':
+        return `NUKUSTOCK|PRODUCT|${product.internalRef || product.id}`
+      case 'qrCategory':
+        return `NUKUSTOCK|CATEGORY|${product.category || 'Sans catégorie'}`
+      case 'qrSubcategory':
+        return `NUKUSTOCK|SUBCATEGORY|${product.subcategory || 'Sans sous-catégorie'}`
+      case 'qrLocation':
+        return `NUKUSTOCK|LOCATION|${lot.location || 'Non affecté'}`
+      case 'reference':
+        return product.internalRef || ''
+      case 'product':
+        return product.name || ''
+      case 'category':
+        return product.category || ''
+      case 'subcategory':
+        return product.subcategory || ''
+      case 'supplier':
+        return product.mainSupplier || ''
+      case 'location':
+        return lot.location || 'Non affecté'
+      case 'lot':
+        return lot.lotNumber || ''
+      case 'expiry':
+        return lot.expiry
+          ? new Date(
+              `${lot.expiry}T00:00:00`
+            ).toLocaleDateString('fr-FR')
+          : 'Sans DLUO'
+      case 'quantity':
+        return quantity.toLocaleString('fr-FR')
+      case 'unit':
+        return product.unit || ''
+      case 'price':
+        return Math.max(
           0,
-          10
-        )}.csv`
+          Number(product.purchasePrice) || 0
+        ).toLocaleString('fr-FR')
+      case 'value':
+        return value.toLocaleString('fr-FR')
+      default:
+        return ''
+    }
+  }
 
-    document.body.appendChild(
-      link
+  const printStock = async () => {
+    if (stockPrintColumns.length === 0) {
+      window.alert(
+        'Sélectionne au moins une colonne à imprimer.'
+      )
+      return
+    }
+
+    const selectedDefinitions =
+      STOCK_PRINT_COLUMNS.filter((column) =>
+        stockPrintColumns.includes(column.key)
+      )
+
+    const headers = selectedDefinitions
+      .map((column) => `<th>${column.label}</th>`)
+      .join('')
+
+    const rows = await Promise.all(
+      filteredRows.map((row) => {
+        return Promise.all(
+          selectedDefinitions.map(async (column) => {
+            const value = getStockPrintValue(
+              column.key,
+              row
+            )
+
+            if (column.key.startsWith('qr')) {
+              const qr = await QRCode.toDataURL(value, {
+                width: 90,
+                margin: 1,
+                errorCorrectionLevel: 'M',
+              })
+              return `<td class="qrCell"><img src="${qr}" alt="${column.label}" /><div>${value.split('|').pop() || ''}</div></td>`
+            }
+
+            return `<td>${value}</td>`
+          })
+        ).then(
+          (cells) => `<tr>${cells.join('')}</tr>`
+        )
+      })
+    ).then((items) => items.join(''))
+
+    const printWindow = window.open(
+      '',
+      '_blank',
+      'width=1200,height=900'
     )
 
-    link.click()
-    link.remove()
+    if (!printWindow) {
+      window.alert(
+        "Impossible d'ouvrir la fenêtre d'impression."
+      )
+      return
+    }
 
-    URL.revokeObjectURL(
-      url
-    )
+    printWindow.document.write(`
+      <!doctype html>
+      <html lang="fr">
+        <head>
+          <meta charset="utf-8" />
+          <title>NukuStock - Stock disponible</title>
+          <style>
+            @page {
+              size: A4 landscape;
+              margin: 10mm;
+            }
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              font-family: Arial, Helvetica, sans-serif;
+              color: #111;
+              background: #fff;
+            }
+            .header { margin-bottom: 8mm; }
+            .brand { font-size: 18px; font-weight: 800; }
+            .title {
+              margin-top: 3px;
+              font-size: 13px;
+              font-weight: 700;
+            }
+            .meta { margin-top: 5px; font-size: 9px; }
+            .zone {
+              margin-top: 6px;
+              padding: 5px 0;
+              border-top: 1px solid #111;
+              border-bottom: 1px solid #111;
+              text-align: center;
+              font-size: 11px;
+              font-weight: 800;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              table-layout: auto;
+              font-size: 7px;
+            }
+            th, td {
+              border: 1px solid #999;
+              padding: 3px 4px;
+              vertical-align: middle;
+              overflow-wrap: anywhere;
+            }
+            th {
+              background: #f2f2f2;
+              font-weight: 700;
+              white-space: nowrap;
+            }
+            tr { break-inside: avoid; }
+            .qrCell { text-align: center; min-width: 24mm; }
+            .qrCell img { width: 20mm; height: 20mm; display: block; margin: 0 auto 1mm; }
+            .qrCell div { font-size: 5.5px; font-weight: 700; overflow-wrap: anywhere; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="brand">NUKUTEPIPI - NukuStock</div>
+            <div class="title">État du stock disponible</div>
+            <div class="meta">
+              Édité le ${new Date().toLocaleDateString('fr-FR')} -
+              ${filteredProductIds.size} référence(s) -
+              ${totalQty.toLocaleString('fr-FR')} unité(s)
+            </div>
+            <div class="zone">ZONE : ${zoneFilter}</div>
+          </div>
+          <table>
+            <thead><tr>${headers}</tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <script>
+            window.onload = () => {
+              window.print()
+              window.onafterprint = () => window.close()
+            }
+          </script>
+        </body>
+      </html>
+    `)
+
+    printWindow.document.close()
+    setPrintColumnsOpen(false)
+  }
+
+  const statBox: CSSProperties = {
+    padding: 14,
+    borderRadius: 13,
+    background: '#ffffff',
+    border:
+      '1px solid #e5e7eb',
+  }
+
+  const thButton: CSSProperties = {
+    border: 0,
+    background: 'transparent',
+    font: 'inherit',
+    fontWeight: 700,
+    cursor: 'pointer',
+    padding: 0,
+    color: 'inherit',
+    textAlign: 'left',
   }
 
   return (
     <Page
-      title="Mouvements de stock"
-      subtitle="Journal central de toutes les entrées, sorties, transferts, réquisitions, réceptions et ajustements"
+      title="Stocks"
+      subtitle="Consultation du stock disponible — les modifications se font uniquement dans Produits"
       action={
         <div
+          className="screenOnly"
           style={{
             display: 'flex',
             gap: 8,
             flexWrap: 'wrap',
           }}
         >
-          <Badge tone="warn">
-            {
-              movements.filter(
-                (movement) =>
-                  movement.regularizationStatus ===
-                  'A_REGULARISER'
-              ).length
-            }{' '}
-            à régulariser
-          </Badge>
+          <ColumnVisibility
+            columns={STOCK_SCREEN_COLUMNS}
+            visible={stockDisplay.visible}
+            onChange={stockDisplay.setVisible}
+            essential={STOCK_SCREEN_ESSENTIAL}
+          />
+
+          <button
+            className="button"
+            type="button"
+            onClick={() => {
+              resetQuickEntry()
+              setQuickEntryOpen(true)
+            }}
+          >
+            + Entrée rapide
+          </button>
 
           <button
             className="button secondary"
             type="button"
-            onClick={exportCsv}
+            onClick={exportExcel}
           >
-            Exporter Excel / CSV
+            Exporter Excel
+          </button>
+
+          <button
+            className="button secondary"
+            type="button"
+            onClick={exportPdf}
+          >
+            Exporter PDF
+          </button>
+
+          <button
+            className="button"
+            type="button"
+            onClick={() =>
+              setPrintColumnsOpen(true)
+            }
+          >
+            Imprimer le stock
           </button>
         </div>
       }
     >
-      <div className="mvStats">
-        <Card>
-          <div className="mvStatTitle">Mouvements affichés</div>
-          <div className="mvStatNumber">{filtered.length}</div>
-        </Card>
-
-        <Card>
-          <div className="mvStatTitle">Entrées</div>
-          <div className="mvStatNumber">
-            +{totalEntries.toLocaleString('fr-FR')}
+      <div
+        className="printOnly"
+        style={{
+          display: 'none',
+        }}
+      >
+        <div
+          style={{
+            textAlign: 'center',
+            marginBottom: 10,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 16,
+              fontWeight: 900,
+            }}
+          >
+            NUKUTEPIPI · NUKUSTOCK
           </div>
-        </Card>
 
-        <Card>
-          <div className="mvStatTitle">Sorties</div>
-          <div className="mvStatNumber">
-            -{totalOutputs.toLocaleString('fr-FR')}
+          <div
+            style={{
+              marginTop: 3,
+              fontSize: 12,
+              fontWeight: 700,
+            }}
+          >
+            État du stock disponible
           </div>
-        </Card>
+
+          <div
+            style={{
+              marginTop: 4,
+              fontSize: 9,
+            }}
+          >
+            Date d'impression :{' '}
+            {new Date().toLocaleDateString('fr-FR')}{' '}
+            {new Date().toLocaleTimeString('fr-FR', {
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: 8,
+            marginBottom: 10,
+            fontSize: 9,
+          }}
+        >
+          <div
+            style={{
+              gridColumn: '1 / -1',
+              textAlign: 'center',
+              fontSize: 11,
+              fontWeight: 900,
+              padding: '5px 0',
+              borderTop: '1px solid #000',
+              borderBottom: '1px solid #000',
+            }}
+          >
+            ZONE : {zoneFilter}
+          </div>
+
+          <div>
+            <strong>Références :</strong>{' '}
+            {filteredProductIds.size}
+          </div>
+
+          <div>
+            <strong>Stock total :</strong>{' '}
+            {totalQty.toLocaleString('fr-FR')}
+          </div>
+        </div>
+
+        <div
+          style={{
+            marginBottom: 8,
+            fontSize: 8,
+            textAlign: 'center',
+          }}
+        >
+          Impression simplifiée : la zone est indiquée en en-tête et les numéros de lot ne sont pas imprimés.
+        </div>
       </div>
 
-      <div className="mvFilterCard">
-        <div className="mvFilterGridTop">
-          <div className="mvField">
-            <label>Mouvement</label>
-            <select
-              value={typeFilter}
-              onChange={(e) =>
-                setTypeFilter(
-                  e.target.value as MovementFilter
-                )
-              }
-            >
-              <option value="Tous">Tous les mouvements</option>
-              {Object.entries(movementLabels).map(
-                ([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                )
-              )}
-            </select>
+      <div
+        style={{
+          padding: 12,
+          borderRadius: 12,
+          marginBottom: 16,
+          background:
+            'rgba(59,130,246,.08)',
+          border:
+            '1px solid rgba(59,130,246,.18)',
+          fontSize: 12,
+          lineHeight: 1.5,
+        }}
+      >
+        <strong>
+          Consultation uniquement.
+        </strong>{' '}
+        Les quantités, DLUO/DLC,
+        lots et lieux de stockage ne
+        peuvent pas être modifiés ici.
+        Pour effectuer une entrée ou
+        modifier le stock, utilise
+        l&apos;onglet{' '}
+        <strong>Produits</strong>.
+      </div>
+
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns:
+            'repeat(auto-fit,minmax(170px,1fr))',
+          gap: 12,
+          marginBottom: 16,
+        }}
+      >
+        <div style={statBox}>
+          <div
+            style={{
+              fontSize: 11,
+              color: '#667085',
+            }}
+          >
+            Références affichées
           </div>
 
-          <div className="mvField">
-            <label>Produit</label>
-            <select
-              value={productFilter}
-              onChange={(e) =>
-                setProductFilter(e.target.value)
-              }
-            >
-              <option value="Tous">Tous les produits</option>
-              {[...products]
-                .sort((a, b) =>
-                  a.name.localeCompare(b.name, 'fr')
-                )
-                .map((product) => (
-                  <option
-                    key={product.id}
-                    value={product.id}
-                  >
-                    {product.name}
-                  </option>
-                ))}
-            </select>
+          <div
+            style={{
+              fontSize: 24,
+              fontWeight: 800,
+              marginTop: 4,
+            }}
+          >
+            {filteredProductIds.size}
+          </div>
+        </div>
+
+        <div style={statBox}>
+          <div
+            style={{
+              fontSize: 11,
+              color: '#667085',
+            }}
+          >
+            Stock disponible
           </div>
 
-          <div className="mvField">
-            <label>Lieu</label>
-            <select
-              value={locationFilter}
-              onChange={(e) =>
-                setLocationFilter(e.target.value)
-              }
-            >
-              <option value="Tous">Tous les lieux</option>
-              {locations.map((location) => (
+          <div
+            style={{
+              fontSize: 24,
+              fontWeight: 800,
+              marginTop: 4,
+            }}
+          >
+            {totalQty.toLocaleString(
+              'fr-FR'
+            )}
+          </div>
+        </div>
+
+        <div style={statBox}>
+          <div
+            style={{
+              fontSize: 11,
+              color: '#667085',
+            }}
+          >
+            Valeur du stock
+          </div>
+
+          <div
+            style={{
+              fontSize: 20,
+              fontWeight: 800,
+              marginTop: 4,
+            }}
+          >
+            {totalValue.toLocaleString(
+              'fr-FR'
+            )}{' '}
+            XPF
+          </div>
+        </div>
+
+        <div style={statBox}>
+          <div
+            style={{
+              fontSize: 11,
+              color: '#667085',
+            }}
+          >
+            Lots périmés
+          </div>
+
+          <div
+            style={{
+              fontSize: 24,
+              fontWeight: 800,
+              marginTop: 4,
+            }}
+          >
+            {expiredCount}
+          </div>
+        </div>
+
+        <div style={statBox}>
+          <div
+            style={{
+              fontSize: 11,
+              color: '#667085',
+            }}
+          >
+            DLUO &lt; 1 mois
+          </div>
+
+          <div
+            style={{
+              fontSize: 24,
+              fontWeight: 800,
+              marginTop: 4,
+            }}
+          >
+            {underOneMonthCount}
+          </div>
+        </div>
+      </div>
+
+      <Card>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns:
+              'repeat(auto-fit,minmax(180px,1fr))',
+            gap: 10,
+          }}
+        >
+          <input
+            className="input"
+            placeholder="Rechercher..."
+            value={search}
+            onChange={(event) =>
+              setSearch(
+                event.target.value
+              )
+            }
+          />
+
+          <select
+            className="select"
+            value={zoneFilter}
+            onChange={(event) =>
+              setZoneFilter(
+                event.target.value as ZoneFilter
+              )
+            }
+          >
+            <option value="All">
+              Toutes les zones
+            </option>
+            <option value="Beverage">
+              Beverage
+            </option>
+            <option value="Food">
+              Food
+            </option>
+            <option value="Matériel & Accessoires">
+              Matériel & Accessoires
+            </option>
+          </select>
+
+          <select
+            className="select"
+            value={categoryFilter}
+            onChange={(event) => {
+              setCategoryFilter(
+                event.target.value
+              )
+              setSubcategoryFilter(
+                'Toutes'
+              )
+            }}
+          >
+            <option value="Toutes">
+              Toutes les catégories
+            </option>
+
+            {categories.map(
+              (category) => (
+                <option
+                  key={category}
+                  value={category}
+                >
+                  {category}
+                </option>
+              )
+            )}
+          </select>
+
+          <select
+            className="select"
+            value={
+              subcategoryFilter
+            }
+            onChange={(event) =>
+              setSubcategoryFilter(
+                event.target.value
+              )
+            }
+          >
+            <option value="Toutes">
+              Toutes les
+              sous-catégories
+            </option>
+
+            {subcategories.map(
+              (subcategory) => (
+                <option
+                  key={subcategory}
+                  value={subcategory}
+                >
+                  {subcategory}
+                </option>
+              )
+            )}
+          </select>
+
+          <select
+            className="select"
+            value={supplierFilter}
+            onChange={(event) =>
+              setSupplierFilter(
+                event.target.value
+              )
+            }
+          >
+            <option value="Tous">
+              Tous les fournisseurs
+            </option>
+
+            {suppliers.map(
+              (supplier) => (
+                <option
+                  key={supplier}
+                  value={supplier}
+                >
+                  {supplier}
+                </option>
+              )
+            )}
+          </select>
+
+
+          <select
+            className="select"
+            value={locationFilter}
+            onChange={(event) =>
+              setLocationFilter(
+                event.target.value
+              )
+            }
+          >
+            <option value="Tous">
+              Tous les lieux
+            </option>
+
+            {locations.map(
+              (location) => (
                 <option
                   key={location}
                   value={location}
                 >
                   {location}
                 </option>
-              ))}
-            </select>
-          </div>
-          <div className="mvField">
-            <label>Régularisation</label>
-            <select
-              value={regularizationFilter}
-              onChange={(e) =>
-                setRegularizationFilter(
-                  e.target.value as
-                    | 'Tous'
-                    | StockRegularizationStatus
-                )
-              }
-            >
-              <option value="Tous">
-                Tous les statuts
-              </option>
-              <option value="A_REGULARISER">
-                À régulariser
-              </option>
-              <option value="REGULARISE">
-                Régularisés
-              </option>
-              <option value="NON_REQUIS">
-                Sans régularisation
-              </option>
-            </select>
-          </div>
-        </div>
-
-        <div className="mvFilterGridBottom">
-          <div className="mvField">
-            <label>Du</label>
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) =>
-                setDateFrom(e.target.value)
-              }
-            />
-          </div>
-
-          <div className="mvField">
-            <label>Au</label>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) =>
-                setDateTo(e.target.value)
-              }
-            />
-          </div>
-
-          <div className="mvReset">
-            <button
-              type="button"
-              onClick={resetFilters}
-            >
-              Réinitialiser
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <Card>
-        <div className="mvTableScroll">
-          <div className="mvTable">
-            <div className="mvTableHead">
-              <div>Date</div>
-              <div>Mouvement</div>
-              <div>Référence</div>
-              <div>Produit</div>
-              <div>Qté</div>
-              <div>Source</div>
-              <div>Destination</div>
-              <div>Opération</div>
-            </div>
-
-            {filtered.map((movement) => (
-              <div
-                key={movement.id}
-                className="mvRow"
-              >
-                <div className="mvCell">
-                  <span className="mvMobileLabel">Date</span>
-                  {new Date(
-                    movement.createdAt
-                  ).toLocaleString('fr-FR')}
-                </div>
-
-                <div className="mvCell">
-                  <span className="mvMobileLabel">Mouvement</span>
-                  <Badge
-                    tone={getMovementTone(movement)}
-                  >
-                    {movementLabels[movement.type]}
-                  </Badge>
-                </div>
-
-                <div className="mvCell">
-                  <span className="mvMobileLabel">Référence</span>
-                  <strong>
-                    {movement.internalRef || '—'}
-                  </strong>
-                </div>
-
-                <div className="mvCell">
-                  <span className="mvMobileLabel">Produit</span>
-                  <div>
-                    <strong>{movement.productName}</strong>
-
-                    {(movement.lotNumber ||
-                      movement.expiry) && (
-                      <div className="mvSub">
-                        {movement.lotNumber
-                          ? `Lot ${movement.lotNumber}`
-                          : ''}
-
-                        {movement.lotNumber &&
-                        movement.expiry
-                          ? ' · '
-                          : ''}
-
-                        {movement.expiry
-                          ? `DLUO/DLC ${new Date(
-                              `${movement.expiry}T00:00:00`
-                            ).toLocaleDateString('fr-FR')}`
-                          : ''}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="mvCell">
-                  <span className="mvMobileLabel">Qté</span>
-                  <strong>
-                    {formatQuantity(movement.quantity)}
-                  </strong>
-                </div>
-
-                <div className="mvCell">
-                  <span className="mvMobileLabel">Source</span>
-                  {movement.fromLocation || '—'}
-                </div>
-
-                <div className="mvCell">
-                  <span className="mvMobileLabel">Destination</span>
-                  {movement.toLocation || '—'}
-                </div>
-
-                <div className="mvCell">
-                  <span className="mvMobileLabel">Opération</span>
-                  <div>
-                    {movement.referenceId || '—'}
-
-                    {movement.regularizationStatus ===
-                      'A_REGULARISER' && (
-                      <div
-                        style={{
-                          marginTop: 6,
-                          display: 'flex',
-                          gap: 6,
-                          flexWrap: 'wrap',
-                        }}
-                      >
-                        <Badge tone="warn">
-                          À régulariser
-                        </Badge>
-                        <button
-                          className="button secondary small"
-                          type="button"
-                          onClick={() =>
-                            openRegularization(
-                              movement
-                            )
-                          }
-                        >
-                          Régulariser
-                        </button>
-                      </div>
-                    )}
-
-                    {movement.regularizationStatus ===
-                      'REGULARISE' && (
-                      <div
-                        style={{
-                          marginTop: 6,
-                        }}
-                      >
-                        <Badge tone="good">
-                          Régularisé
-                        </Badge>
-                      </div>
-                    )}
-
-                    {(movement.specialNote ||
-                      movement.note) && (
-                      <div className="mvSub">
-                        {movement.specialNote ||
-                          movement.note}
-                      </div>
-                    )}
-
-                    {movement.invoiceNumber && (
-                      <div className="mvSub">
-                        Facture :{' '}
-                        {movement.invoiceNumber}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
-
-            {filtered.length === 0 && (
-              <div className="mvEmpty">
-                Aucun mouvement de stock trouvé.
-              </div>
+              )
             )}
-          </div>
+          </select>
+
+          <select
+            className="select"
+            value={quantityFilter}
+            onChange={(event) =>
+              setQuantityFilter(
+                event.target
+                  .value as QuantityFilter
+              )
+            }
+          >
+            <option value="Tous">
+              Toutes les quantités
+            </option>
+            <option value="Rupture">
+              Stock = 0
+            </option>
+            <option value="1-10">
+              1 à 10
+            </option>
+            <option value="11-50">
+              11 à 50
+            </option>
+            <option value="51-100">
+              51 à 100
+            </option>
+            <option value="100+">
+              Plus de 100
+            </option>
+            <option value="Sous minimum">
+              Sous stock minimum
+            </option>
+          </select>
+
+          <select
+            className="select"
+            value={expiryFilter}
+            onChange={(event) =>
+              setExpiryFilter(
+                event.target
+                  .value as ExpiryFilter
+              )
+            }
+          >
+            <option value="Toutes">
+              Toutes les DLUO/DLC
+            </option>
+            <option value="Périmé">
+              Périmé
+            </option>
+            <option value="Moins d'un mois">
+              Moins d&apos;un mois
+            </option>
+            <option value="De 1 à 3 mois">
+              1 à 3 mois
+            </option>
+            <option value="De 3 à 6 mois">
+              3 à 6 mois
+            </option>
+            <option value="De 6 mois à 1 an">
+              6 mois à 1 an
+            </option>
+            <option value="+ d'un an">
+              Plus d&apos;un an
+            </option>
+            <option value="Sans DLUO">
+              Sans DLUO
+            </option>
+          </select>
+
+          <button
+            className="button secondary"
+            type="button"
+            onClick={resetFilters}
+          >
+            Réinitialiser filtres
+          </button>
         </div>
       </Card>
 
+      <Card>
+        <div style={{ overflowX: 'auto' }}>
+          {(() => {
+            const cols = [
+              stockDisplay.isVisible('reference') && '150px',
+              stockDisplay.isVisible('photo') && '76px',
+              stockDisplay.isVisible('qrProduct') && '76px',
+              stockDisplay.isVisible('product') && 'minmax(230px,2fr)',
+              stockDisplay.isVisible('zone') && '135px',
+              stockDisplay.isVisible('category') && '150px',
+              stockDisplay.isVisible('qrCategory') && '76px',
+              stockDisplay.isVisible('subcategory') && '165px',
+              stockDisplay.isVisible('qrSubcategory') && '76px',
+              stockDisplay.isVisible('location') && '160px',
+              stockDisplay.isVisible('qrLocation') && '76px',
+              stockDisplay.isVisible('lot') && '145px',
+              stockDisplay.isVisible('expiry') && '135px',
+              stockDisplay.isVisible('quantity') && '120px',
+              stockDisplay.isVisible('price') && '120px',
+              stockDisplay.isVisible('value') && '120px',
+              stockDisplay.isVisible('unitWeight') && '125px',
+              stockDisplay.isVisible('caseWeight') && '165px',
+              stockDisplay.isVisible('totalWeight') && '145px',
+              '120px',
+            ].filter(Boolean).join(' ')
 
-      {movementToRegularize && (
+            const minWidth = Math.max(
+              850,
+              stockDisplay.visible.length * 105
+            )
+
+            const qrBox = (
+              value: string,
+              title: string
+            ) => (
+              <div
+                className="screenOnly"
+                title={title}
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 10,
+                  background: '#fff',
+                  border: '1px solid #e5e7eb',
+                  display: 'grid',
+                  placeItems: 'center',
+                  padding: 4,
+                }}
+              >
+                <QRCodeSVG
+                  value={value}
+                  size={54}
+                  level="M"
+                  marginSize={0}
+                  title={title}
+                />
+              </div>
+            )
+
+            return (
+              <div style={{ minWidth }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: cols,
+                    gap: 12,
+                    padding: '0 0 12px',
+                    fontWeight: 700,
+                    alignItems: 'center',
+                  }}
+                >
+                  {stockDisplay.isVisible('reference') && <div>Référence</div>}
+                  {stockDisplay.isVisible('photo') && <div>Photo</div>}
+                  {stockDisplay.isVisible('qrProduct') && <div>QR Produit</div>}
+                  {stockDisplay.isVisible('product') && (
+                    <button style={thButton} onClick={() => toggleSort('product')}>
+                      Produit{sortIndicator('product')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('zone') && <div>Zone</div>}
+                  {stockDisplay.isVisible('category') && (
+                    <button style={thButton} onClick={() => toggleSort('category')}>
+                      Catégorie{sortIndicator('category')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('qrCategory') && <div>QR Cat.</div>}
+                  {stockDisplay.isVisible('subcategory') && (
+                    <button style={thButton} onClick={() => toggleSort('subcategory')}>
+                      Sous-catégorie{sortIndicator('subcategory')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('qrSubcategory') && <div>QR Sous-cat.</div>}
+                  {stockDisplay.isVisible('location') && (
+                    <button style={thButton} onClick={() => toggleSort('location')}>
+                      Lieu{sortIndicator('location')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('qrLocation') && <div>QR Lieu</div>}
+                  {stockDisplay.isVisible('lot') && <div>Lot</div>}
+                  {stockDisplay.isVisible('expiry') && (
+                    <button style={thButton} onClick={() => toggleSort('expiry')}>
+                      DLUO / DLC{sortIndicator('expiry')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('quantity') && (
+                    <button style={thButton} onClick={() => toggleSort('quantity')}>
+                      Disponible{sortIndicator('quantity')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('price') && (
+                    <button style={thButton} onClick={() => toggleSort('price')}>
+                      Prix{sortIndicator('price')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('value') && (
+                    <button style={thButton} onClick={() => toggleSort('value')}>
+                      Valeur{sortIndicator('value')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('unitWeight') && <div>Poids unitaire</div>}
+                  {stockDisplay.isVisible('caseWeight') && <div>Poids conditionnement</div>}
+                  {stockDisplay.isVisible('totalWeight') && <div>Poids total stock</div>}
+                  <div className="screenOnly">Action</div>
+                </div>
+
+                {filteredRows.map(({ product, lot, quantity, value }, index) => (
+                  <div
+                    key={`${product.id}-${lot.id}-${index}`}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: cols,
+                      gap: 12,
+                      padding: '13px 0',
+                      borderTop: '1px solid rgba(255,255,255,.08)',
+                      alignItems: 'center',
+                    }}
+                  >
+                    {stockDisplay.isVisible('reference') && (
+                      <strong style={{ fontSize: 11, letterSpacing: '.03em' }}>
+                        {product.internalRef || '—'}
+                      </strong>
+                    )}
+
+                    {stockDisplay.isVisible('photo') && (
+                      <div className="screenOnly">
+                        {getProductPhoto(product) ? (
+                          <div
+                            style={{
+                              width: 64,
+                              height: 64,
+                              borderRadius: 10,
+                              background: '#fff',
+                              border: '1px solid #e5e7eb',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              overflow: 'hidden',
+                              padding: 4,
+                            }}
+                          >
+                            <img
+                              src={getProductPhoto(product)}
+                              alt={product.name || 'Produit'}
+                              loading="lazy"
+                              style={{
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'contain',
+                                display: 'block',
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <div
+                            style={{
+                              width: 64,
+                              height: 64,
+                              borderRadius: 10,
+                              border: '1px dashed #cbd5e1',
+                              display: 'grid',
+                              placeItems: 'center',
+                              fontSize: 10,
+                              opacity: 0.5,
+                            }}
+                          >
+                            PHOTO
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {stockDisplay.isVisible('qrProduct') &&
+                      qrBox(
+                        `NUKUSTOCK|PRODUCT|${product.internalRef || product.id}`,
+                        `QR Produit ${product.internalRef || product.name}`
+                      )}
+
+                    {stockDisplay.isVisible('product') && (
+                      <div>
+                        <div style={{ fontWeight: 800 }}>{product.name}</div>
+                        <div style={{ marginTop: 3, fontSize: 11, opacity: 0.65 }}>
+                          {[product.packaging].filter(Boolean).join(' · ')}
+                        </div>
+                      </div>
+                    )}
+
+                    {stockDisplay.isVisible('zone') && (
+                      <div><Badge tone="info">{detectProductZone(product)}</Badge></div>
+                    )}
+
+                    {stockDisplay.isVisible('category') && (
+                      <div>{product.category || '—'}</div>
+                    )}
+
+                    {stockDisplay.isVisible('qrCategory') &&
+                      qrBox(
+                        `NUKUSTOCK|CATEGORY|${product.category || 'Sans catégorie'}`,
+                        `QR Catégorie ${product.category || ''}`
+                      )}
+
+                    {stockDisplay.isVisible('subcategory') && (
+                      <div>{product.subcategory || '—'}</div>
+                    )}
+
+                    {stockDisplay.isVisible('qrSubcategory') &&
+                      qrBox(
+                        `NUKUSTOCK|SUBCATEGORY|${product.subcategory || 'Sans sous-catégorie'}`,
+                        `QR Sous-catégorie ${product.subcategory || ''}`
+                      )}
+
+                    {stockDisplay.isVisible('location') && (
+                      <div>{lot.location || 'Non affecté'}</div>
+                    )}
+
+                    {stockDisplay.isVisible('qrLocation') &&
+                      qrBox(
+                        `NUKUSTOCK|LOCATION|${lot.location || 'Non affecté'}`,
+                        `QR Lieu ${lot.location || 'Non affecté'}`
+                      )}
+
+                    {stockDisplay.isVisible('lot') && (
+                      <div>{lot.lotNumber || '—'}</div>
+                    )}
+
+                    {stockDisplay.isVisible('expiry') && (
+                      <div>
+                        {lot.expiry ? (
+                          <Badge tone={getExpiryTone(lot.expiry)}>
+                            {new Date(`${lot.expiry}T00:00:00`).toLocaleDateString('fr-FR')}
+                          </Badge>
+                        ) : (
+                          <span style={{ opacity: 0.5, fontSize: 12 }}>Sans DLUO</span>
+                        )}
+                      </div>
+                    )}
+
+                    {stockDisplay.isVisible('quantity') && (
+                      <div>
+                        <Badge
+                          tone={
+                            quantity <= 0
+                              ? 'danger'
+                              : quantity < Math.max(0, Number(product.minStock) || 0)
+                              ? 'warn'
+                              : 'good'
+                          }
+                        >
+                          {quantity} {product.unit}
+                        </Badge>
+                      </div>
+                    )}
+
+                    {stockDisplay.isVisible('price') && (
+                      <div>
+                        {Math.max(0, Number(product.purchasePrice) || 0).toLocaleString('fr-FR')} XPF
+                      </div>
+                    )}
+
+                    {stockDisplay.isVisible('value') && (
+                      <div>{value.toLocaleString('fr-FR')} XPF</div>
+                    )}
+
+                    {stockDisplay.isVisible('unitWeight') && (
+                      <div style={{ fontWeight: 700 }}>
+                        {formatWeightKg(product.netUnitWeightKg)}
+                      </div>
+                    )}
+
+                    {stockDisplay.isVisible('caseWeight') && (
+                      <div style={{ fontWeight: 700 }}>
+                        {formatWeightKg(product.caseWeightKg)}
+                      </div>
+                    )}
+
+                    {stockDisplay.isVisible('totalWeight') && (
+                      <div>
+                        <strong>
+                          {formatWeightKg(
+                            quantity * Number(product.netUnitWeightKg || 0)
+                          )}
+                        </strong>
+                        {quantity > 0 && Number(product.netUnitWeightKg || 0) > 0 && (
+                          <div
+                            style={{
+                              marginTop: 3,
+                              fontSize: 10,
+                              opacity: 0.6,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {quantity} × {formatWeightKg(product.netUnitWeightKg)}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="screenOnly">
+                      <button
+                        className="button small"
+                        type="button"
+                        disabled={quantity <= 0 || !lot.location}
+                        onClick={() => openTransfer(product, lot, quantity)}
+                      >
+                        Transférer
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          })()}
+        </div>
+      </Card>
+
+      <style jsx global>{`
+        @media print {
+          @page {
+            size: A4 landscape;
+            margin: 10mm;
+          }
+        }
+      `}</style>
+
+      {printColumnsOpen && (
         <div
+          className="screenOnly"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            background: 'rgba(15,23,42,.58)',
+            display: 'grid',
+            placeItems: 'center',
+            padding: 18,
+          }}
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) {
+              setPrintColumnsOpen(false)
+            }
+          }}
+        >
+          <div
+            style={{
+              width: 'min(620px, 100%)',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              background: '#fff',
+              borderRadius: 18,
+              padding: 22,
+              boxShadow: '0 24px 70px rgba(15,23,42,.25)',
+            }}
+          >
+            <h2 style={{ margin: 0 }}>
+              Colonnes à imprimer
+            </h2>
+            <p
+              style={{
+                margin: '6px 0 18px',
+                color: '#667085',
+                fontSize: 13,
+              }}
+            >
+              Coche uniquement les informations que tu veux voir sur l&apos;impression du stock.
+            </p>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns:
+                  'repeat(auto-fit,minmax(180px,1fr))',
+                gap: 9,
+              }}
+            >
+              {STOCK_PRINT_COLUMNS.map((column) => (
+                <label
+                  key={column.key}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 9,
+                    padding: '10px 12px',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: 11,
+                    cursor: 'pointer',
+                    fontSize: 13,
+                    fontWeight: 700,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={stockPrintColumns.includes(
+                      column.key
+                    )}
+                    onChange={() =>
+                      toggleStockPrintColumn(
+                        column.key
+                      )
+                    }
+                  />
+                  {column.label}
+                </label>
+              ))}
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+                flexWrap: 'wrap',
+                marginTop: 16,
+              }}
+            >
+              <button
+                className="button secondary small"
+                type="button"
+                onClick={() =>
+                  setStockPrintColumns(
+                    STOCK_PRINT_COLUMNS.map(
+                      (column) => column.key
+                    )
+                  )
+                }
+              >
+                Tout sélectionner
+              </button>
+              <button
+                className="button secondary small"
+                type="button"
+                onClick={() =>
+                  setStockPrintColumns(
+                    DEFAULT_STOCK_PRINT_COLUMNS
+                  )
+                }
+              >
+                Réinitialiser
+              </button>
+              <button
+                className="button secondary small"
+                type="button"
+                onClick={() =>
+                  setStockPrintColumns([])
+                }
+              >
+                Tout décocher
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: 9,
+                marginTop: 22,
+              }}
+            >
+              <button
+                className="button secondary"
+                type="button"
+                onClick={() =>
+                  setPrintColumnsOpen(false)
+                }
+              >
+                Annuler
+              </button>
+              <button
+                className="button"
+                type="button"
+                onClick={printStock}
+              >
+                Imprimer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {transferOpen && (() => {
+        const product = items.find((item) => item.id === transferProductId)
+        const sourceLot = product?.lots.find((lot) => lot.id === transferLotId)
+        const available = Math.max(0, Number(sourceLot?.quantity) || 0)
+
+        return (
+          <div
+            className="screenOnly"
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 1400,
+              background: 'rgba(15,23,42,.65)',
+              display: 'grid',
+              placeItems: 'center',
+              padding: 18,
+            }}
+            onMouseDown={(event) => {
+              if (event.currentTarget === event.target) setTransferOpen(false)
+            }}
+          >
+            <div
+              style={{
+                width: 'min(560px,100%)',
+                maxHeight: '92vh',
+                overflowY: 'auto',
+                background: '#fff',
+                color: '#101828',
+                borderRadius: 18,
+                padding: 24,
+                boxShadow: '0 25px 80px rgba(0,0,0,.30)',
+              }}
+            >
+              <h2 style={{ margin: 0 }}>Transférer le stock</h2>
+              <div style={{ marginTop: 6, color: '#667085', fontSize: 13 }}>
+                {product?.name || 'Produit'}
+              </div>
+
+              <div style={{ display: 'grid', gap: 14, marginTop: 20 }}>
+                <div style={{ padding: 12, borderRadius: 12, background: '#f8fafc', border: '1px solid #e5e7eb' }}>
+                  <strong>Lieu source :</strong> {transferFromLocation}<br />
+                  <strong>Disponible :</strong> {available} {product?.unit || ''}<br />
+                  <strong>DLUO / DLC :</strong>{' '}
+                  {sourceLot?.expiry
+                    ? new Date(`${sourceLot.expiry}T00:00:00`).toLocaleDateString('fr-FR')
+                    : 'Sans DLUO'}
+                  {sourceLot?.lotNumber ? <><br /><strong>Lot :</strong> {sourceLot.lotNumber}</> : null}
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: 6, fontSize: 12, fontWeight: 800 }}>
+                    Lieu destination
+                  </label>
+                  <select
+                    className="input"
+                    style={{ width: '100%' }}
+                    value={transferToLocation}
+                    onChange={(event) => setTransferToLocation(event.target.value)}
+                  >
+                    <option value="">Choisir un lieu</option>
+                    {quickEntryLocations
+                      .filter((location) => location !== transferFromLocation)
+                      .map((location) => (
+                        <option key={location} value={location}>{location}</option>
+                      ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: 6, fontSize: 12, fontWeight: 800 }}>
+                    Quantité à transférer
+                  </label>
+                  <input
+                    className="input"
+                    style={{ width: '100%' }}
+                    type="number"
+                    min="0.01"
+                    max={available}
+                    step="0.01"
+                    value={transferQuantity}
+                    onChange={(event) =>
+                      setTransferQuantity(Math.max(0, Number(event.target.value) || 0))
+                    }
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 22 }}>
+                <button className="button secondary" type="button" onClick={() => setTransferOpen(false)}>
+                  Annuler
+                </button>
+                <button className="button" type="button" onClick={saveTransfer}>
+                  Confirmer le transfert
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {quickEntryOpen && (
+        <div
+          className="screenOnly"
           style={{
             position: 'fixed',
             inset: 0,
             zIndex: 1300,
-            background:
-              'rgba(15,23,42,.65)',
+            background: 'rgba(15,23,42,.65)',
             display: 'grid',
             placeItems: 'center',
             padding: 18,
@@ -1011,7 +2680,7 @@ export default function StockMovementsPage() {
               event.currentTarget ===
               event.target
             ) {
-              setRegularizeMovementId('')
+              setQuickEntryOpen(false)
             }
           }}
         >
@@ -1028,103 +2697,40 @@ export default function StockMovementsPage() {
                 '0 25px 80px rgba(0,0,0,.30)',
             }}
           >
-            <h2 style={{ margin: 0 }}>
-              Régulariser l&apos;opération
-            </h2>
-
             <div
               style={{
-                marginTop: 5,
-                color: '#667085',
-                fontSize: 12,
+                display: 'flex',
+                justifyContent:
+                  'space-between',
+                gap: 14,
+                alignItems: 'flex-start',
               }}
             >
-              <strong>
-                {movementToRegularize.referenceId ||
-                  'Entrée rapide'}
-              </strong>
-              {' · '}
-              {regularizationGroup.length}{' '}
-              produit(s)
-              {' · '}
-              {regularizationGroup
-                .reduce(
-                  (sum, movement) =>
-                    sum +
-                    movement.quantity,
-                  0
-                )
-                .toLocaleString('fr-FR')}{' '}
-              unité(s)
-            </div>
-
-            <div
-              style={{
-                marginTop: 14,
-                padding: 12,
-                borderRadius: 10,
-                background: '#ecfdf3',
-                border:
-                  '1px solid #abefc6',
-                fontSize: 12,
-                color: '#067647',
-              }}
-            >
-              Cette régularisation complète les documents du mouvement existant. Elle ne modifie pas la quantité de stock.
-            </div>
-
-            {regularizationGroup.length > 1 && (
-              <div
-                style={{
-                  marginTop: 12,
-                  padding: 12,
-                  borderRadius: 10,
-                  border:
-                    '1px solid #e5e7eb',
-                  background: '#f8fafc',
-                }}
-              >
-                <strong
+              <div>
+                <h2 style={{ margin: 0 }}>
+                  Entrée rapide de stock
+                </h2>
+                <div
                   style={{
-                    display: 'block',
-                    marginBottom: 8,
+                    marginTop: 5,
+                    color: '#667085',
                     fontSize: 12,
                   }}
                 >
-                  Produits de l&apos;opération
-                </strong>
-
-                {regularizationGroup.map(
-                  (movement) => (
-                    <div
-                      key={movement.id}
-                      style={{
-                        display: 'flex',
-                        justifyContent:
-                          'space-between',
-                        gap: 12,
-                        padding:
-                          '6px 0',
-                        borderTop:
-                          '1px solid #eef1f5',
-                        fontSize: 11,
-                      }}
-                    >
-                      <span>
-                        {movement.productName}
-                        {' · '}
-                        {movement.toLocation ||
-                          'Lieu non renseigné'}
-                      </span>
-
-                      <strong>
-                        +{movement.quantity}
-                      </strong>
-                    </div>
-                  )
-                )}
+                  Ajoute immédiatement le stock sans créer de commande fournisseur.
+                </div>
               </div>
-            )}
+
+              <button
+                className="button secondary small"
+                type="button"
+                onClick={() =>
+                  setQuickEntryOpen(false)
+                }
+              >
+                Fermer
+              </button>
+            </div>
 
             <div
               style={{
@@ -1132,7 +2738,7 @@ export default function StockMovementsPage() {
                 gridTemplateColumns:
                   'repeat(2,minmax(0,1fr))',
                 gap: 14,
-                marginTop: 18,
+                marginTop: 20,
               }}
             >
               <div
@@ -1147,19 +2753,40 @@ export default function StockMovementsPage() {
                   fontSize: 12,
                   fontWeight: 800,
                 }}>
-                  Fournisseur
+                  Produit
                 </label>
-                <input
+                <select
                   className="input"
                   style={{ width: '100%' }}
-                  value={regSupplier}
+                  value={quickProductId}
                   onChange={(event) =>
-                    setRegSupplier(
+                    setQuickProductId(
                       event.target.value
                     )
                   }
-                  placeholder="Nom du fournisseur"
-                />
+                >
+                  <option value="">
+                    Choisir un produit
+                  </option>
+                  {[...items]
+                    .sort((a, b) =>
+                      a.name.localeCompare(
+                        b.name,
+                        'fr'
+                      )
+                    )
+                    .map((product) => (
+                      <option
+                        key={product.id}
+                        value={product.id}
+                      >
+                        {product.internalRef
+                          ? `${product.internalRef} · `
+                          : ''}
+                        {product.name}
+                      </option>
+                    ))}
+                </select>
               </div>
 
               <div>
@@ -1170,93 +2797,107 @@ export default function StockMovementsPage() {
                   fontSize: 12,
                   fontWeight: 800,
                 }}>
-                  N° devis
-                </label>
-                <input
-                  className="input"
-                  style={{ width: '100%' }}
-                  value={regQuote}
-                  onChange={(event) =>
-                    setRegQuote(
-                      event.target.value
-                    )
-                  }
-                />
-              </div>
-
-              <div>
-                <label style={{
-                  display: 'block',
-                  marginBottom: 6,
-                  color: '#344054',
-                  fontSize: 12,
-                  fontWeight: 800,
-                }}>
-                  N° BC
-                </label>
-                <input
-                  className="input"
-                  style={{ width: '100%' }}
-                  value={regBc}
-                  onChange={(event) =>
-                    setRegBc(
-                      event.target.value
-                    )
-                  }
-                />
-              </div>
-
-              <div>
-                <label style={{
-                  display: 'block',
-                  marginBottom: 6,
-                  color: '#344054',
-                  fontSize: 12,
-                  fontWeight: 800,
-                }}>
-                  N° facture
-                </label>
-                <input
-                  className="input"
-                  style={{ width: '100%' }}
-                  value={regInvoice}
-                  onChange={(event) =>
-                    setRegInvoice(
-                      event.target.value
-                    )
-                  }
-                />
-              </div>
-
-              <div>
-                <label style={{
-                  display: 'block',
-                  marginBottom: 6,
-                  color: '#344054',
-                  fontSize: 12,
-                  fontWeight: 800,
-                }}>
-                  Prix unitaire XPF
-                  {regularizationGroup.length > 1
-                    ? ' — uniquement pour une entrée à 1 produit'
-                    : ''}
+                  Quantité
                 </label>
                 <input
                   className="input"
                   style={{ width: '100%' }}
                   type="number"
-                  min="0"
+                  min="0.01"
                   step="0.01"
-                  disabled={
-                    regularizationGroup.length > 1
-                  }
-                  value={regUnitPrice}
+                  value={quickQuantity}
                   onChange={(event) =>
-                    setRegUnitPrice(
+                    setQuickQuantity(
+                      Math.max(
+                        0,
+                        Number(
+                          event.target.value
+                        ) || 0
+                      )
+                    )
+                  }
+                />
+              </div>
+
+              <div>
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  Lieu de stockage
+                </label>
+                <select
+                  className="input"
+                  style={{ width: '100%' }}
+                  value={quickLocation}
+                  onChange={(event) =>
+                    setQuickLocation(
                       event.target.value
                     )
                   }
-                  placeholder="Facultatif"
+                >
+                  <option value="">
+                    Choisir un lieu
+                  </option>
+                  {quickEntryLocations.map(
+                    (location) => (
+                      <option
+                        key={location}
+                        value={location}
+                      >
+                        {location}
+                      </option>
+                    )
+                  )}
+                </select>
+              </div>
+
+              <div>
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  Lot (facultatif)
+                </label>
+                <input
+                  className="input"
+                  style={{ width: '100%' }}
+                  value={quickLotNumber}
+                  onChange={(event) =>
+                    setQuickLotNumber(
+                      event.target.value
+                    )
+                  }
+                  placeholder="Ex. LOT-2408"
+                />
+              </div>
+
+              <div>
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  DLUO / DLC (facultatif)
+                </label>
+                <input
+                  className="input"
+                  style={{ width: '100%' }}
+                  type="date"
+                  value={quickExpiry}
+                  onChange={(event) =>
+                    setQuickExpiry(
+                      event.target.value
+                    )
+                  }
                 />
               </div>
 
@@ -1272,24 +2913,69 @@ export default function StockMovementsPage() {
                   fontSize: 12,
                   fontWeight: 800,
                 }}>
-                  Note / documents
+                  Note spéciale
                 </label>
                 <textarea
                   className="input"
                   style={{
                     width: '100%',
-                    minHeight: 95,
+                    minHeight: 90,
                     paddingTop: 10,
                     resize: 'vertical',
                   }}
-                  value={regNote}
+                  value={quickNote}
                   onChange={(event) =>
-                    setRegNote(
+                    setQuickNote(
                       event.target.value
                     )
                   }
+                  placeholder="Ex. Livraison urgente, facture à récupérer demain."
                 />
               </div>
+
+              <label
+                style={{
+                  gridColumn: '1 / -1',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 10,
+                  padding: 13,
+                  borderRadius: 12,
+                  background: '#fff7e6',
+                  border:
+                    '1px solid #f4c56a',
+                  cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={
+                    quickNeedsRegularization
+                  }
+                  onChange={(event) =>
+                    setQuickNeedsRegularization(
+                      event.target.checked
+                    )
+                  }
+                  style={{ marginTop: 3 }}
+                />
+                <span>
+                  <strong>
+                    À régulariser
+                  </strong>
+                  <span
+                    style={{
+                      display: 'block',
+                      marginTop: 3,
+                      color: '#667085',
+                      fontSize: 11,
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    Le stock est ajouté tout de suite. Les documents, fournisseur, facture, BC et prix pourront être complétés plus tard dans Mouvements.
+                  </span>
+                </span>
+              </label>
             </div>
 
             <div
@@ -1305,7 +2991,7 @@ export default function StockMovementsPage() {
                 className="button secondary"
                 type="button"
                 onClick={() =>
-                  setRegularizeMovementId('')
+                  setQuickEntryOpen(false)
                 }
               >
                 Annuler
@@ -1314,314 +3000,16 @@ export default function StockMovementsPage() {
               <button
                 className="button"
                 type="button"
-                onClick={saveRegularization}
+                onClick={saveQuickEntry}
               >
-                Marquer comme régularisé
+                Valider l&apos;entrée
               </button>
             </div>
           </div>
+
         </div>
       )}
 
-      <style jsx global>{`
-        .mvStats {
-          display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 14px;
-          margin-bottom: 16px;
-        }
-
-        .mvStatTitle {
-          color: #667085;
-          font-size: 12px;
-          font-weight: 700;
-        }
-
-        .mvStatNumber {
-          margin-top: 8px;
-          color: #101828;
-          font-size: 30px;
-          line-height: 1;
-          font-weight: 900;
-        }
-
-        .mvFilterCard {
-          width: 100%;
-          margin: 0 0 16px;
-          padding: 18px;
-          border: 1px solid #e5e9f0;
-          border-radius: 16px;
-          background: #fff;
-          overflow: hidden;
-        }
-
-        .mvFilterGridTop {
-          display: grid;
-          grid-template-columns:
-            repeat(4, minmax(0, 1fr));
-          gap: 14px;
-          align-items: end;
-        }
-
-        .mvFilterGridBottom {
-          display: grid;
-          grid-template-columns: 220px 220px 160px;
-          gap: 14px;
-          align-items: end;
-          margin-top: 14px;
-        }
-
-        .mvField {
-          min-width: 0;
-          width: 100%;
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-        }
-
-        .mvField label {
-          display: block;
-          min-height: 16px;
-          margin: 0;
-          color: #667085;
-          font-size: 11px;
-          line-height: 16px;
-          font-weight: 800;
-        }
-
-        .mvField input,
-        .mvField select {
-          width: 100% !important;
-          max-width: 100% !important;
-          min-width: 0 !important;
-          height: 44px !important;
-          min-height: 44px !important;
-          max-height: 44px !important;
-          margin: 0 !important;
-          padding: 0 12px !important;
-          border: 1px solid #d8dee8 !important;
-          border-radius: 10px !important;
-          background: #fff !important;
-          color: #101828 !important;
-          font-family: inherit !important;
-          font-size: 13px !important;
-          line-height: 44px !important;
-          box-shadow: none !important;
-          outline: none !important;
-        }
-
-        .mvField select {
-          padding-right: 32px !important;
-        }
-
-        .mvField input[type="date"] {
-          line-height: normal !important;
-        }
-
-        .mvField input:focus,
-        .mvField select:focus {
-          border-color: #98a2b3 !important;
-          box-shadow: 0 0 0 3px rgba(152,162,179,.12) !important;
-        }
-
-        .mvReset {
-          display: flex;
-          align-items: flex-end;
-        }
-
-        .mvReset button {
-          width: 160px !important;
-          min-width: 160px !important;
-          height: 44px !important;
-          min-height: 44px !important;
-          margin: 0 !important;
-          padding: 0 16px !important;
-          border: 1px solid #d8dee8 !important;
-          border-radius: 10px !important;
-          background: #fff !important;
-          color: #344054 !important;
-          font-family: inherit !important;
-          font-size: 13px !important;
-          font-weight: 800 !important;
-          line-height: 44px !important;
-          white-space: nowrap !important;
-          cursor: pointer;
-        }
-
-        .mvTableScroll {
-          width: 100%;
-          overflow-x: auto;
-          -webkit-overflow-scrolling: touch;
-        }
-
-        .mvTable {
-          min-width: 1180px;
-        }
-
-        .mvTableHead,
-        .mvRow {
-          display: grid;
-          grid-template-columns:
-            145px
-            170px
-            135px
-            minmax(210px, 1.5fr)
-            80px
-            155px
-            155px
-            165px;
-          gap: 12px;
-          align-items: center;
-        }
-
-        .mvTableHead {
-          padding: 2px 4px 12px;
-          color: #344054;
-          font-size: 11px;
-          font-weight: 800;
-        }
-
-        .mvRow {
-          padding: 13px 4px;
-          border-top: 1px solid #eef1f5;
-        }
-
-        .mvCell {
-          min-width: 0;
-          color: #344054;
-          font-size: 12px;
-          line-height: 1.35;
-          overflow-wrap: anywhere;
-        }
-
-        .mvSub {
-          margin-top: 4px;
-          color: #98a2b3;
-          font-size: 10px;
-          line-height: 1.35;
-        }
-
-        .mvMobileLabel {
-          display: none;
-        }
-
-        .mvEmpty {
-          padding: 34px 20px;
-          text-align: center;
-          color: #667085;
-          font-size: 14px;
-        }
-
-        @media (max-width: 1100px) {
-          .mvFilterGridTop {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-          }
-
-          .mvFilterGridBottom {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-          }
-
-          .mvReset {
-            grid-column: 1 / -1;
-          }
-
-          .mvReset button {
-            width: 100% !important;
-          }
-        }
-
-        @media (max-width: 767px) {
-          .mvStats {
-            grid-template-columns: 1fr;
-            gap: 10px;
-          }
-
-          .mvFilterCard {
-            padding: 14px;
-          }
-
-          .mvFilterGridTop,
-          .mvFilterGridBottom {
-            grid-template-columns: 1fr;
-            gap: 10px;
-          }
-
-          .mvFilterGridBottom {
-            margin-top: 10px;
-          }
-
-          .mvReset {
-            grid-column: auto;
-          }
-
-          .mvField input,
-          .mvField select,
-          .mvReset button {
-            width: 100% !important;
-            min-width: 0 !important;
-            height: 48px !important;
-            min-height: 48px !important;
-            font-size: 16px !important;
-            line-height: normal !important;
-          }
-
-          .mvTableScroll {
-            overflow: visible;
-          }
-
-          .mvTable {
-            min-width: 0;
-            width: 100%;
-          }
-
-          .mvTableHead {
-            display: none;
-          }
-
-          .mvRow {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 12px;
-            margin-bottom: 12px;
-            padding: 14px;
-            border: 1px solid #e7eaf0;
-            border-radius: 14px;
-            background: #fff;
-          }
-
-          .mvCell {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-            font-size: 13px;
-          }
-
-          .mvMobileLabel {
-            display: block;
-            color: #98a2b3;
-            font-size: 9px;
-            font-weight: 800;
-            text-transform: uppercase;
-            letter-spacing: .04em;
-          }
-
-          .mvCell:nth-child(4),
-          .mvCell:nth-child(8) {
-            grid-column: 1 / -1;
-          }
-        }
-
-        @media (max-width: 420px) {
-          .mvRow {
-            grid-template-columns: 1fr;
-          }
-
-          .mvCell:nth-child(4),
-          .mvCell:nth-child(8) {
-            grid-column: auto;
-          }
-        }
-      `}</style>
     </Page>
   )
 }
