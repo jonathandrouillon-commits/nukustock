@@ -77,6 +77,7 @@ const navItems: NavItem[] = [
   { href: '/planning-bar', label: 'Planning Bar', icon: '▦' },
   { href: '/labels', label: 'Étiquettes', icon: '▦' },
   { href: '/setup', label: 'SET UP', icon: '◫' },
+  { href: '/import', label: 'Import / Export', icon: '⇩' },
   { href: '/settings', label: 'Réglages', icon: '⚙' },
 ]
 
@@ -693,6 +694,14 @@ export function AppShell({
                   </div>
                 )
               })}
+
+              <Link
+                href="/import"
+                className={isActive(pathname, '/import') ? 'active' : ''}
+              >
+                <span className="nskSidebarIcon" aria-hidden="true">⇩</span>
+                <span>Import / Export</span>
+              </Link>
 
               <Link
                 href="/settings"
