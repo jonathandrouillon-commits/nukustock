@@ -7,6 +7,7 @@ import {
   type CSSProperties,
 } from 'react'
 import { supabase } from '@/lib/supabase'
+import RequisitionPushNotifications from '@/components/requisition-push-notifications'
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>
@@ -1197,6 +1198,7 @@ export default function RequisitionPage() {
         }
       `}</style>
       <main style={styles.page}>
+        <RequisitionPushNotifications />
       <header style={styles.header}>
         <div>
           <div style={styles.eyebrow}>
