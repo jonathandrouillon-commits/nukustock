@@ -64,9 +64,7 @@ function arrayBuffersEqual(
 
 export default function BarPushNotifications() {
   const [state, setState] =
-    useState<PermissionState>(
-      'default'
-    )
+    useState<PermissionState>('default')
 
   const [loading, setLoading] =
     useState(false)
@@ -81,8 +79,7 @@ export default function BarPushNotifications() {
    */
   const syncPushSubscription =
     async (
-      requestPermission:
-        boolean
+      requestPermission: boolean
     ) => {
       const publicKey =
         process.env
@@ -101,22 +98,18 @@ export default function BarPushNotifications() {
         Notification.permission
 
       if (
-        permission ===
-          'default' &&
+        permission === 'default' &&
         requestPermission
       ) {
         permission =
-          await Notification
-            .requestPermission()
+          await Notification.requestPermission()
       }
 
       if (
-        permission !==
-        'granted'
+        permission !== 'granted'
       ) {
         setState(
-          permission ===
-            'denied'
+          permission === 'denied'
             ? 'denied'
             : 'default'
         )
@@ -130,18 +123,14 @@ export default function BarPushNotifications() {
        * Service Worker
        */
       const registration =
-        await navigator
-          .serviceWorker
-          .register(
-            '/bar-sw.js',
-            {
-              scope: '/',
-            }
-          )
+        await navigator.serviceWorker.register(
+          '/bar-sw.js',
+          {
+            scope: '/',
+          }
+        )
 
-      await navigator
-        .serviceWorker
-        .ready
+      await navigator.serviceWorker.ready
 
       const vapidKey =
         urlBase64ToUint8Array(
@@ -152,14 +141,12 @@ export default function BarPushNotifications() {
        * Subscription existante Chrome
        */
       let subscription =
-        await registration
-          .pushManager
+        await registration.pushManager
           .getSubscription()
 
       /**
-       * IMPORTANT :
-       * si l'ancienne subscription
-       * utilise une ancienne clé VAPID,
+       * Si la subscription utilise
+       * une ancienne clé VAPID,
        * on la supprime.
        */
       if (subscription) {
@@ -178,41 +165,35 @@ export default function BarPushNotifications() {
             'Ancienne clé VAPID détectée : suppression de la subscription.'
           )
 
-          await subscription
-            .unsubscribe()
+          await subscription.unsubscribe()
 
           subscription = null
         }
       }
 
       /**
-       * Nouvelle subscription
+       * Création d'une nouvelle subscription
        */
       if (!subscription) {
         subscription =
-          await registration
-            .pushManager
+          await registration.pushManager
             .subscribe({
-              userVisibleOnly:
-                true,
-
+              userVisibleOnly: true,
               applicationServerKey:
                 vapidKey,
             })
       }
 
       /**
-       * Utilisateur Supabase
+       * Utilisateur connecté Supabase
        */
       const {
         data: {
           user,
         },
-        error:
-          userError,
+        error: userError,
       } =
-        await supabase
-          .auth
+        await supabase.auth
           .getUser()
 
       if (userError) {
@@ -226,16 +207,11 @@ export default function BarPushNotifications() {
       }
 
       /**
-       * Réenregistrement
-       * systématique dans Supabase.
-       *
-       * Même si Chrome dit déjà
-       * "notifications actives",
-       * on remet la ligne en base.
+       * Enregistrement / resynchronisation
+       * de la subscription dans Supabase.
        */
       const {
-        error:
-          subscriptionError,
+        error: subscriptionError,
       } =
         await supabase
           .from(
@@ -281,19 +257,85 @@ export default function BarPushNotifications() {
         subscription.endpoint
       )
 
-      setState(
-        'enabled'
-      )
+      setState('enabled')
 
       return subscription
     }
 
   /**
-   * Au chargement :
+   * Test LOCAL de notification.
    *
-   * si Chrome autorise déjà
-   * les notifications, on resynchronise
-   * automatiquement Supabase.
+   * Ce test ne passe PAS par :
+   * - la réquisition
+   * - Supabase Edge Function
+   * - FCM
+   *
+   * Il vérifie uniquement si Android/Chrome
+   * peut afficher une notification.
+   */
+  const testNotification =
+    async () => {
+      setMessage('')
+
+      try {
+        if (
+          !(
+            'serviceWorker' in
+            navigator
+          )
+        ) {
+          throw new Error(
+            'Service Worker non disponible.'
+          )
+        }
+
+        if (
+          Notification.permission !==
+          'granted'
+        ) {
+          throw new Error(
+            'Les notifications ne sont pas autorisées.'
+          )
+        }
+
+        const registration =
+          await navigator.serviceWorker
+            .ready
+
+        await registration
+          .showNotification(
+            'Test Bar Nuku',
+            {
+              body:
+                'Si tu vois cette notification, Bar Nuku peut afficher les notifications sur ce téléphone.',
+              tag:
+                'bar-nuku-test',
+              requireInteraction:
+                false,
+            }
+          )
+
+        setMessage(
+          'Notification test envoyée.'
+        )
+      } catch (
+        caughtError
+      ) {
+        console.error(
+          'Test notification Bar Nuku:',
+          caughtError
+        )
+
+        setMessage(
+          caughtError instanceof Error
+            ? caughtError.message
+            : 'Impossible d’afficher la notification test.'
+        )
+      }
+    }
+
+  /**
+   * Initialisation
    */
   useEffect(() => {
     const initialize =
@@ -320,8 +362,7 @@ export default function BarPushNotifications() {
         }
 
         if (
-          Notification
-            .permission ===
+          Notification.permission ===
           'denied'
         ) {
           setState(
@@ -331,15 +372,17 @@ export default function BarPushNotifications() {
           return
         }
 
+        /**
+         * Si Chrome a déjà l'autorisation,
+         * on resynchronise automatiquement
+         * l'abonnement avec Supabase.
+         */
         if (
-          Notification
-            .permission ===
+          Notification.permission ===
           'granted'
         ) {
           try {
-            setLoading(
-              true
-            )
+            setLoading(true)
 
             await syncPushSubscription(
               false
@@ -361,15 +404,12 @@ export default function BarPushNotifications() {
             )
 
             setMessage(
-              caughtError instanceof
-                Error
+              caughtError instanceof Error
                 ? caughtError.message
                 : 'Impossible de synchroniser les notifications.'
             )
           } finally {
-            setLoading(
-              false
-            )
+            setLoading(false)
           }
 
           return
@@ -384,7 +424,7 @@ export default function BarPushNotifications() {
   }, [])
 
   /**
-   * Bouton activation
+   * Activation manuelle
    */
   const enableNotifications =
     async () => {
@@ -408,18 +448,18 @@ export default function BarPushNotifications() {
         )
 
         setMessage(
-          caughtError instanceof
-            Error
+          caughtError instanceof Error
             ? caughtError.message
             : 'Impossible d’activer les notifications.'
         )
       } finally {
-        setLoading(
-          false
-        )
+        setLoading(false)
       }
     }
 
+  /**
+   * Navigateur incompatible
+   */
   if (
     state ===
     'unsupported'
@@ -427,6 +467,9 @@ export default function BarPushNotifications() {
     return null
   }
 
+  /**
+   * Notifications activées
+   */
   if (
     state ===
     'enabled'
@@ -437,6 +480,16 @@ export default function BarPushNotifications() {
           🔔 Notifications actives
         </span>
 
+        <button
+          type="button"
+          className="barPushButton"
+          onClick={
+            testNotification
+          }
+        >
+          Tester la notification
+        </button>
+
         {message && (
           <small>
             {message}
@@ -446,6 +499,9 @@ export default function BarPushNotifications() {
     )
   }
 
+  /**
+   * Notifications bloquées
+   */
   if (
     state ===
     'denied'
@@ -458,6 +514,9 @@ export default function BarPushNotifications() {
     )
   }
 
+  /**
+   * Notifications pas encore activées
+   */
   return (
     <div className="barPushBox">
       <button
