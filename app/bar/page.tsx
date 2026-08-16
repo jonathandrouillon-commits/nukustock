@@ -169,7 +169,7 @@ export default function BarPage() {
       if (filter === 'Livrées') {
         return sorted.filter(
           (request) =>
-            request.status === 'Livrée'
+            Boolean(request.deliveredAt)
         )
       }
 
@@ -659,7 +659,7 @@ export default function BarPage() {
     const finalStatus =
       validation.hasNonFullLine
         ? ('Partielle' as const)
-        : ('Livrée' as const)
+        : ('Préparation' as const)
 
     const timestamp =
       new Date().toISOString()
@@ -802,8 +802,13 @@ export default function BarPage() {
              */
             status: finalStatus,
 
+            /*
+             * Le stock est traité maintenant,
+             * mais la livraison sera confirmée
+             * séparément.
+             */
             deliveredAt:
-              timestamp,
+              request.deliveredAt,
 
             stockAppliedAt:
               timestamp,
@@ -835,9 +840,57 @@ export default function BarPage() {
     setModalError('')
 
     setMessage(
-      finalStatus === 'Livrée'
-        ? `Réquisition ${currentRequest.id} livrée complètement et clôturée.`
-        : `Réquisition ${currentRequest.id} traitée partiellement et clôturée.`
+      finalStatus === 'Préparation'
+        ? `Réquisition ${currentRequest.id} traitée. Stock déduit. Livraison à confirmer.`
+        : `Réquisition ${currentRequest.id} traitée partiellement. Stock déduit selon les quantités données. Livraison à confirmer.`
+    )
+  }
+
+  const confirmDelivery = (
+    request: InternalRequest
+  ) => {
+    if (!request.stockAppliedAt) {
+      setError(
+        'Cette réquisition doit être traitée avant de confirmer la livraison.'
+      )
+      return
+    }
+
+    if (request.deliveredAt) {
+      setMessage(
+        `La livraison de ${request.id} est déjà confirmée.`
+      )
+      return
+    }
+
+    const deliveredAt =
+      new Date().toISOString()
+
+    const updatedRequests =
+      requests.map((item) => {
+        if (item.id !== request.id) {
+          return item
+        }
+
+        return {
+          ...item,
+          /*
+           * Une livraison partielle reste
+           * identifiable comme Partielle.
+           * Une livraison complète devient Livrée.
+           */
+          status:
+            item.status === 'Partielle'
+              ? ('Partielle' as const)
+              : ('Livrée' as const),
+          deliveredAt,
+        }
+      })
+
+    saveRequests(updatedRequests)
+    setError('')
+    setMessage(
+      `Livraison ${request.id} confirmée.`
     )
   }
 
@@ -1122,9 +1175,7 @@ export default function BarPage() {
                   </div>
 
                   <div className="requestActions">
-                    {!request.stockAppliedAt &&
-                    request.status !==
-                      'Livrée' ? (
+                    {!request.stockAppliedAt ? (
                       <button
                         type="button"
                         className="treatButton"
@@ -1136,9 +1187,27 @@ export default function BarPage() {
                       >
                         Traiter la demande
                       </button>
+                    ) : !request.deliveredAt ? (
+                      <div className="deliveryActions">
+                        <div className="treatedLabel">
+                          ✓ Demande traitée
+                        </div>
+
+                        <button
+                          type="button"
+                          className="deliveryButton"
+                          onClick={() =>
+                            confirmDelivery(
+                              request
+                            )
+                          }
+                        >
+                          ✓ Valider la livraison
+                        </button>
+                      </div>
                     ) : (
-                      <div className="treatedLabel">
-                        ✓ Demande traitée
+                      <div className="deliveredLabel">
+                        ✓ Livraison validée
                       </div>
                     )}
                   </div>
@@ -1891,6 +1960,46 @@ export default function BarPage() {
           font-size: 10px;
           font-weight: 800;
         }
+        .deliveryActions {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+
+        .deliveryButton {
+          min-height: 40px;
+          padding: 0 16px;
+          border: 1px solid #12b76a;
+          border-radius: 10px;
+          background: #12b76a;
+          color: #fff;
+          font: inherit;
+          font-size: 11px;
+          font-weight: 900;
+          cursor: pointer;
+        }
+
+        .deliveryButton:hover {
+          background: #039855;
+          border-color: #039855;
+        }
+
+        .deliveredLabel {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 40px;
+          padding: 0 14px;
+          border: 1px solid #abefc6;
+          border-radius: 10px;
+          background: #ecfdf3;
+          color: #027a48;
+          font-size: 11px;
+          font-weight: 900;
+        }
+
 
         .emptyState {
           padding: 50px 20px;
