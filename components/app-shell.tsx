@@ -88,9 +88,15 @@ const navGroups: NavGroup[] = [
     icon: '▣',
     items: [
       { href: '/products', label: 'Produits', icon: '▣' },
-      { href: '/equipment-glassware', label: 'Matériel & Verrerie', icon: '▦' },
       { href: '/product-images', label: 'Photos produits', icon: '▧' },
       { href: '/labels', label: 'Étiquettes', icon: '▦' },
+    ],
+  },
+  {
+    label: 'MATÉRIEL & VERRERIE',
+    icon: '▦',
+    items: [
+      { href: '/equipment-glassware', label: 'Listing Matériel & Verrerie', icon: '▦' },
     ],
   },
   {
@@ -243,6 +249,7 @@ export function AppShell({
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     PRODUITS: true,
+    'MATÉRIEL & VERRERIE': true,
     STOCKS: true,
     APPROVISIONNEMENT: true,
     'BAR TEAM': true,
