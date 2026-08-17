@@ -991,7 +991,7 @@ export default function BarPage() {
         </div>
       )}
 
-      <BarPushNotifications />
+      {/* <BarPushNotifications /> */}
 
       <section className="quickLinks">
         <Link
