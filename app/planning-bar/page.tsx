@@ -372,6 +372,35 @@ function dedupePlanningsByWeek(
   return Array.from(byWeek.values())
 }
 
+
+function mergeSignaturesIntoSavedPlannings(
+  plannings: Array<SavedPlanning | null | undefined>,
+  signatures: WeeklySignatures
+) {
+  return plannings.map(saved => {
+    if (!saved) return saved
+
+    const weekPrefix = `${saved.weekStart}:`
+    const signaturesForWeek = Object.entries(signatures).reduce<WeeklySignatures>(
+      (result, [key, signature]) => {
+        if (key.startsWith(weekPrefix) && signature?.signed) {
+          result[key] = signature
+        }
+        return result
+      },
+      {}
+    )
+
+    return {
+      ...saved,
+      weeklySignatures: {
+        ...(saved.weeklySignatures || {}),
+        ...signaturesForWeek,
+      },
+    }
+  })
+}
+
 function mergeHistoricalPlannings(
   existing: Array<SavedPlanning | null | undefined>
 ) {
@@ -726,6 +755,99 @@ function formatShortDateForList(value: string) {
 }
 
 
+
+function isWeeklySignature(value: unknown): value is WeeklySignature {
+  if (!value || typeof value !== 'object') return false
+
+  const candidate = value as Partial<WeeklySignature>
+
+  return (
+    candidate.signed === true &&
+    typeof candidate.signatureDataUrl === 'string' &&
+    candidate.signatureDataUrl.startsWith('data:image/') &&
+    typeof candidate.signedAt === 'string'
+  )
+}
+
+function recoverSignaturesFromUnknownValue(
+  value: unknown,
+  result: WeeklySignatures
+) {
+  if (!value || typeof value !== 'object') return
+
+  if (Array.isArray(value)) {
+    value.forEach(item =>
+      recoverSignaturesFromUnknownValue(
+        item,
+        result
+      )
+    )
+    return
+  }
+
+  const record = value as Record<string, unknown>
+
+  Object.entries(record).forEach(([key, child]) => {
+    if (
+      /^\d{4}-\d{2}-\d{2}:.+/.test(key) &&
+      isWeeklySignature(child)
+    ) {
+      result[key] = child
+    }
+
+    recoverSignaturesFromUnknownValue(
+      child,
+      result
+    )
+  })
+}
+
+function recoverLegacySignaturesFromLocalStorage() {
+  const recovered: WeeklySignatures = {}
+
+  try {
+    for (
+      let index = 0;
+      index < window.localStorage.length;
+      index += 1
+    ) {
+      const key =
+        window.localStorage.key(index)
+
+      if (!key) continue
+
+      const normalized =
+        key.toLowerCase()
+
+      if (
+        !normalized.includes('planning') &&
+        !normalized.includes('signature') &&
+        !normalized.includes('bar')
+      ) {
+        continue
+      }
+
+      const raw =
+        window.localStorage.getItem(key)
+
+      if (!raw) continue
+
+      try {
+        recoverSignaturesFromUnknownValue(
+          JSON.parse(raw),
+          recovered
+        )
+      } catch {
+        // Ignore les anciennes valeurs qui ne sont pas du JSON.
+      }
+    }
+  } catch {
+    // localStorage peut être indisponible dans certains contextes.
+  }
+
+  return recovered
+}
+
 function savedEmployeeSignature(
   saved: SavedPlanning,
   employeeId: string
@@ -801,23 +923,48 @@ function BarPlanningPage() {
       }
       if (p) setPlanning(JSON.parse(p))
       if (w) setWeekStart(w)
-      if (s) setWeeklySignatures(JSON.parse(s))
+      const parsedSignatures: WeeklySignatures =
+        s ? JSON.parse(s) : {}
+
+      const legacySignatures =
+        recoverLegacySignaturesFromLocalStorage()
+
+      const allRecoveredSignatures: WeeklySignatures = {
+        ...legacySignatures,
+        ...parsedSignatures,
+      }
+
+      if (Object.keys(allRecoveredSignatures).length) {
+        setWeeklySignatures(allRecoveredSignatures)
+      }
       if (special) setSpecialDayInfo(JSON.parse(special))
+
       if (saved) {
         const parsedSaved = JSON.parse(saved) as Array<
           SavedPlanning | null | undefined
         >
 
-        setSavedPlannings(
-          mergeHistoricalPlannings(
+        const restoredSaved =
+          mergeSignaturesIntoSavedPlannings(
             Array.isArray(parsedSaved)
               ? parsedSaved
-              : []
+              : [],
+            allRecoveredSignatures
+          )
+
+        setSavedPlannings(
+          mergeHistoricalPlannings(
+            restoredSaved
           )
         )
       } else {
         setSavedPlannings(
-          HISTORICAL_PLANNINGS
+          mergeHistoricalPlannings(
+            mergeSignaturesIntoSavedPlannings(
+              HISTORICAL_PLANNINGS,
+              allRecoveredSignatures
+            )
+          )
         )
       }
     } catch {}
@@ -1231,6 +1378,43 @@ function BarPlanningPage() {
   }
 
 
+
+  const recoverLegacySignatures = () => {
+    const recovered =
+      recoverLegacySignaturesFromLocalStorage()
+
+    const recoveredCount =
+      Object.keys(recovered).length
+
+    if (!recoveredCount) {
+      window.alert(
+        'Aucune ancienne signature exploitable n’a été retrouvée dans le stockage de ce navigateur.'
+      )
+      return
+    }
+
+    setWeeklySignatures(current => ({
+      ...recovered,
+      ...current,
+    }))
+
+    setSavedPlannings(current =>
+      mergeHistoricalPlannings(
+        mergeSignaturesIntoSavedPlannings(
+          current,
+          {
+            ...recovered,
+            ...weeklySignatures,
+          }
+        )
+      )
+    )
+
+    window.alert(
+      `${recoveredCount} signature${recoveredCount > 1 ? 's' : ''} retrouvée${recoveredCount > 1 ? 's' : ''} dans ce navigateur.`
+    )
+  }
+
   const exportExcel = () => {
     const headerCells = days
       .map(day => {
@@ -1576,7 +1760,8 @@ function BarPlanningPage() {
         (result, employee) => {
           const key = `${weekStart}:${employee.id}`
           const signature =
-            weeklySignatures[key]
+            weeklySignatures[key] ||
+            existing?.weeklySignatures?.[key]
 
           if (signature) {
             result[key] =
@@ -1587,7 +1772,9 @@ function BarPlanningPage() {
 
           return result
         },
-        {}
+        {
+          ...(existing?.weeklySignatures || {}),
+        }
       ),
     }
 
@@ -2253,6 +2440,14 @@ function BarPlanningPage() {
                 Retrouve les semaines enregistrées et change leur statut.
               </p>
             </div>
+
+            <button
+              type="button"
+              className="btn noPrint"
+              onClick={recoverLegacySignatures}
+            >
+              Rechercher anciennes signatures
+            </button>
           </div>
 
           <div className="savedPlanningList">
@@ -2278,6 +2473,35 @@ function BarPlanningPage() {
                         savedPlanningTotalMinutes(saved)
                       )}
                     </b>
+
+                    <div className="savedPlanningSignatures">
+                      {(() => {
+                        const signedEmployees =
+                          saved.employees.filter(employee =>
+                            savedEmployeeIsSigned(
+                              saved,
+                              employee.id
+                            )
+                          )
+
+                        return signedEmployees.length > 0 ? (
+                          <>
+                            <span className="signedPlanningBadge">
+                              ✓ Signé
+                            </span>
+                            <small>
+                              {signedEmployees.length}/
+                              {saved.employees.length} signature
+                              {saved.employees.length > 1 ? 's' : ''}
+                            </small>
+                          </>
+                        ) : (
+                          <small>
+                            Aucune signature enregistrée
+                          </small>
+                        )
+                      })()}
+                    </div>
                   </div>
 
                   <div className="savedPlanningStatus">
@@ -3096,6 +3320,11 @@ function BarPlanningPage() {
         .signatureModalCard { width:min(620px,100%); background:#fff; border-radius:16px; padding:18px; box-shadow:0 24px 70px rgba(16,24,40,.28); }
         .signatureModalCard h2 { margin:0; }
         .signatureModalCard p { color:#667085; font-size:12px; }
+
+
+        .savedPlanningSignatures { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:8px; }
+        .savedPlanningSignatures small { color:#667085; font-size:10px; font-weight:700; }
+        .signedPlanningBadge { display:inline-flex; align-items:center; min-height:24px; padding:0 8px; border-radius:999px; background:#dcfae6; color:#067647; font-size:10px; font-weight:900; }
 
         @media (max-width: 760px) {
           .topActions, .topNavGroup, .topActionGroup { width:100%; }
