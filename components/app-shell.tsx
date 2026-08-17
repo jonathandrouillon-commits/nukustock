@@ -63,7 +63,6 @@ const navItems: NavItem[] = [
   { href: '/', label: 'Dashboard', icon: '⌂' },
   { href: '/scan', label: 'Scan QR', icon: '⌗' },
   { href: '/products', label: 'Produits', icon: '▣' },
-  { href: '/equipment-glassware', label: 'Matériel & Verrerie', icon: '▦' },
   { href: '/product-images', label: 'Photos produits', icon: '▧' },
   { href: '/stocks', label: 'Stocks', icon: '▤' },
   { href: '/stock-entry', label: 'Entrée rapide', icon: '＋' },
@@ -90,13 +89,6 @@ const navGroups: NavGroup[] = [
       { href: '/products', label: 'Produits', icon: '▣' },
       { href: '/product-images', label: 'Photos produits', icon: '▧' },
       { href: '/labels', label: 'Étiquettes', icon: '▦' },
-    ],
-  },
-  {
-    label: 'MATÉRIEL & VERRERIE',
-    icon: '▦',
-    items: [
-      { href: '/equipment-glassware', label: 'Listing Matériel & Verrerie', icon: '▦' },
     ],
   },
   {
@@ -249,7 +241,6 @@ export function AppShell({
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     PRODUITS: true,
-    'MATÉRIEL & VERRERIE': true,
     STOCKS: true,
     APPROVISIONNEMENT: true,
     'BAR TEAM': true,
