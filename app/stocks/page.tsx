@@ -2,56 +2,81 @@
 
 import { useMemo, useState, type CSSProperties } from 'react'
 import { Page, Card, Badge } from '@/components/ui'
-import { useInventories, useMasterData, useProducts } from '@/lib/store'
-import QRCode from 'qrcode'
+import { useMasterData, useProducts, useStockMovements } from '@/lib/store'
+import * as XLSX from 'xlsx'
+import { jsPDF } from 'jspdf'
+import { autoTable } from 'jspdf-autotable'
 import { QRCodeSVG } from 'qrcode.react'
+import QRCode from 'qrcode'
 import { ColumnVisibility, useColumnVisibility } from '@/components/column-visibility'
-import jsQR from 'jsqr'
+import type { StockMovement } from '@/lib/types'
 
-type InventoryPurpose =
-  | 'Stock initial'
-  | 'Contrôle'
-  | 'Séjour'
+type QuantityFilter =
+  | 'Tous'
+  | 'Rupture'
+  | '1-10'
+  | '11-50'
+  | '51-100'
+  | '100+'
+  | 'Sous minimum'
 
-type InventoryEntryMode =
-  | 'Saisie classique'
-  | 'Scan QR'
+type ExpiryFilter =
+  | 'Toutes'
+  | 'Périmé'
+  | "Moins d'un mois"
+  | 'De 1 à 3 mois'
+  | 'De 3 à 6 mois'
+  | 'De 6 mois à 1 an'
+  | "+ d'un an"
+  | 'Sans DLUO'
 
-type ActiveInventory = {
-  id: string
-  name: string
-  type: string
-  purpose: InventoryPurpose
-  entryMode: InventoryEntryMode
-  date: string
-  stayStartDate: string
-  stayEndDate: string
-  guestCount: number
-  durationDays: number
-  inventoryScope: InventoryScope
-  createdAt: string
+type ZoneFilter =
+  | 'All'
+  | 'Beverage'
+  | 'Food'
+  | 'Matériel & Accessoires'
+
+type SortKey =
+  | 'product'
+  | 'category'
+  | 'subcategory'
+  | 'supplier'
+  | 'location'
+  | 'expiry'
+  | 'quantity'
+  | 'price'
+  | 'value'
+
+type SortDirection = 'asc' | 'desc'
+
+type StockRow = {
+  product: any
+  lot: any
+  quantity: number
+  value: number
+  expiryPriority: string
 }
 
-
-type InventoryPrintColumnKey =
+type StockPrintColumnKey =
   | 'qrProduct'
   | 'qrCategory'
   | 'qrSubcategory'
   | 'qrLocation'
   | 'reference'
+  | 'product'
   | 'category'
   | 'subcategory'
-  | 'product'
+  | 'supplier'
   | 'location'
-  | 'theoretical'
-  | 'real'
-  | 'consumption'
+  | 'lot'
+  | 'expiry'
+  | 'quantity'
   | 'unit'
   | 'price'
   | 'value'
 
-const INVENTORY_PRINT_COLUMNS: {
-  key: InventoryPrintColumnKey
+const STOCK_PRINT_COLUMNS: {
+  key: StockPrintColumnKey
   label: string
 }[] = [
   { key: 'qrProduct', label: 'QR Produit' },
@@ -59,188 +84,724 @@ const INVENTORY_PRINT_COLUMNS: {
   { key: 'qrSubcategory', label: 'QR Sous-catégorie' },
   { key: 'qrLocation', label: 'QR Lieu' },
   { key: 'reference', label: 'Référence' },
+  { key: 'product', label: 'Produit' },
   { key: 'category', label: 'Catégorie' },
   { key: 'subcategory', label: 'Sous-catégorie' },
-  { key: 'product', label: 'Produit' },
+  { key: 'supplier', label: 'Fournisseur' },
   { key: 'location', label: 'Lieu' },
-  { key: 'theoretical', label: 'Théorique' },
-  { key: 'real', label: 'Réel' },
-  { key: 'consumption', label: 'Consommation' },
+  { key: 'lot', label: 'Lot' },
+  { key: 'expiry', label: 'DLUO / DLC' },
+  { key: 'quantity', label: 'Quantité disponible' },
   { key: 'unit', label: 'Unité' },
   { key: 'price', label: 'Prix unitaire' },
-  { key: 'value', label: 'Valeur consommée' },
+  { key: 'value', label: 'Valeur' },
 ]
 
-const DEFAULT_INVENTORY_PRINT_COLUMNS: InventoryPrintColumnKey[] = [
+const DEFAULT_STOCK_PRINT_COLUMNS: StockPrintColumnKey[] = [
   'reference',
   'product',
   'location',
-  'theoretical',
-  'real',
-  'consumption',
+  'expiry',
+  'quantity',
   'unit',
 ]
 
-const INVENTORY_SCREEN_COLUMNS = [
+const STOCK_SCREEN_COLUMNS = [
   { key: 'reference', label: 'Référence' },
   { key: 'photo', label: 'Photo' },
   { key: 'qrProduct', label: 'QR Produit', qr: true },
   { key: 'product', label: 'Produit' },
+  { key: 'zone', label: 'Zone' },
   { key: 'category', label: 'Catégorie' },
   { key: 'qrCategory', label: 'QR Catégorie', qr: true },
   { key: 'subcategory', label: 'Sous-catégorie' },
   { key: 'qrSubcategory', label: 'QR Sous-catégorie', qr: true },
   { key: 'location', label: 'Lieu' },
   { key: 'qrLocation', label: 'QR Lieu', qr: true },
-  { key: 'theoretical', label: 'Théorique' },
-  { key: 'real', label: 'Réel' },
-  { key: 'consumption', label: 'Consommation' },
-  { key: 'unit', label: 'Unité' },
-  { key: 'price', label: 'Prix unitaire' },
-  { key: 'value', label: 'Valeur consommée' },
+  { key: 'lot', label: 'Lot' },
+  { key: 'expiry', label: 'DLUO / DLC' },
+  { key: 'quantity', label: 'Disponible' },
+  { key: 'price', label: 'Prix' },
+  { key: 'value', label: 'Valeur' },
+  { key: 'unitWeight', label: 'Poids unitaire' },
+  { key: 'caseWeight', label: 'Poids conditionnement' },
+  { key: 'totalWeight', label: 'Poids total stock' },
+  { key: 'transfer', label: 'Transfert' },
 ]
 
-const INVENTORY_SCREEN_ESSENTIAL = [
+const STOCK_SCREEN_ESSENTIAL = [
   'reference',
   'photo',
   'qrProduct',
   'product',
+  'category',
+  'subcategory',
   'location',
-  'theoretical',
-  'real',
-  'consumption',
+  'expiry',
+  'quantity',
 ]
 
-const inventoryTypes = [
-  "Début d’exploitation",
-  "Fin d’exploitation",
-  'Journalier',
-  'Hebdomadaire',
-  'Mensuel',
-]
+function formatWeightKg(value: number | null | undefined) {
+  const numeric = Number(value || 0)
 
-
-type InventoryScope =
-  | 'Tous les inventaires'
-  | 'Beverage'
-  | 'Food'
-  | 'Matériel & Verrerie'
-
-const inventoryScopes: InventoryScope[] = [
-  'Tous les inventaires',
-  'Beverage',
-  'Food',
-  'Matériel & Verrerie',
-]
-
-const isProductInScope = (
-  product: {
-    category?: string
-    subcategory?: string
-    name?: string
-  },
-  scope: InventoryScope
-) => {
-  const haystack = `${product.category || ''} ${product.subcategory || ''} ${
-    product.name || ''
-  }`.toLowerCase()
-
-
-  if (scope === 'Tous les inventaires') {
-    return true
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return '—'
   }
 
-  const beverageKeywords = [
-    'alcool',
-    'vin',
-    'champagne',
-    'bière',
-    'biere',
-    'soft',
-    'soda',
-    'jus',
-    'sirop',
-    'eau',
-    'boisson',
-    'spiritueux',
-    'gin',
-    'vodka',
-    'rhum',
-    'tequila',
-    'mezcal',
-    'whisky',
-    'cognac',
-    'liqueur',
-  ]
+  return `${numeric.toLocaleString('fr-FR', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 3,
+  })} kg`
+}
 
-  const foodKeywords = [
+function normalizeZoneText(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+}
+
+function detectProductZone(product: any): ZoneFilter {
+  const explicitZone = String(
+    product.zone ||
+      product.family ||
+      product.inventoryScope ||
+      ''
+  ).trim()
+
+  if (
+    explicitZone === 'Beverage' ||
+    explicitZone === 'Food' ||
+    explicitZone === 'Matériel & Accessoires'
+  ) {
+    return explicitZone
+  }
+
+  const text = normalizeZoneText(
+    `${product.category || ''} ${product.subcategory || ''} ${
+      product.name || ''
+    }`
+  )
+
+  const foodWords = [
     'food',
     'aliment',
-    'nourriture',
-    'épicerie',
     'epicerie',
     'fruit',
-    'légume',
     'legume',
     'viande',
     'poisson',
     'produit frais',
-    'surgelé',
     'surgele',
-    'sec',
     'cuisine',
   ]
 
-  const equipmentKeywords = [
-    'matériel',
+  const materialWords = [
     'materiel',
+    'accessoire',
     'verrerie',
-    'équipement',
+    'verre',
     'equipement',
     'ustensile',
-    'glass',
-    'verre',
+    'barware',
     'assiette',
     'couvert',
-    'barware',
-    'outil',
   ]
 
-  if (scope === 'Food') {
-    return foodKeywords.some((keyword) => haystack.includes(keyword))
+  if (
+    foodWords.some((word) =>
+      text.includes(word)
+    )
+  ) {
+    return 'Food'
   }
 
-  if (scope === 'Matériel & Verrerie') {
-    return equipmentKeywords.some((keyword) => haystack.includes(keyword))
+  if (
+    materialWords.some((word) =>
+      text.includes(word)
+    )
+  ) {
+    return 'Matériel & Accessoires'
   }
 
-  // Les produits historiques de NukuStock sont principalement Beverage.
-  // Tout produit non identifié comme Food ou Matériel reste classé Beverage
-  // afin de ne pas disparaître de l'inventaire existant.
-  const isFood = foodKeywords.some((keyword) => haystack.includes(keyword))
-  const isEquipment = equipmentKeywords.some((keyword) =>
-    haystack.includes(keyword)
-  )
+  return 'Beverage'
+}
 
+function getProductPhoto(product: any) {
   return (
-    beverageKeywords.some((keyword) => haystack.includes(keyword)) ||
-    (!isFood && !isEquipment)
+    product.photoUrl ||
+    product.photo_url ||
+    product.photo ||
+    product.imageUrl ||
+    product.image_url ||
+    ''
   )
 }
 
-function formatQty(value: number) {
-  return Number((Number(value) || 0).toFixed(2)).toLocaleString('fr-FR', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })
-}
-
-export default function Inventory() {
-  const { items: products, save: saveProducts } = useProducts()
-  const { items: history, save: saveHistory } = useInventories()
+export default function Stocks() {
+  const { items, save: saveProducts } = useProducts()
   const { items: masterData } = useMasterData()
+  const {
+    items: stockMovements,
+    save: saveStockMovements,
+  } = useStockMovements()
+
+  const [search, setSearch] = useState('')
+  const [categoryFilter, setCategoryFilter] =
+    useState('Toutes')
+  const [subcategoryFilter, setSubcategoryFilter] =
+    useState('Toutes')
+  const [supplierFilter, setSupplierFilter] =
+    useState('Tous')
+  const [locationFilter, setLocationFilter] =
+    useState('Tous')
+
+  const [zoneFilter, setZoneFilter] =
+    useState<ZoneFilter>('All')
+
+  const [quantityFilter, setQuantityFilter] =
+    useState<QuantityFilter>('Tous')
+
+  const [expiryFilter, setExpiryFilter] =
+    useState<ExpiryFilter>('Toutes')
+
+  const [sortKey, setSortKey] =
+    useState<SortKey>('product')
+
+  const [sortDirection, setSortDirection] =
+    useState<SortDirection>('asc')
+
+  const stockDisplay = useColumnVisibility(
+    'nukustock_display_stocks_v1',
+    STOCK_SCREEN_ESSENTIAL
+  )
+
+  const [printColumnsOpen, setPrintColumnsOpen] =
+    useState(false)
+
+  const [stockPrintColumns, setStockPrintColumns] =
+    useState<StockPrintColumnKey[]>(
+      DEFAULT_STOCK_PRINT_COLUMNS
+    )
+
+  const [quickEntryOpen, setQuickEntryOpen] =
+    useState(false)
+  const [quickProductId, setQuickProductId] =
+    useState('')
+  const [quickQuantity, setQuickQuantity] =
+    useState(1)
+  const [quickLocation, setQuickLocation] =
+    useState('')
+  const [quickLotNumber, setQuickLotNumber] =
+    useState('')
+  const [quickExpiry, setQuickExpiry] =
+    useState('')
+  const [quickNeedsRegularization, setQuickNeedsRegularization] =
+    useState(true)
+  const [quickNote, setQuickNote] =
+    useState('')
+
+  const [transferOpen, setTransferOpen] = useState(false)
+  const [transferProductId, setTransferProductId] = useState('')
+  const [transferLotId, setTransferLotId] = useState('')
+  const [transferFromLocation, setTransferFromLocation] = useState('')
+  const [transferToLocation, setTransferToLocation] = useState('')
+  const [transferQuantity, setTransferQuantity] = useState(1)
+
+
+  const toggleStockPrintColumn = (
+    key: StockPrintColumnKey
+  ) => {
+    setStockPrintColumns((current) =>
+      current.includes(key)
+        ? current.filter((item) => item !== key)
+        : [...current, key]
+    )
+  }
+
+  const getExpiryPriority = (
+    expiryDate: string
+  ) => {
+    if (!expiryDate) {
+      return 'Sans DLUO'
+    }
+
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    const target = new Date(
+      `${expiryDate}T00:00:00`
+    )
+    target.setHours(0, 0, 0, 0)
+
+    const days =
+      (target.getTime() -
+        today.getTime()) /
+      (1000 * 60 * 60 * 24)
+
+    if (days < 0) return 'Périmé'
+    if (days < 30) {
+      return "Moins d'un mois"
+    }
+    if (days < 90) {
+      return 'De 1 à 3 mois'
+    }
+    if (days < 180) {
+      return 'De 3 à 6 mois'
+    }
+    if (days < 365) {
+      return 'De 6 mois à 1 an'
+    }
+
+    return "+ d'un an"
+  }
+
+  const getExpiryTone = (
+    expiryDate: string
+  ):
+    | 'danger'
+    | 'warn'
+    | 'good'
+    | 'neutral'
+    | 'info' => {
+    const priority =
+      getExpiryPriority(expiryDate)
+
+    if (
+      priority === 'Périmé' ||
+      priority === "Moins d'un mois"
+    ) {
+      return 'danger'
+    }
+
+    if (
+      priority === 'De 1 à 3 mois' ||
+      priority === 'De 3 à 6 mois'
+    ) {
+      return 'warn'
+    }
+
+    if (
+      priority === 'De 6 mois à 1 an'
+    ) {
+      return 'info'
+    }
+
+    if (priority === "+ d'un an") {
+      return 'good'
+    }
+
+    return 'neutral'
+  }
+
+  const categories = useMemo(
+    () =>
+      [
+        ...new Set(
+          items
+            .map((product) =>
+              product.category
+            )
+            .filter(Boolean)
+        ),
+      ].sort((a, b) =>
+        a.localeCompare(b, 'fr')
+      ),
+    [items]
+  )
+
+  const subcategories = useMemo(
+    () =>
+      [
+        ...new Set(
+          items
+            .filter(
+              (product) =>
+                categoryFilter ===
+                  'Toutes' ||
+                product.category ===
+                  categoryFilter
+            )
+            .map((product) =>
+              product.subcategory
+            )
+            .filter(Boolean)
+        ),
+      ].sort((a, b) =>
+        a.localeCompare(b, 'fr')
+      ),
+    [items, categoryFilter]
+  )
+
+  const suppliers = useMemo(
+    () =>
+      [
+        ...new Set(
+          items
+            .map((product) =>
+              product.mainSupplier
+            )
+            .filter(Boolean)
+        ),
+      ].sort((a, b) =>
+        a.localeCompare(b, 'fr')
+      ),
+    [items]
+  )
+
 
   const locations = useMemo(
+    () =>
+      [
+        ...new Set(
+          items.flatMap((product) =>
+            product.lots
+              .map((lot) => lot.location)
+              .filter(Boolean)
+          )
+        ),
+      ].sort((a, b) =>
+        a.localeCompare(b, 'fr')
+      ),
+    [items]
+  )
+
+  const allRows =
+    useMemo<StockRow[]>(() => {
+      return items.flatMap(
+        (product) => {
+          /*
+           * Même si un produit n'a aucun lot,
+           * on l'affiche avec un stock à zéro.
+           */
+          if (!product.lots.length) {
+            return [
+              {
+                product,
+                lot: {
+                  id: `empty-${product.id}`,
+                  lotNumber: '',
+                  expiry: '',
+                  location: '',
+                  quantity: 0,
+                },
+                quantity: 0,
+                value: 0,
+                expiryPriority:
+                  'Sans DLUO',
+              },
+            ]
+          }
+
+          return product.lots.map(
+            (lot) => {
+              const quantity = Math.max(
+                0,
+                Number(
+                  lot.quantity
+                ) || 0
+              )
+
+              return {
+                product,
+                lot,
+                quantity,
+                value:
+                  quantity *
+                  Math.max(
+                    0,
+                    Number(
+                      product.purchasePrice
+                    ) || 0
+                  ),
+                expiryPriority:
+                  getExpiryPriority(
+                    lot.expiry
+                  ),
+              }
+            }
+          )
+        }
+      )
+    }, [items])
+
+  const matchesQuantityFilter = (
+    quantity: number,
+    minStock: number
+  ) => {
+    switch (quantityFilter) {
+      case 'Rupture':
+        return quantity === 0
+
+      case '1-10':
+        return (
+          quantity >= 1 &&
+          quantity <= 10
+        )
+
+      case '11-50':
+        return (
+          quantity >= 11 &&
+          quantity <= 50
+        )
+
+      case '51-100':
+        return (
+          quantity >= 51 &&
+          quantity <= 100
+        )
+
+      case '100+':
+        return quantity > 100
+
+      case 'Sous minimum':
+        return quantity < minStock
+
+      default:
+        return true
+    }
+  }
+
+  const filteredRows = useMemo(
+    () => {
+      const query = search
+        .trim()
+        .toLowerCase()
+
+      const rows = allRows.filter(
+        ({
+          product,
+          lot,
+          quantity,
+          expiryPriority,
+        }) => {
+          const haystack =
+            `${product.internalRef || ''} ${
+              product.name || ''
+            } ${
+              product.category || ''
+            } ${
+              product.subcategory || ''
+            } ${
+              product.mainSupplier || ''
+            } ${lot.location || ''} ${
+              lot.lotNumber || ''
+            }`
+              .toLowerCase()
+
+          if (
+            query &&
+            !haystack.includes(query)
+          ) {
+            return false
+          }
+
+          if (
+            zoneFilter !== 'All' &&
+            detectProductZone(product) !== zoneFilter
+          ) {
+            return false
+          }
+
+          if (
+            categoryFilter !==
+              'Toutes' &&
+            product.category !==
+              categoryFilter
+          ) {
+            return false
+          }
+
+          if (
+            subcategoryFilter !==
+              'Toutes' &&
+            product.subcategory !==
+              subcategoryFilter
+          ) {
+            return false
+          }
+
+          if (
+            supplierFilter !==
+              'Tous' &&
+            product.mainSupplier !==
+              supplierFilter
+          ) {
+            return false
+          }
+
+          if (
+            locationFilter !==
+              'Tous' &&
+            lot.location !==
+              locationFilter
+          ) {
+            return false
+          }
+
+          if (
+            expiryFilter !==
+              'Toutes' &&
+            expiryPriority !==
+              expiryFilter
+          ) {
+            return false
+          }
+
+          if (
+            !matchesQuantityFilter(
+              quantity,
+              Math.max(
+                0,
+                Number(
+                  product.minStock
+                ) || 0
+              )
+            )
+          ) {
+            return false
+          }
+
+          return true
+        }
+      )
+
+      return [...rows].sort(
+        (a, b) => {
+          const getValue = (
+            row: StockRow
+          ) => {
+            switch (sortKey) {
+              case 'category':
+                return (
+                  row.product
+                    .category || ''
+                )
+
+              case 'subcategory':
+                return (
+                  row.product
+                    .subcategory || ''
+                )
+
+              case 'supplier':
+                return (
+                  row.product
+                    .mainSupplier || ''
+                )
+
+              case 'location':
+                return (
+                  row.lot.location || ''
+                )
+
+              case 'expiry':
+                return (
+                  row.lot.expiry ||
+                  '9999-12-31'
+                )
+
+              case 'quantity':
+                return row.quantity
+
+              case 'price':
+                return (
+                  Number(
+                    row.product
+                      .purchasePrice
+                  ) || 0
+                )
+
+              case 'value':
+                return row.value
+
+              case 'product':
+              default:
+                return (
+                  row.product.name ||
+                  ''
+                )
+            }
+          }
+
+          const av = getValue(a)
+          const bv = getValue(b)
+
+          const result =
+            typeof av === 'number' &&
+            typeof bv === 'number'
+              ? av - bv
+              : String(
+                  av
+                ).localeCompare(
+                  String(bv),
+                  'fr'
+                )
+
+          return sortDirection ===
+            'asc'
+            ? result
+            : -result
+        }
+      )
+    },
+    [
+      allRows,
+      search,
+      zoneFilter,
+      categoryFilter,
+      subcategoryFilter,
+      supplierFilter,
+      locationFilter,
+      quantityFilter,
+      expiryFilter,
+      sortKey,
+      sortDirection,
+    ]
+  )
+
+  const filteredProductIds =
+    useMemo(
+      () =>
+        new Set(
+          filteredRows.map(
+            (row) =>
+              row.product.id
+          )
+        ),
+      [filteredRows]
+    )
+
+  const totalQty =
+    filteredRows.reduce(
+      (sum, row) =>
+        sum + row.quantity,
+      0
+    )
+
+  const totalValue =
+    filteredRows.reduce(
+      (sum, row) =>
+        sum + row.value,
+      0
+    )
+
+  const expiredCount =
+    filteredRows.filter(
+      (row) =>
+        row.expiryPriority ===
+        'Périmé'
+    ).length
+
+  const underOneMonthCount =
+    filteredRows.filter(
+      (row) =>
+        row.expiryPriority ===
+        "Moins d'un mois"
+    ).length
+
+  const quickEntryLocations = useMemo(
     () =>
       masterData
         .filter(
@@ -258,667 +819,569 @@ export default function Inventory() {
     [masterData]
   )
 
-  const [activeInventory, setActiveInventory] =
-    useState<ActiveInventory | null>(null)
-
-  const [counted, setCounted] =
-    useState<Record<string, number>>({})
-
-  const [createOpen, setCreateOpen] = useState(false)
-  const [newName, setNewName] = useState('')
-  const [newType, setNewType] = useState("Début d’exploitation")
-  const [newPurpose, setNewPurpose] =
-    useState<InventoryPurpose>('Stock initial')
-
-  const [newEntryMode, setNewEntryMode] =
-    useState<InventoryEntryMode>('Saisie classique')
-  const [newScope, setNewScope] =
-    useState<InventoryScope>('Tous les inventaires')
-  const [newDate, setNewDate] = useState(
-    new Date().toISOString().slice(0, 10)
-  )
-
-  const [stayStartDate, setStayStartDate] = useState(
-    new Date().toISOString().slice(0, 10)
-  )
-
-  const [stayEndDate, setStayEndDate] = useState(
-    new Date().toISOString().slice(0, 10)
-  )
-
-  const [guestCount, setGuestCount] = useState(1)
-
-  const [expandedLocations, setExpandedLocations] =
-    useState<Record<string, boolean>>({})
-
-  const [msg, setMsg] = useState('')
-
-  const [closeOpen, setCloseOpen] = useState(false)
-  const [applyCountToStock, setApplyCountToStock] = useState(false)
-
-  const [scanLocation, setScanLocation] = useState('')
-  const [scanProductId, setScanProductId] = useState('')
-  const [scanQuantity, setScanQuantity] = useState(0)
-  const [scanMessage, setScanMessage] = useState('')
-  const [scanBusy, setScanBusy] = useState(false)
-
-  const inventoryDisplay = useColumnVisibility(
-    'nukustock_display_inventory_v1',
-    INVENTORY_SCREEN_ESSENTIAL
-  )
-
-  const [printColumnsOpen, setPrintColumnsOpen] =
-    useState(false)
-
-  const [inventoryPrintColumns, setInventoryPrintColumns] =
-    useState<InventoryPrintColumnKey[]>(
-      DEFAULT_INVENTORY_PRINT_COLUMNS
-    )
-
-  const toggleInventoryPrintColumn = (
-    key: InventoryPrintColumnKey
-  ) => {
-    setInventoryPrintColumns((current) =>
-      current.includes(key)
-        ? current.filter((item) => item !== key)
-        : [...current, key]
-    )
+  const resetQuickEntry = () => {
+    setQuickProductId('')
+    setQuickQuantity(1)
+    setQuickLocation('')
+    setQuickLotNumber('')
+    setQuickExpiry('')
+    setQuickNeedsRegularization(true)
+    setQuickNote('')
   }
 
-  const currentScope: InventoryScope =
-    activeInventory?.inventoryScope || newScope
+  const saveQuickEntry = () => {
+    const product = items.find(
+      (item) => item.id === quickProductId
+    )
 
-  const inventoryProducts = useMemo(
-    () =>
-      products.filter((product) =>
-        isProductInScope(product, currentScope)
-      ),
-    [products, currentScope]
-  )
-
-  const keyFor = (location: string, productId: string) =>
-    `${location}::${productId}`
-
-  const calculateStayDays = (startDate: string, endDate: string) => {
-    if (!startDate || !endDate) return 1
-
-    const start = new Date(`${startDate}T12:00:00`)
-    const end = new Date(`${endDate}T12:00:00`)
-
-    const diff =
-      Math.floor(
-        (end.getTime() - start.getTime()) /
-          (1000 * 60 * 60 * 24)
-      ) + 1
-
-    return Math.max(1, diff)
-  }
-
-  const theoretical = (
-    productId: string,
-    location: string
-  ) =>
-    inventoryProducts
-      .find((product) => product.id === productId)
-      ?.lots.filter((lot) => lot.location === location)
-      .reduce((sum, lot) => sum + lot.quantity, 0) || 0
-
-  const locationRows = useMemo(() => {
-    return locations.map((location) => {
-      const rows = inventoryProducts
-        .map((product) => {
-          const theoreticalQty = theoretical(product.id, location)
-
-          const key = keyFor(location, product.id)
-
-          const realQty =
-            counted[key] ?? theoreticalQty
-
-          const consumption = Math.max(
-            0,
-            theoreticalQty - realQty
-          )
-
-          return {
-            key,
-            product,
-            theoreticalQty,
-            realQty,
-            diff: consumption,
-            value: consumption * product.purchasePrice,
-          }
-        })
-        .filter(
-          (row) =>
-            row.theoreticalQty > 0 ||
-            counted[row.key] !== undefined
-        )
-
-      const theoreticalTotal = rows.reduce(
-        (sum, row) => sum + row.theoreticalQty,
-        0
-      )
-
-      const realTotal = rows.reduce(
-        (sum, row) => sum + row.realQty,
-        0
-      )
-
-      const diffTotal = rows.reduce(
-        (sum, row) => sum + row.diff,
-        0
-      )
-
-      const valueTotal = rows.reduce(
-        (sum, row) => sum + row.value,
-        0
-      )
-
-      const gapCount = rows.filter(
-        (row) => row.diff !== 0
-      ).length
-
-      return {
-        location,
-        rows,
-        theoreticalTotal,
-        realTotal,
-        diffTotal,
-        valueTotal,
-        gapCount,
-      }
-    })
-  }, [inventoryProducts, counted])
-
-  const locationsWithStock = locationRows.filter(
-    (group) => group.rows.length > 0
-  )
-
-  const globalTheoretical = locationsWithStock.reduce(
-    (sum, group) => sum + group.theoreticalTotal,
-    0
-  )
-
-  const globalReal = locationsWithStock.reduce(
-    (sum, group) => sum + group.realTotal,
-    0
-  )
-
-  const globalDiff = locationsWithStock.reduce(
-    (sum, group) => sum + group.diffTotal,
-    0
-  )
-
-  const globalValue = locationsWithStock.reduce(
-    (sum, group) => sum + group.valueTotal,
-    0
-  )
-
-  const globalGapCount = locationsWithStock.reduce(
-    (sum, group) => sum + group.gapCount,
-    0
-  )
-
-  const productConsumptionSummary = useMemo(() => {
-    if (!activeInventory) return []
-
-    return inventoryProducts
-      .map((product) => {
-        const consumption = locationsWithStock.reduce(
-          (sum, group) => {
-            const row = group.rows.find(
-              (item) => item.product.id === product.id
-            )
-
-            return sum + (row?.diff || 0)
-          },
-          0
-        )
-
-        const value =
-          consumption * product.purchasePrice
-
-        const perDay =
-          consumption /
-          Math.max(1, activeInventory.durationDays)
-
-        const perGuest =
-          consumption /
-          Math.max(1, activeInventory.guestCount)
-
-        const perGuestPerDay =
-          consumption /
-          Math.max(
-            1,
-            activeInventory.guestCount *
-              activeInventory.durationDays
-          )
-
-        return {
-          product,
-          consumption,
-          value,
-          perDay,
-          perGuest,
-          perGuestPerDay,
-        }
-      })
-      .filter((row) => row.consumption > 0)
-      .sort((a, b) => b.consumption - a.consumption)
-  }, [
-    inventoryProducts,
-    locationsWithStock,
-    activeInventory,
-  ])
-
-  const createInventory = () => {
-    if (
-      newPurpose === 'Séjour' &&
-      (!stayStartDate || !stayEndDate)
-    ) {
-      alert('Renseigne les dates de début et de fin du séjour.')
+    if (!product) {
+      window.alert('Choisis un produit.')
       return
     }
 
-    if (
-      newPurpose === 'Séjour' &&
-      new Date(`${stayEndDate}T12:00:00`).getTime() <
-        new Date(`${stayStartDate}T12:00:00`).getTime()
-    ) {
-      alert('La date de fin du séjour doit être postérieure ou égale à la date de début.')
-      return
-    }
-
-    if (newPurpose === 'Séjour' && guestCount <= 0) {
-      alert("Le nombre d'invités doit être supérieur à 0.")
-      return
-    }
-
-    const effectiveStayStart =
-      newPurpose === 'Séjour' ? stayStartDate : newDate
-    const effectiveStayEnd =
-      newPurpose === 'Séjour' ? stayEndDate : newDate
-
-    const durationDays =
-      newPurpose === 'Séjour'
-        ? calculateStayDays(
-            effectiveStayStart,
-            effectiveStayEnd
-          )
-        : 1
-
-    const id = `INV-${Date.now()
-      .toString()
-      .slice(-6)}`
-
-    const inventory: ActiveInventory = {
-      id,
-      name:
-        newName.trim() ||
-        `${newScope} - ${newPurpose} - ${newType}`,
-      type: newType,
-      purpose: newPurpose,
-      entryMode: newEntryMode,
-      inventoryScope: newScope,
-      date: newDate,
-      stayStartDate: effectiveStayStart,
-      stayEndDate: effectiveStayEnd,
-      guestCount:
-        newPurpose === 'Séjour' ? guestCount : 1,
-      durationDays,
-      createdAt: new Date().toISOString(),
-    }
-
-    setActiveInventory(inventory)
-    setCounted({})
-    setScanLocation('')
-    setScanProductId('')
-    setScanQuantity(0)
-    setScanMessage('')
-
-    const defaultExpanded: Record<string, boolean> = {}
-
-    locationsWithStock.forEach((group, index) => {
-      defaultExpanded[group.location] = index === 0
-    })
-
-    setExpandedLocations(defaultExpanded)
-    setCreateOpen(false)
-    setMsg(
-      `Inventaire ${inventory.inventoryScope} ${inventory.id} créé. Le comptage est organisé par lieu de stockage.`
+    const quantity = Math.max(
+      0,
+      Number(quickQuantity) || 0
     )
-  }
 
-  const cancelInventory = () => {
-    if (
-      !confirm(
-        "Annuler l'inventaire global en cours ? Les quantités saisies seront perdues."
+    if (quantity <= 0) {
+      window.alert(
+        'La quantité doit être supérieure à 0.'
       )
-    ) {
       return
     }
 
-    setActiveInventory(null)
-    setCounted({})
-    setExpandedLocations({})
-    setScanLocation('')
-    setScanProductId('')
-    setScanQuantity(0)
-    setScanMessage('')
-    setMsg('Inventaire en cours annulé.')
-  }
+    if (!quickLocation) {
+      window.alert('Choisis un lieu de stockage.')
+      return
+    }
 
-  const adjustLocationQuantity = (
-    product: any,
-    location: string,
-    targetQty: number,
-    inventoryId: string
-  ) => {
-    const safeTarget = Math.max(0, Number(targetQty) || 0)
-
-    const locationLots = product.lots
-      .map((lot: any, index: number) => ({ lot, index }))
-      .filter(({ lot }: any) => lot.location === location)
-
-    const currentQty = locationLots.reduce(
-      (sum: number, { lot }: any) =>
-        sum + Math.max(0, Number(lot.quantity) || 0),
-      0
+    const sameLotIndex = product.lots.findIndex(
+      (lot) =>
+        lot.location === quickLocation &&
+        (lot.lotNumber || '') ===
+          quickLotNumber.trim() &&
+        (lot.expiry || '') === quickExpiry
     )
 
-    if (currentQty === safeTarget) {
-      return product
-    }
+    const nextLots = product.lots.map(
+      (lot) => ({ ...lot })
+    )
 
-    const nextLots = product.lots.map((lot: any) => ({ ...lot }))
-
-    if (locationLots.length === 0) {
-      if (safeTarget <= 0) return product
-
-      nextLots.push({
-        id: crypto.randomUUID(),
-        lotNumber: `INV-${inventoryId}`,
-        expiry: '',
-        location,
-        quantity: safeTarget,
-      })
-
-      return {
-        ...product,
-        lots: nextLots,
-      }
-    }
-
-    if (safeTarget > currentQty) {
-      const difference = safeTarget - currentQty
-
-      const preferred = [...locationLots].sort((a: any, b: any) => {
-        const aExpiry = a.lot.expiry || '9999-12-31'
-        const bExpiry = b.lot.expiry || '9999-12-31'
-        return aExpiry.localeCompare(bExpiry)
-      })[0]
-
-      nextLots[preferred.index] = {
-        ...nextLots[preferred.index],
+    if (sameLotIndex >= 0) {
+      nextLots[sameLotIndex] = {
+        ...nextLots[sameLotIndex],
         quantity:
           Math.max(
             0,
-            Number(nextLots[preferred.index].quantity) || 0
-          ) + difference,
+            Number(
+              nextLots[sameLotIndex].quantity
+            ) || 0
+          ) + quantity,
       }
-
-      return {
-        ...product,
-        lots: nextLots,
-      }
-    }
-
-    let toRemove = currentQty - safeTarget
-
-    const ordered = [...locationLots].sort((a: any, b: any) => {
-      const aExpiry = a.lot.expiry || '9999-12-31'
-      const bExpiry = b.lot.expiry || '9999-12-31'
-      return aExpiry.localeCompare(bExpiry)
-    })
-
-    ordered.forEach(({ index }: any) => {
-      if (toRemove <= 0) return
-
-      const available = Math.max(
-        0,
-        Number(nextLots[index].quantity) || 0
-      )
-      const reduction = Math.min(available, toRemove)
-
-      nextLots[index] = {
-        ...nextLots[index],
-        quantity: available - reduction,
-      }
-
-      toRemove -= reduction
-    })
-
-    return {
-      ...product,
-      lots: nextLots,
-    }
-  }
-
-  const applyInventoryToStock = () => {
-    if (!activeInventory) return
-
-    let nextProducts = products.map((product) => ({
-      ...product,
-      lots: product.lots.map((lot) => ({ ...lot })),
-    }))
-
-    locationsWithStock.forEach((group) => {
-      group.rows.forEach((row) => {
-        nextProducts = nextProducts.map((product) =>
-          product.id === row.product.id
-            ? adjustLocationQuantity(
-                product,
-                group.location,
-                row.realQty,
-                activeInventory.id
-              )
-            : product
-        )
+    } else {
+      nextLots.push({
+        id: crypto.randomUUID(),
+        lotNumber: quickLotNumber.trim(),
+        expiry: quickExpiry,
+        location: quickLocation,
+        quantity,
       })
-    })
+    }
 
-    saveProducts(nextProducts)
-  }
-
-  const finalizeInventory = () => {
-    if (!activeInventory) return
-
-    const lines = locationsWithStock.flatMap((group) =>
-      group.rows.map((row) => ({
-        productId: row.product.id,
-        productName: row.product.name,
-        location: group.location,
-        theoretical: row.theoreticalQty,
-        real: row.realQty,
-        diff: row.diff,
-        value: row.value,
-      }))
+    saveProducts(
+      items.map((item) =>
+        item.id === product.id
+          ? {
+              ...item,
+              lots: nextLots,
+            }
+          : item
+      )
     )
 
-    if (applyCountToStock) {
-      applyInventoryToStock()
+    const now = new Date().toISOString()
+
+    const movement: StockMovement = {
+      id: crypto.randomUUID(),
+      createdAt: now,
+      type: 'ENTREE_PRODUIT',
+      productId: product.id,
+      productName: product.name,
+      internalRef: product.internalRef,
+      quantity,
+      toLocation: quickLocation,
+      lotNumber:
+        quickLotNumber.trim() || undefined,
+      expiry: quickExpiry || undefined,
+      referenceType: 'product',
+      referenceId: `RAP-${Date.now()
+        .toString()
+        .slice(-8)}`,
+      note:
+        quickNote.trim() ||
+        'Entrée rapide de stock',
+      specialNote:
+        quickNote.trim() || undefined,
+      regularizationStatus:
+        quickNeedsRegularization
+          ? 'A_REGULARISER'
+          : 'NON_REQUIS',
     }
 
-    saveHistory([
-      {
-        id: activeInventory.id,
-        name: activeInventory.name,
-        type: `${activeInventory.purpose} · ${activeInventory.type}`,
-        inventoryScope: activeInventory.inventoryScope,
-        location: 'GLOBAL',
-        locations: locationsWithStock.map(
-          (group) => group.location
-        ),
-        date: new Date(
-          `${activeInventory.date}T12:00:00`
-        ).toISOString(),
-        stayStartDate: activeInventory.stayStartDate,
-        stayEndDate: activeInventory.stayEndDate,
-        guestCount: activeInventory.guestCount,
-        durationDays: activeInventory.durationDays,
-        lines,
-      },
-      ...history,
+    saveStockMovements([
+      movement,
+      ...stockMovements,
     ])
 
-    setMsg(
-      applyCountToStock
-        ? `Inventaire ${activeInventory.id} clôturé. Le comptage réel est maintenant appliqué au stock.`
-        : `Inventaire ${activeInventory.id} clôturé et enregistré sans modification du stock.`
-    )
+    setQuickEntryOpen(false)
+    resetQuickEntry()
 
-    setCloseOpen(false)
-    setApplyCountToStock(false)
-    setActiveInventory(null)
-    setCounted({})
-    setExpandedLocations({})
-    setScanLocation('')
-    setScanProductId('')
-    setScanQuantity(0)
-    setScanMessage('')
-  }
-
-  const closeInventory = () => {
-    if (!activeInventory) return
-
-    setApplyCountToStock(
-      activeInventory.purpose === 'Stock initial'
-    )
-    setCloseOpen(true)
-  }
-
-  const reopenHistoricalInventory = (
-    inventoryId: string
-  ) => {
-    const inventory = history.find(
-      (item) => item.id === inventoryId
-    )
-
-    if (!inventory) return
-
-    const date = new Date(inventory.date)
-      .toISOString()
-      .slice(0, 10)
-
-    const reopenStart =
-      inventory.stayStartDate || date
-
-    const reopenEnd =
-      inventory.stayEndDate || date
-
-    const reopenGuests =
-      inventory.guestCount || 1
-
-    setActiveInventory({
-      id: `INV-${Date.now()
-        .toString()
-        .slice(-6)}`,
-      name: `Recomptage ${inventory.id}`,
-      type: inventory.type,
-      purpose: 'Contrôle',
-      entryMode: 'Saisie classique',
-      inventoryScope:
-        (inventory.inventoryScope as InventoryScope | undefined) ||
-        'Tous les inventaires',
-      date,
-      stayStartDate: reopenStart,
-      stayEndDate: reopenEnd,
-      guestCount: reopenGuests,
-      durationDays:
-        inventory.durationDays ||
-        calculateStayDays(reopenStart, reopenEnd),
-      createdAt: new Date().toISOString(),
-    })
-
-    setCounted(
-      Object.fromEntries(
-        inventory.lines.map((line) => [
-          keyFor(
-            line.location ||
-              inventory.location ||
-              'Container',
-            line.productId
-          ),
-          Math.max(0, line.real),
-        ])
-      )
-    )
-
-    const expanded: Record<string, boolean> = {}
-
-    const usedLocations =
-      inventory.locations ||
-      [
-        ...new Set(
-          inventory.lines
-            .map((line) => line.location)
-            .filter(Boolean)
-        ),
-      ]
-
-    usedLocations.forEach(
-      (location, index) => {
-        if (location) {
-          expanded[location] = index === 0
-        }
-      }
-    )
-
-    setExpandedLocations(expanded)
-    setMsg(
-      `Recomptage global créé à partir de ${inventory.id}.`
+    window.alert(
+      quickNeedsRegularization
+        ? `Entrée ajoutée : +${quantity} ${product.unit} de ${product.name} dans ${quickLocation}. Mouvement marqué À régulariser.`
+        : `Entrée ajoutée : +${quantity} ${product.unit} de ${product.name} dans ${quickLocation}.`
     )
   }
 
-  const deleteHistoricalInventory = (
-    inventoryId: string
-  ) => {
-    if (
-      !confirm(
-        `Supprimer définitivement l'inventaire ${inventoryId} ?`
-      )
-    ) {
+  const openTransfer = (product: any, lot: any, quantity: number) => {
+    if (!lot.location) {
+      window.alert('Ce stock n’a pas de lieu source.')
+      return
+    }
+    if (quantity <= 0) {
+      window.alert('Aucun stock disponible à transférer.')
       return
     }
 
-    saveHistory(
-      history.filter(
-        (inventory) =>
-          inventory.id !== inventoryId
+    setTransferProductId(product.id)
+    setTransferLotId(lot.id)
+    setTransferFromLocation(lot.location)
+    setTransferToLocation('')
+    setTransferQuantity(1)
+    setTransferOpen(true)
+  }
+
+  const saveTransfer = () => {
+    const product = items.find((item) => item.id === transferProductId)
+    if (!product) {
+      window.alert('Produit introuvable.')
+      return
+    }
+
+    const sourceIndex = product.lots.findIndex(
+      (lot) => lot.id === transferLotId
+    )
+    if (sourceIndex < 0) {
+      window.alert('Lot source introuvable.')
+      return
+    }
+
+    const sourceLot = product.lots[sourceIndex]
+    const available = Math.max(0, Number(sourceLot.quantity) || 0)
+    const quantity = Math.max(0, Number(transferQuantity) || 0)
+
+    if (!transferToLocation) {
+      window.alert('Choisis le lieu de destination.')
+      return
+    }
+    if (transferToLocation === transferFromLocation) {
+      window.alert('Le lieu de destination doit être différent du lieu source.')
+      return
+    }
+    if (quantity <= 0) {
+      window.alert('La quantité doit être supérieure à 0.')
+      return
+    }
+    if (quantity > available) {
+      window.alert(`Stock insuffisant. Disponible : ${available} ${product.unit || ''}.`)
+      return
+    }
+
+    const nextLots = product.lots.map((lot) => ({ ...lot }))
+    nextLots[sourceIndex] = {
+      ...nextLots[sourceIndex],
+      quantity: available - quantity,
+    }
+
+    const destinationIndex = nextLots.findIndex(
+      (lot, index) =>
+        index !== sourceIndex &&
+        lot.location === transferToLocation &&
+        (lot.lotNumber || '') === (sourceLot.lotNumber || '') &&
+        (lot.expiry || '') === (sourceLot.expiry || '')
+    )
+
+    if (destinationIndex >= 0) {
+      nextLots[destinationIndex] = {
+        ...nextLots[destinationIndex],
+        quantity:
+          Math.max(0, Number(nextLots[destinationIndex].quantity) || 0) +
+          quantity,
+      }
+    } else {
+      nextLots.push({
+        id: crypto.randomUUID(),
+        lotNumber: sourceLot.lotNumber || '',
+        expiry: sourceLot.expiry || '',
+        location: transferToLocation,
+        quantity,
+      })
+    }
+
+    saveProducts(
+      items.map((item) =>
+        item.id === product.id
+          ? { ...item, lots: nextLots }
+          : item
       )
     )
 
-    setMsg(`Inventaire ${inventoryId} supprimé.`)
+    const transferReference =
+      `TRF-${Date.now().toString().slice(-8)}`
+
+    const createdAt =
+      new Date().toISOString()
+
+    const movements: StockMovement[] = [
+      {
+        id: crypto.randomUUID(),
+        createdAt,
+        type: 'TRANSFERT_SORTIE',
+        productId: product.id,
+        productName: product.name,
+        internalRef: product.internalRef,
+        quantity: -quantity,
+        fromLocation: transferFromLocation,
+        toLocation: transferToLocation,
+        lotNumber: sourceLot.lotNumber || undefined,
+        expiry: sourceLot.expiry || undefined,
+        referenceType: 'transfer',
+        referenceId: transferReference,
+        note: `Transfert de ${transferFromLocation} vers ${transferToLocation}`,
+        regularizationStatus: 'NON_REQUIS',
+      },
+      {
+        id: crypto.randomUUID(),
+        createdAt,
+        type: 'TRANSFERT_ENTREE',
+        productId: product.id,
+        productName: product.name,
+        internalRef: product.internalRef,
+        quantity,
+        fromLocation: transferFromLocation,
+        toLocation: transferToLocation,
+        lotNumber: sourceLot.lotNumber || undefined,
+        expiry: sourceLot.expiry || undefined,
+        referenceType: 'transfer',
+        referenceId: transferReference,
+        note: `Transfert de ${transferFromLocation} vers ${transferToLocation}`,
+        regularizationStatus: 'NON_REQUIS',
+      },
+    ]
+
+    saveStockMovements([
+      ...movements,
+      ...stockMovements,
+    ])
+
+    setTransferOpen(false)
+    window.alert(
+      `Transfert effectué : ${quantity} ${product.unit || ''} de ${product.name} vers ${transferToLocation}.`
+    )
   }
 
-  const openAllLocations = () => {
-    const next: Record<string, boolean> = {}
+  const resetFilters = () => {
+    setSearch('')
+    setCategoryFilter('Toutes')
+    setSubcategoryFilter('Toutes')
+    setSupplierFilter('Tous')
+    setLocationFilter('Tous')
+    setZoneFilter('All')
+    setQuantityFilter('Tous')
+    setExpiryFilter('Toutes')
+  }
 
-    locationsWithStock.forEach((group) => {
-      next[group.location] = true
+  const toggleSort = (
+    key: SortKey
+  ) => {
+    if (sortKey === key) {
+      setSortDirection(
+        (current) =>
+          current === 'asc'
+            ? 'desc'
+            : 'asc'
+      )
+      return
+    }
+
+    setSortKey(key)
+    setSortDirection('asc')
+  }
+
+  const sortIndicator = (
+    key: SortKey
+  ) =>
+    sortKey === key
+      ? sortDirection === 'asc'
+        ? ' ▲'
+        : ' ▼'
+      : ''
+
+  const getExportRows = () =>
+    filteredRows.map(
+      ({
+        product,
+        lot,
+        quantity,
+        value,
+      }) => ({
+        Référence:
+          product.internalRef || '',
+        Produit: product.name || '',
+        Zone:
+          detectProductZone(product),
+        Catégorie:
+          product.category || '',
+        'Sous-catégorie':
+          product.subcategory || '',
+        Marque:
+          product.brand || '',
+        Fournisseur:
+          product.mainSupplier || '',
+        Lieu:
+          lot.location || '',
+        Lot:
+          lot.lotNumber || '',
+        'DLUO / DLC':
+          lot.expiry
+            ? new Date(
+                `${lot.expiry}T00:00:00`
+              ).toLocaleDateString(
+                'fr-FR'
+              )
+            : 'Sans DLUO',
+        Disponible: quantity,
+        Unité:
+          product.unit || '',
+        'Prix unitaire XPF':
+          Math.max(
+            0,
+            Number(
+              product.purchasePrice
+            ) || 0
+          ),
+        'Valeur XPF': value,
+      })
+    )
+
+  const exportExcel = () => {
+    const rows = getExportRows()
+
+    const worksheet =
+      XLSX.utils.json_to_sheet(
+        rows
+      )
+
+    worksheet['!cols'] = [
+      { wch: 20 },
+      { wch: 32 },
+      { wch: 24 },
+      { wch: 20 },
+      { wch: 22 },
+      { wch: 18 },
+      { wch: 24 },
+      { wch: 22 },
+      { wch: 18 },
+      { wch: 16 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 18 },
+      { wch: 18 },
+    ]
+
+    const workbook =
+      XLSX.utils.book_new()
+
+    XLSX.utils.book_append_sheet(
+      workbook,
+      worksheet,
+      'Stock disponible'
+    )
+
+    XLSX.writeFile(
+      workbook,
+      `NukuStock-Stock-${new Date()
+        .toISOString()
+        .slice(0, 10)}.xlsx`
+    )
+  }
+
+  const exportPdf = () => {
+    const doc = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: 'a4',
     })
 
-    setExpandedLocations(next)
+    doc.setFontSize(17)
+    doc.text(
+      'NUKUTEPIPI - NukuStock',
+      12,
+      13
+    )
+
+    doc.setFontSize(12)
+    doc.text(
+      `État du stock disponible - Zone : ${zoneFilter}`,
+      12,
+      19
+    )
+
+    doc.setFontSize(8)
+    doc.text(
+      `Édité le ${new Date().toLocaleDateString(
+        'fr-FR'
+      )} - ${filteredProductIds.size} référence(s) - ${totalQty.toLocaleString(
+        'fr-FR'
+      )} unité(s)`,
+      12,
+      24
+    )
+
+    autoTable(doc, {
+      startY: 29,
+
+      head: [
+        [
+          'Référence',
+          'Produit',
+          'Catégorie',
+          'Sous-cat.',
+          'Lieu',
+          'DLUO/DLC',
+          'Disponible',
+          'Prix XPF',
+          'Valeur XPF',
+        ],
+      ],
+
+      body: filteredRows.map(
+        ({
+          product,
+          lot,
+          quantity,
+          value,
+        }) => [
+          product.internalRef ||
+            '',
+          product.name || '',
+          product.category ||
+            '',
+          product.subcategory ||
+            '',
+          lot.location ||
+            'Non affecté',
+          lot.expiry
+            ? new Date(
+                `${lot.expiry}T00:00:00`
+              ).toLocaleDateString(
+                'fr-FR'
+              )
+            : 'Sans DLUO',
+          `${quantity} ${
+            product.unit || ''
+          }`,
+          Math.max(
+            0,
+            Number(
+              product.purchasePrice
+            ) || 0
+          ).toLocaleString(
+            'fr-FR'
+          ),
+          value.toLocaleString(
+            'fr-FR'
+          ),
+        ]
+      ),
+
+      styles: {
+        fontSize: 6.5,
+        cellPadding: 1.5,
+        overflow: 'linebreak',
+      },
+
+      headStyles: {
+        fontStyle: 'bold',
+      },
+
+      margin: {
+        left: 7,
+        right: 7,
+      },
+    })
+
+    doc.save(
+      `NukuStock-Stock-${new Date()
+        .toISOString()
+        .slice(0, 10)}.pdf`
+    )
   }
 
-  const closeAllLocations = () => {
-    setExpandedLocations({})
+  const getStockPrintValue = (
+    key: StockPrintColumnKey,
+    row: StockRow
+  ) => {
+    const { product, lot, quantity, value } = row
+
+    switch (key) {
+      case 'qrProduct':
+        return `NUKUSTOCK|PRODUCT|${product.internalRef || product.id}`
+      case 'qrCategory':
+        return `NUKUSTOCK|CATEGORY|${product.category || 'Sans catégorie'}`
+      case 'qrSubcategory':
+        return `NUKUSTOCK|SUBCATEGORY|${product.subcategory || 'Sans sous-catégorie'}`
+      case 'qrLocation':
+        return `NUKUSTOCK|LOCATION|${lot.location || 'Non affecté'}`
+      case 'reference':
+        return product.internalRef || ''
+      case 'product':
+        return product.name || ''
+      case 'category':
+        return product.category || ''
+      case 'subcategory':
+        return product.subcategory || ''
+      case 'supplier':
+        return product.mainSupplier || ''
+      case 'location':
+        return lot.location || 'Non affecté'
+      case 'lot':
+        return lot.lotNumber || ''
+      case 'expiry':
+        return lot.expiry
+          ? new Date(
+              `${lot.expiry}T00:00:00`
+            ).toLocaleDateString('fr-FR')
+          : 'Sans DLUO'
+      case 'quantity':
+        return quantity.toLocaleString('fr-FR')
+      case 'unit':
+        return product.unit || ''
+      case 'price':
+        return Math.max(
+          0,
+          Number(product.purchasePrice) || 0
+        ).toLocaleString('fr-FR')
+      case 'value':
+        return value.toLocaleString('fr-FR')
+      default:
+        return ''
+    }
   }
 
-  const printInventory = async () => {
-    if (!activeInventory) return
-
-    if (inventoryPrintColumns.length === 0) {
+  const printStock = async () => {
+    if (stockPrintColumns.length === 0) {
       window.alert(
         'Sélectionne au moins une colonne à imprimer.'
       )
@@ -926,96 +1389,37 @@ export default function Inventory() {
     }
 
     const selectedDefinitions =
-      INVENTORY_PRINT_COLUMNS.filter((column) =>
-        inventoryPrintColumns.includes(column.key)
+      STOCK_PRINT_COLUMNS.filter((column) =>
+        stockPrintColumns.includes(column.key)
       )
 
     const headers = selectedDefinitions
       .map((column) => `<th>${column.label}</th>`)
       .join('')
 
-    const getValue = (
-      key: InventoryPrintColumnKey,
-      group: (typeof locationsWithStock)[number],
-      row: (typeof locationsWithStock)[number]['rows'][number]
-    ) => {
-      switch (key) {
-        case 'qrProduct':
-          return `NUKUSTOCK|PRODUCT|${row.product.internalRef || row.product.id}`
-        case 'qrCategory':
-          return `NUKUSTOCK|CATEGORY|${row.product.category || 'Sans catégorie'}`
-        case 'qrSubcategory':
-          return `NUKUSTOCK|SUBCATEGORY|${row.product.subcategory || 'Sans sous-catégorie'}`
-        case 'qrLocation':
-          return `NUKUSTOCK|LOCATION|${group.location}`
-        case 'reference':
-          return row.product.internalRef || ''
-        case 'product':
-          return row.product.name || ''
-        case 'category':
-          return row.product.category || ''
-        case 'subcategory':
-          return row.product.subcategory || ''
-        case 'location':
-          return group.location
-        case 'theoretical':
-          return row.theoreticalQty.toLocaleString('fr-FR')
-        case 'real':
-          return row.realQty.toLocaleString('fr-FR')
-        case 'consumption':
-          return row.diff.toLocaleString('fr-FR')
-        case 'unit':
-          return row.product.unit || ''
-        case 'price':
-          return Math.max(
-            0,
-            Number(row.product.purchasePrice) || 0
-          ).toLocaleString('fr-FR')
-        case 'value':
-          return row.value.toLocaleString('fr-FR')
-        default:
-          return ''
-      }
-    }
-
-    const sections = await Promise.all(
-      locationsWithStock.map(async (group) => {
-        const rows = await Promise.all(
-          group.rows.map(async (row) => {
-            const cells = await Promise.all(
-              selectedDefinitions.map(async (column) => {
-                const value = getValue(
-                  column.key,
-                  group,
-                  row
-                )
-
-                if (column.key.startsWith('qr')) {
-                  const qr = await QRCode.toDataURL(value, {
-                    width: 90,
-                    margin: 1,
-                    errorCorrectionLevel: 'M',
-                  })
-                  return `<td class="qrCell"><img src="${qr}" alt="${column.label}" /><div>${value.split('|').pop() || ''}</div></td>`
-                }
-
-                return `<td>${value}</td>`
-              })
+    const rows = await Promise.all(
+      filteredRows.map((row) => {
+        return Promise.all(
+          selectedDefinitions.map(async (column) => {
+            const value = getStockPrintValue(
+              column.key,
+              row
             )
 
-            return `<tr>${cells.join('')}</tr>`
-          })
-        ).then((items) => items.join(''))
+            if (column.key.startsWith('qr')) {
+              const qr = await QRCode.toDataURL(value, {
+                width: 90,
+                margin: 1,
+                errorCorrectionLevel: 'M',
+              })
+              return `<td class="qrCell"><img src="${qr}" alt="${column.label}" /><div>${value.split('|').pop() || ''}</div></td>`
+            }
 
-        return `
-          <section class="location-section">
-            <h2>${group.location}</h2>
-            <table>
-              <thead><tr>${headers}</tr></thead>
-              <tbody>${rows}</tbody>
-            </table>
-          </section>
-        `
+            return `<td>${value}</td>`
+          })
+        ).then(
+          (cells) => `<tr>${cells.join('')}</tr>`
+        )
       })
     ).then((items) => items.join(''))
 
@@ -1037,7 +1441,7 @@ export default function Inventory() {
       <html lang="fr">
         <head>
           <meta charset="utf-8" />
-          <title>NukuStock - Inventaire ${activeInventory.id}</title>
+          <title>NukuStock - Stock disponible</title>
           <style>
             @page {
               size: A4 landscape;
@@ -1050,38 +1454,22 @@ export default function Inventory() {
               color: #111;
               background: #fff;
             }
-            .header { margin-bottom: 7mm; }
+            .header { margin-bottom: 8mm; }
             .brand { font-size: 18px; font-weight: 800; }
             .title {
               margin-top: 3px;
               font-size: 13px;
               font-weight: 700;
             }
-            .meta {
-              margin-top: 5px;
-              font-size: 9px;
-              line-height: 1.5;
-            }
-            .summary {
-              display: grid;
-              grid-template-columns: repeat(4, 1fr);
-              gap: 5mm;
-              margin: 5mm 0 7mm;
-              font-size: 9px;
-            }
-            .summary div {
-              border: 1px solid #bbb;
-              padding: 3mm;
-            }
-            .location-section {
-              margin: 0 0 8mm;
-              break-inside: avoid-page;
-            }
-            h2 {
-              margin: 0 0 3mm;
-              padding-bottom: 2mm;
+            .meta { margin-top: 5px; font-size: 9px; }
+            .zone {
+              margin-top: 6px;
+              padding: 5px 0;
+              border-top: 1px solid #111;
               border-bottom: 1px solid #111;
-              font-size: 12px;
+              text-align: center;
+              font-size: 11px;
+              font-weight: 800;
             }
             table {
               width: 100%;
@@ -1109,41 +1497,18 @@ export default function Inventory() {
         <body>
           <div class="header">
             <div class="brand">NUKUTEPIPI - NukuStock</div>
-            <div class="title">
-              Inventaire ${activeInventory.name}
-            </div>
+            <div class="title">État du stock disponible</div>
             <div class="meta">
-              ${activeInventory.id} ·
-              ${activeInventory.purpose} ·
-              ${activeInventory.entryMode} ·
-              ${activeInventory.inventoryScope} ·
-              ${activeInventory.type} ·
-              ${new Date(
-                `${activeInventory.date}T12:00:00`
-              ).toLocaleDateString('fr-FR')}
-              <br />
-              Séjour du
-              ${new Date(
-                `${activeInventory.stayStartDate}T12:00:00`
-              ).toLocaleDateString('fr-FR')}
-              au
-              ${new Date(
-                `${activeInventory.stayEndDate}T12:00:00`
-              ).toLocaleDateString('fr-FR')}
-              · ${activeInventory.durationDays} jour(s)
-              · ${activeInventory.guestCount} invité(s)
+              Édité le ${new Date().toLocaleDateString('fr-FR')} -
+              ${filteredProductIds.size} référence(s) -
+              ${totalQty.toLocaleString('fr-FR')} unité(s)
             </div>
+            <div class="zone">ZONE : ${zoneFilter}</div>
           </div>
-
-          <div class="summary">
-            <div><strong>Théorique :</strong> ${formatQty(globalTheoretical)}</div>
-            <div><strong>Réel :</strong> ${formatQty(globalReal)}</div>
-            <div><strong>Consommation :</strong> ${globalDiff}</div>
-            <div><strong>Valeur :</strong> ${globalValue.toLocaleString('fr-FR')} XPF</div>
-          </div>
-
-          ${sections}
-
+          <table>
+            <thead><tr>${headers}</tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
           <script>
             window.onload = () => {
               window.print()
@@ -1158,1867 +1523,900 @@ export default function Inventory() {
     setPrintColumnsOpen(false)
   }
 
-
-  const parseNukuStockQr = (rawValue: string) => {
-    const raw = rawValue.trim()
-
-    if (!raw) {
-      return null
-    }
-
-    const parts = raw.split('|')
-
-    if (
-      parts.length >= 3 &&
-      parts[0].toUpperCase() === 'NUKUSTOCK'
-    ) {
-      return {
-        type: parts[1].toUpperCase(),
-        value: parts.slice(2).join('|').trim(),
-      }
-    }
-
-    // Compatibilité avec les premiers QR Produit contenant uniquement
-    // la référence interne.
-    const product = products.find(
-      (item) =>
-        item.internalRef?.trim().toLowerCase() ===
-        raw.toLowerCase()
-    )
-
-    if (product) {
-      return {
-        type: 'PRODUCT',
-        value: raw,
-      }
-    }
-
-    return null
+  const statBox: CSSProperties = {
+    padding: 14,
+    borderRadius: 13,
+    background: '#ffffff',
+    border:
+      '1px solid #e5e7eb',
   }
 
-  const applyScannedQrValue = (rawValue: string) => {
-    if (!activeInventory) return
-
-    const parsed = parseNukuStockQr(rawValue)
-
-    if (!parsed) {
-      setScanMessage(
-        'QR non reconnu. Utilise un QR NukuStock de lieu ou de produit.'
-      )
-      return
-    }
-
-    if (parsed.type === 'LOCATION') {
-      const matchedLocation = locations.find(
-        (location) =>
-          location.trim().toLowerCase() ===
-          parsed.value.toLowerCase()
-      )
-
-      if (!matchedLocation) {
-        setScanMessage(
-          `Lieu introuvable dans NukuStock : ${parsed.value}`
-        )
-        return
-      }
-
-      setScanLocation(matchedLocation)
-      setScanProductId('')
-      setScanQuantity(0)
-      setScanMessage(
-        `Lieu actif : ${matchedLocation}. Scanne maintenant un produit.`
-      )
-
-      setExpandedLocations((current) => ({
-        ...current,
-        [matchedLocation]: true,
-      }))
-
-      return
-    }
-
-    if (parsed.type === 'PRODUCT') {
-      if (!scanLocation) {
-        setScanMessage(
-          'Scanne d’abord le QR du lieu de stockage.'
-        )
-        return
-      }
-
-      const product = products.find(
-        (item) =>
-          item.internalRef?.trim().toLowerCase() ===
-            parsed.value.toLowerCase() ||
-          item.id === parsed.value
-      )
-
-      if (!product) {
-        setScanMessage(
-          `Produit introuvable : ${parsed.value}`
-        )
-        return
-      }
-
-      if (!isProductInScope(product, activeInventory.inventoryScope)) {
-        setScanMessage(
-          `${product.name} n’appartient pas au périmètre ${activeInventory.inventoryScope}.`
-        )
-        return
-      }
-
-      const existingKey = keyFor(
-        scanLocation,
-        product.id
-      )
-      const existingTheoretical = theoretical(
-        product.id,
-        scanLocation
-      )
-      const existingCount =
-        counted[existingKey] ?? existingTheoretical
-
-      setScanProductId(product.id)
-      setScanQuantity(existingCount)
-      setScanMessage(
-        `${product.name} sélectionné dans ${scanLocation}. Saisis la quantité réelle.`
-      )
-
-      return
-    }
-
-    setScanMessage(
-      `Ce QR (${parsed.type}) n’est pas utilisé pour le comptage. Scanne un QR Lieu ou Produit.`
-    )
-  }
-
-  const decodeQrPhoto = async (file?: File) => {
-    if (!file || !activeInventory) return
-
-    setScanBusy(true)
-    setScanMessage('Lecture du QR en cours…')
-
-    try {
-      const bitmap = await createImageBitmap(file)
-      const maxDimension = 1800
-      const ratio = Math.min(
-        1,
-        maxDimension /
-          Math.max(bitmap.width, bitmap.height)
-      )
-      const width = Math.max(
-        1,
-        Math.round(bitmap.width * ratio)
-      )
-      const height = Math.max(
-        1,
-        Math.round(bitmap.height * ratio)
-      )
-
-      const canvas = document.createElement('canvas')
-      canvas.width = width
-      canvas.height = height
-
-      const context = canvas.getContext('2d')
-
-      if (!context) {
-        throw new Error(
-          'Canvas indisponible pour lire le QR.'
-        )
-      }
-
-      context.drawImage(
-        bitmap,
-        0,
-        0,
-        width,
-        height
-      )
-
-      const imageData = context.getImageData(
-        0,
-        0,
-        width,
-        height
-      )
-
-      const result = jsQR(
-        imageData.data,
-        imageData.width,
-        imageData.height,
-        {
-          inversionAttempts:
-            'attemptBoth',
-        }
-      )
-
-      bitmap.close()
-
-      if (!result?.data) {
-        setScanMessage(
-          'Aucun QR détecté sur la photo. Rapproche-toi du QR et reprends la photo.'
-        )
-        return
-      }
-
-      applyScannedQrValue(result.data)
-    } catch (error: any) {
-      setScanMessage(
-        `Impossible de lire cette photo : ${
-          error?.message || 'erreur inconnue'
-        }`
-      )
-    } finally {
-      setScanBusy(false)
-    }
-  }
-
-  const validateScannedProduct = () => {
-    if (!activeInventory) return
-
-    if (!scanLocation) {
-      setScanMessage(
-        'Scanne d’abord un lieu de stockage.'
-      )
-      return
-    }
-
-    if (!scanProductId) {
-      setScanMessage(
-        'Scanne d’abord un produit.'
-      )
-      return
-    }
-
-    const product = products.find(
-      (item) => item.id === scanProductId
-    )
-
-    if (!product) {
-      setScanMessage('Produit introuvable.')
-      return
-    }
-
-    const quantity = Math.max(
-      0,
-      Number(scanQuantity) || 0
-    )
-
-    setCounted((current) => ({
-      ...current,
-      [keyFor(
-        scanLocation,
-        scanProductId
-      )]: quantity,
-    }))
-
-    setExpandedLocations((current) => ({
-      ...current,
-      [scanLocation]: true,
-    }))
-
-    setScanMessage(
-      `${product.name} : ${formatQty(
-        quantity
-      )} ${product.unit || ''} enregistré dans ${scanLocation}. Scanne le produit suivant.`
-    )
-    setScanProductId('')
-    setScanQuantity(0)
-  }
-
-  const labelStyle: CSSProperties = {
-    display: 'block',
-    fontSize: 13,
+  const thButton: CSSProperties = {
+    border: 0,
+    background: 'transparent',
+    font: 'inherit',
     fontWeight: 700,
-    marginBottom: 7,
-    color: '#dbe4f0',
+    cursor: 'pointer',
+    padding: 0,
+    color: 'inherit',
+    textAlign: 'left',
   }
 
   return (
     <Page
-      title="Inventaires"
-      subtitle="Tous les inventaires ou par famille : Beverage, Food, Matériel & Verrerie"
+      title="Stocks"
+      subtitle="Consultation du stock disponible — les modifications se font uniquement dans Produits"
       action={
-        activeInventory ? (
-          <div
-            style={{
-              display: 'flex',
-              gap: 8,
-              flexWrap: 'wrap',
-            }}
-          >
-            <ColumnVisibility
-              columns={INVENTORY_SCREEN_COLUMNS}
-              visible={inventoryDisplay.visible}
-              onChange={inventoryDisplay.setVisible}
-              essential={INVENTORY_SCREEN_ESSENTIAL}
-            />
-            <button
-              className="button secondary"
-              type="button"
-              onClick={() =>
-                setPrintColumnsOpen(true)
-              }
-            >
-              Imprimer l&apos;inventaire
-            </button>
-            <button
-              className="button"
-              onClick={closeInventory}
-            >
-              Clôturer l&apos;inventaire
-            </button>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <ColumnVisibility
-              columns={INVENTORY_SCREEN_COLUMNS}
-              visible={inventoryDisplay.visible}
-              onChange={inventoryDisplay.setVisible}
-              essential={INVENTORY_SCREEN_ESSENTIAL}
-            />
+        <div
+          className="screenOnly"
+          style={{
+            display: 'flex',
+            gap: 8,
+            flexWrap: 'wrap',
+          }}
+        >
+          <ColumnVisibility
+            columns={STOCK_SCREEN_COLUMNS}
+            visible={stockDisplay.visible}
+            onChange={stockDisplay.setVisible}
+            essential={STOCK_SCREEN_ESSENTIAL}
+          />
+
           <button
             className="button"
+            type="button"
             onClick={() => {
-              setNewName('')
-              setNewType(
-                "Début d’exploitation"
-              )
-              setNewPurpose('Stock initial')
-              setNewEntryMode('Saisie classique')
-              setNewScope('Tous les inventaires')
-              const today = new Date()
-                .toISOString()
-                .slice(0, 10)
-
-              setNewDate(today)
-              setStayStartDate(today)
-              setStayEndDate(today)
-              setGuestCount(1)
-              setCreateOpen(true)
+              resetQuickEntry()
+              setQuickEntryOpen(true)
             }}
           >
-            + Créer un inventaire
+            + Entrée rapide
           </button>
-          </div>
-        )
+
+          <button
+            className="button secondary"
+            type="button"
+            onClick={exportExcel}
+          >
+            Exporter Excel
+          </button>
+
+          <button
+            className="button secondary"
+            type="button"
+            onClick={exportPdf}
+          >
+            Exporter PDF
+          </button>
+
+          <button
+            className="button"
+            type="button"
+            onClick={() =>
+              setPrintColumnsOpen(true)
+            }
+          >
+            Imprimer le stock
+          </button>
+        </div>
       }
     >
-      {msg && (
-        <div className="notice goodNotice">
-          {msg}
-        </div>
-      )}
-
-      {!activeInventory && (
-        <Card>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent:
-                'space-between',
-              gap: 18,
-              flexWrap: 'wrap',
-            }}
-          >
-            <div>
-              <h2
-                style={{
-                  margin: 0,
-                  fontSize: 20,
-                }}
-              >
-                Aucun inventaire en cours
-              </h2>
-
-              <p
-                style={{
-                  margin: '7px 0 0',
-                  color: '#667085',
-                  fontSize: 13,
-                  maxWidth: 720,
-                }}
-              >
-                Choisis entre Tous les inventaires,
-                Beverage, Food ou Matériel & Verrerie.
-                Tous les lieux concernés sont regroupés
-                dans un seul inventaire, avec un comptage
-                séparé lieu par lieu.
-              </p>
-            </div>
-
-            <button
-              className="button"
-              onClick={() => {
-                setNewScope('Tous les inventaires')
-                setCreateOpen(true)
-              }}
-            >
-              + Créer un inventaire
-            </button>
-          </div>
-        </Card>
-      )}
-
-      {activeInventory && (
-        <>
-          <Card>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent:
-                  'space-between',
-                gap: 16,
-                alignItems:
-                  'flex-start',
-                flexWrap: 'wrap',
-              }}
-            >
-              <div>
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: '#667085',
-                  }}
-                >
-                  INVENTAIRE GLOBAL EN COURS
-                </div>
-
-                <h2
-                  style={{
-                    margin: '5px 0 4px',
-                    fontSize: 20,
-                  }}
-                >
-                  {activeInventory.name}
-                </h2>
-
-                <div
-                  style={{
-                    color: '#667085',
-                    fontSize: 13,
-                  }}
-                >
-                  {activeInventory.id} ·{' '}
-                  {activeInventory.purpose} ·{' '}
-                  {activeInventory.entryMode} ·{' '}
-                  {activeInventory.inventoryScope} ·{' '}
-                  {activeInventory.type} ·{' '}
-                  {new Date(
-                    `${activeInventory.date}T12:00:00`
-                  ).toLocaleDateString(
-                    'fr-FR'
-                  )}
-                </div>
-
-                <div
-                  style={{
-                    color: '#98a2b3',
-                    fontSize: 11,
-                    marginTop: 4,
-                  }}
-                >
-                  {
-                    locationsWithStock.length
-                  }{' '}
-                  lieu
-                  {locationsWithStock.length >
-                  1
-                    ? 'x'
-                    : ''}{' '}
-                  de stockage à compter
-                </div>
-
-                <div
-                  style={{
-                    color: '#667085',
-                    fontSize: 12,
-                    marginTop: 8,
-                    fontWeight: 700,
-                  }}
-                >
-                  Séjour du{' '}
-                  {new Date(
-                    `${activeInventory.stayStartDate}T12:00:00`
-                  ).toLocaleDateString('fr-FR')}{' '}
-                  au{' '}
-                  {new Date(
-                    `${activeInventory.stayEndDate}T12:00:00`
-                  ).toLocaleDateString('fr-FR')}
-                  {' · '}
-                  {activeInventory.durationDays} jour
-                  {activeInventory.durationDays > 1 ? 's' : ''}
-                  {' · '}
-                  {activeInventory.guestCount} invité
-                  {activeInventory.guestCount > 1 ? 's' : ''}
-                </div>
-              </div>
-
-              <div
-                style={{
-                  display: 'flex',
-                  gap: 8,
-                  flexWrap: 'wrap',
-                }}
-              >
-                <Badge tone="info">
-                  Global
-                </Badge>
-
-                <Badge tone="warn">
-                  En cours
-                </Badge>
-
-                <button
-                  className="button secondary small"
-                  onClick={
-                    cancelInventory
-                  }
-                >
-                  Annuler
-                </button>
-              </div>
-            </div>
-
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns:
-                  'repeat(auto-fit,minmax(160px,1fr))',
-                gap: 12,
-                marginTop: 18,
-              }}
-            >
-              <div
-                style={{
-                  padding: 12,
-                  borderRadius: 12,
-                  background: '#f8fafc',
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: '#667085',
-                  }}
-                >
-                  Lieux
-                </div>
-                <div
-                  style={{
-                    fontSize: 22,
-                    fontWeight: 800,
-                  }}
-                >
-                  {locationsWithStock.length}
-                </div>
-              </div>
-
-              <div
-                style={{
-                  padding: 12,
-                  borderRadius: 12,
-                  background: '#f8fafc',
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: '#667085',
-                  }}
-                >
-                  Théorique global
-                </div>
-                <div
-                  style={{
-                    fontSize: 22,
-                    fontWeight: 800,
-                  }}
-                >
-                  {formatQty(globalTheoretical)}
-                </div>
-              </div>
-
-              <div
-                style={{
-                  padding: 12,
-                  borderRadius: 12,
-                  background: '#f8fafc',
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: '#667085',
-                  }}
-                >
-                  Réel global
-                </div>
-                <div
-                  style={{
-                    fontSize: 22,
-                    fontWeight: 800,
-                  }}
-                >
-                  {formatQty(globalReal)}
-                </div>
-              </div>
-
-              <div
-                style={{
-                  padding: 12,
-                  borderRadius: 12,
-                  background:
-                    globalGapCount === 0
-                      ? '#eaf8f0'
-                      : '#fff3df',
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: '#667085',
-                  }}
-                >
-                  Produits consommés
-                </div>
-                <div
-                  style={{
-                    fontSize: 22,
-                    fontWeight: 800,
-                  }}
-                >
-                  {globalGapCount}
-                </div>
-              </div>
-
-              <div
-                style={{
-                  padding: 12,
-                  borderRadius: 12,
-                  background:
-                    globalDiff === 0
-                      ? '#eaf8f0'
-                      : '#ffecec',
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: '#667085',
-                  }}
-                >
-                  Consommation globale
-                </div>
-                <div
-                  style={{
-                    fontSize: 22,
-                    fontWeight: 800,
-                  }}
-                >
-                  {globalDiff > 0
-                    ? '+'
-                    : ''}
-                  {globalDiff}
-                </div>
-              </div>
-
-              <div
-                style={{
-                  padding: 12,
-                  borderRadius: 12,
-                  background:
-                    globalValue === 0
-                      ? '#eaf8f0'
-                      : '#ffecec',
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: '#667085',
-                  }}
-                >
-                  Valeur consommée
-                </div>
-                <div
-                  style={{
-                    fontSize: 18,
-                    fontWeight: 800,
-                  }}
-                >
-                  {globalValue > 0
-                    ? '+'
-                    : ''}
-                  {globalValue.toLocaleString(
-                    'fr-FR'
-                  )}{' '}
-                  XPF
-                </div>
-              </div>
-            </div>
-          </Card>
-
-          {activeInventory.entryMode === 'Scan QR' && (
-            <Card>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent:
-                    'space-between',
-                  alignItems: 'flex-start',
-                  gap: 16,
-                  flexWrap: 'wrap',
-                }}
-              >
-                <div>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: '#667085',
-                      fontWeight: 800,
-                      textTransform: 'uppercase',
-                      letterSpacing: '.06em',
-                    }}
-                  >
-                    Comptage par QR
-                  </div>
-
-                  <h2
-                    style={{
-                      margin: '4px 0 0',
-                    }}
-                  >
-                    {scanLocation
-                      ? `Lieu actif : ${scanLocation}`
-                      : 'Commence par scanner un lieu'}
-                  </h2>
-                </div>
-
-                <button
-                  className="button secondary small"
-                  type="button"
-                  onClick={() => {
-                    setScanLocation('')
-                    setScanProductId('')
-                    setScanQuantity(0)
-                    setScanMessage(
-                      'Lieu réinitialisé. Scanne un nouveau QR de lieu.'
-                    )
-                  }}
-                >
-                  Changer de lieu
-                </button>
-              </div>
-
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns:
-                    'repeat(auto-fit,minmax(220px,1fr))',
-                  gap: 14,
-                  marginTop: 18,
-                }}
-              >
-                <label
-                  style={{
-                    minHeight: 120,
-                    padding: 18,
-                    border:
-                      '2px dashed #cbd5e1',
-                    borderRadius: 14,
-                    display: 'grid',
-                    placeItems: 'center',
-                    textAlign: 'center',
-                    cursor: scanBusy
-                      ? 'wait'
-                      : 'pointer',
-                    background: '#f8fafc',
-                  }}
-                >
-                  <input
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    disabled={scanBusy}
-                    style={{ display: 'none' }}
-                    onChange={async (event) => {
-                      const file =
-                        event.target.files?.[0]
-                      await decodeQrPhoto(file)
-                      event.currentTarget.value = ''
-                    }}
-                  />
-
-                  <span>
-                    <strong
-                      style={{
-                        display: 'block',
-                        fontSize: 15,
-                      }}
-                    >
-                      {scanBusy
-                        ? 'Lecture…'
-                        : 'Prendre en photo un QR'}
-                    </strong>
-
-                    <span
-                      style={{
-                        display: 'block',
-                        marginTop: 6,
-                        color: '#667085',
-                        fontSize: 12,
-                        lineHeight: 1.4,
-                      }}
-                    >
-                      QR Lieu d&apos;abord, puis QR Produit.
-                    </span>
-                  </span>
-                </label>
-
-                <div
-                  style={{
-                    padding: 16,
-                    borderRadius: 14,
-                    border:
-                      '1px solid #e5e7eb',
-                    background: '#fff',
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: '#667085',
-                      fontWeight: 800,
-                    }}
-                  >
-                    PRODUIT SCANNÉ
-                  </div>
-
-                  {scanProductId ? (
-                    <>
-                      <div
-                        style={{
-                          marginTop: 7,
-                          fontSize: 16,
-                          fontWeight: 800,
-                        }}
-                      >
-                        {
-                          products.find(
-                            (item) =>
-                              item.id ===
-                              scanProductId
-                          )?.name
-                        }
-                      </div>
-
-                      <div
-                        style={{
-                          marginTop: 12,
-                        }}
-                      >
-                        <label
-                          style={{
-                            display: 'block',
-                            marginBottom: 6,
-                            fontSize: 12,
-                            fontWeight: 700,
-                          }}
-                        >
-                          Quantité réelle
-                        </label>
-
-                        <input
-                          className="input"
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={scanQuantity}
-                          onChange={(event) =>
-                            setScanQuantity(
-                              Math.max(
-                                0,
-                                Number(
-                                  event.target.value
-                                ) || 0
-                              )
-                            )
-                          }
-                          style={{
-                            width: '100%',
-                          }}
-                        />
-                      </div>
-
-                      <button
-                        className="button"
-                        type="button"
-                        onClick={
-                          validateScannedProduct
-                        }
-                        style={{
-                          width: '100%',
-                          marginTop: 12,
-                        }}
-                      >
-                        Valider ce produit
-                      </button>
-                    </>
-                  ) : (
-                    <div
-                      style={{
-                        marginTop: 8,
-                        color: '#98a2b3',
-                        fontSize: 12,
-                        lineHeight: 1.5,
-                      }}
-                    >
-                      Aucun produit sélectionné. Après avoir scanné un lieu, photographie le QR du produit à compter.
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {scanMessage && (
-                <div
-                  style={{
-                    marginTop: 14,
-                    padding: 12,
-                    borderRadius: 10,
-                    background:
-                      'rgba(59,130,246,.08)',
-                    border:
-                      '1px solid rgba(59,130,246,.18)',
-                    fontSize: 12,
-                    lineHeight: 1.45,
-                  }}
-                >
-                  {scanMessage}
-                </div>
-              )}
-            </Card>
-          )}
-
-          <div
-            style={{
-              display: 'flex',
-              justifyContent:
-                'space-between',
-              alignItems: 'center',
-              gap: 10,
-              margin: '14px 0',
-              flexWrap: 'wrap',
-            }}
-          >
-            <div
-              style={{
-                color: '#667085',
-                fontSize: 13,
-              }}
-            >
-              Compte chaque lieu séparément.
-              Les totaux sont regroupés
-              automatiquement dans
-              l&apos;inventaire global.
-            </div>
-
-            <div
-              style={{
-                display: 'flex',
-                gap: 8,
-              }}
-            >
-              <button
-                className="button secondary small"
-                onClick={openAllLocations}
-              >
-                Tout ouvrir
-              </button>
-
-              <button
-                className="button secondary small"
-                onClick={closeAllLocations}
-              >
-                Tout fermer
-              </button>
-            </div>
-          </div>
-
-          {locationsWithStock.map(
-            (group) => {
-              const isOpen =
-                expandedLocations[
-                  group.location
-                ] === true
-
-              return (
-                <Card key={group.location}>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setExpandedLocations({
-                        ...expandedLocations,
-                        [group.location]:
-                          !isOpen,
-                      })
-                    }
-                    style={{
-                      width: '100%',
-                      border: 0,
-                      background:
-                        'transparent',
-                      padding: 0,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      justifyContent:
-                        'space-between',
-                      alignItems:
-                        'center',
-                      gap: 14,
-                      textAlign: 'left',
-                    }}
-                  >
-                    <div>
-                      <div
-                        style={{
-                          fontWeight: 800,
-                          fontSize: 17,
-                        }}
-                      >
-                        {group.location}
-                      </div>
-
-                      <div
-                        style={{
-                          marginTop: 4,
-                          fontSize: 12,
-                          color: '#667085',
-                        }}
-                      >
-                        {
-                          group.rows.length
-                        }{' '}
-                        produit
-                        {group.rows.length >
-                        1
-                          ? 's'
-                          : ''}{' '}
-                        · Théorique{' '}
-                        {
-                          group.theoreticalTotal
-                        }{' '}
-                        · Réel{' '}
-                        {group.realTotal}
-                      </div>
-                    </div>
-
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems:
-                          'center',
-                        gap: 10,
-                      }}
-                    >
-                      <Badge
-                        tone={
-                          group.gapCount ===
-                          0
-                            ? 'good'
-                            : 'danger'
-                        }
-                      >
-                        {group.gapCount}{' '}
-                        consommation
-                        {group.gapCount >
-                        1
-                          ? 's'
-                          : ''}
-                      </Badge>
-
-                      <span
-                        style={{
-                          fontSize: 18,
-                        }}
-                      >
-                        {isOpen
-                          ? '−'
-                          : '+'}
-                      </span>
-                    </div>
-                  </button>
-
-                  {isOpen && (
-                    <div
-                      style={{
-                        marginTop: 16,
-                      }}
-                    >
-                      <div className="tableWrap">
-                        <table>
-                          <thead>
-                            <tr>
-                              {inventoryDisplay.isVisible('reference') && <th>Référence</th>}
-                              {inventoryDisplay.isVisible('photo') && <th>Photo</th>}
-                              {inventoryDisplay.isVisible('qrProduct') && <th>QR Produit</th>}
-                              {inventoryDisplay.isVisible('product') && <th>Produit</th>}
-                              {inventoryDisplay.isVisible('category') && <th>Catégorie</th>}
-                              {inventoryDisplay.isVisible('qrCategory') && <th>QR Cat.</th>}
-                              {inventoryDisplay.isVisible('subcategory') && <th>Sous-catégorie</th>}
-                              {inventoryDisplay.isVisible('qrSubcategory') && <th>QR Sous-cat.</th>}
-                              {inventoryDisplay.isVisible('location') && <th>Lieu</th>}
-                              {inventoryDisplay.isVisible('qrLocation') && <th>QR Lieu</th>}
-                              {inventoryDisplay.isVisible('theoretical') && <th>Théorique</th>}
-                              {inventoryDisplay.isVisible('real') && <th>Réel</th>}
-                              {inventoryDisplay.isVisible('consumption') && <th>Consommation</th>}
-                              {inventoryDisplay.isVisible('unit') && <th>Unité</th>}
-                              {inventoryDisplay.isVisible('price') && <th>Prix</th>}
-                              {inventoryDisplay.isVisible('value') && <th>Valeur consommée</th>}
-                            </tr>
-                          </thead>
-
-                          <tbody>
-                            {group.rows.map(
-                              ({
-                                key,
-                                product,
-                                theoreticalQty,
-                                realQty,
-                                diff,
-                                value,
-                              }) => {
-                                const qrStyle = {
-                                  width: 52,
-                                  height: 52,
-                                  padding: 3,
-                                  borderRadius: 8,
-                                  background: '#fff',
-                                  display: 'grid',
-                                  placeItems: 'center',
-                                  border: '1px solid #e5e7eb',
-                                } as CSSProperties
-
-                                return (
-                                  <tr key={key}>
-                                    {inventoryDisplay.isVisible('reference') && (
-                                      <td><strong>{product.internalRef || '—'}</strong></td>
-                                    )}
-                                    {inventoryDisplay.isVisible('photo') && (
-                                      <td>
-                                        <div
-                                          style={{
-                                            width: 58,
-                                            height: 58,
-                                            borderRadius: 9,
-                                            background: '#fff',
-                                            border: '1px solid #e5e7eb',
-                                            display: 'grid',
-                                            placeItems: 'center',
-                                            overflow: 'hidden',
-                                            padding: 4,
-                                          }}
-                                        >
-                                          {product.photo ? (
-                                            <img
-                                              src={product.photo}
-                                              alt={product.name || 'Produit'}
-                                              loading="lazy"
-                                              style={{
-                                                width: '100%',
-                                                height: '100%',
-                                                objectFit: 'contain',
-                                                display: 'block',
-                                              }}
-                                            />
-                                          ) : (
-                                            <span
-                                              style={{
-                                                fontSize: 8,
-                                                color: '#98a2b3',
-                                                fontWeight: 800,
-                                              }}
-                                            >
-                                              PHOTO
-                                            </span>
-                                          )}
-                                        </div>
-                                      </td>
-                                    )}
-                                    {inventoryDisplay.isVisible('qrProduct') && (
-                                      <td>
-                                        <div style={qrStyle}>
-                                          <QRCodeSVG
-                                            value={`NUKUSTOCK|PRODUCT|${product.internalRef || product.id}`}
-                                            size={44}
-                                            level="M"
-                                            marginSize={0}
-                                          />
-                                        </div>
-                                      </td>
-                                    )}
-                                    {inventoryDisplay.isVisible('product') && (
-                                      <td><strong>{product.name}</strong></td>
-                                    )}
-                                    {inventoryDisplay.isVisible('category') && (
-                                      <td>{product.category || '—'}</td>
-                                    )}
-                                    {inventoryDisplay.isVisible('qrCategory') && (
-                                      <td>
-                                        <div style={qrStyle}>
-                                          <QRCodeSVG
-                                            value={`NUKUSTOCK|CATEGORY|${product.category || 'Sans catégorie'}`}
-                                            size={44}
-                                            level="M"
-                                            marginSize={0}
-                                          />
-                                        </div>
-                                      </td>
-                                    )}
-                                    {inventoryDisplay.isVisible('subcategory') && (
-                                      <td>{product.subcategory || '—'}</td>
-                                    )}
-                                    {inventoryDisplay.isVisible('qrSubcategory') && (
-                                      <td>
-                                        <div style={qrStyle}>
-                                          <QRCodeSVG
-                                            value={`NUKUSTOCK|SUBCATEGORY|${product.subcategory || 'Sans sous-catégorie'}`}
-                                            size={44}
-                                            level="M"
-                                            marginSize={0}
-                                          />
-                                        </div>
-                                      </td>
-                                    )}
-                                    {inventoryDisplay.isVisible('location') && (
-                                      <td>{group.location}</td>
-                                    )}
-                                    {inventoryDisplay.isVisible('qrLocation') && (
-                                      <td>
-                                        <div style={qrStyle}>
-                                          <QRCodeSVG
-                                            value={`NUKUSTOCK|LOCATION|${group.location}`}
-                                            size={44}
-                                            level="M"
-                                            marginSize={0}
-                                          />
-                                        </div>
-                                      </td>
-                                    )}
-                                    {inventoryDisplay.isVisible('theoretical') && (
-                                      <td>{formatQty(theoreticalQty)}</td>
-                                    )}
-                                    {inventoryDisplay.isVisible('real') && (
-                                      <td>
-                                        <input
-                                          className="input"
-                                          style={{ minWidth: 90, width: 120 }}
-                                          type="number"
-                                          min="0"
-                                          value={realQty}
-                                          onChange={(event) =>
-                                            setCounted({
-                                              ...counted,
-                                              [key]: Math.max(
-                                                0,
-                                                Number(event.target.value) || 0
-                                              ),
-                                            })
-                                          }
-                                        />
-                                      </td>
-                                    )}
-                                    {inventoryDisplay.isVisible('consumption') && (
-                                      <td>
-                                        <Badge tone={diff === 0 ? 'good' : 'danger'}>
-                                          {diff > 0 ? '+' : ''}{formatQty(diff)}
-                                        </Badge>
-                                      </td>
-                                    )}
-                                    {inventoryDisplay.isVisible('unit') && (
-                                      <td>{product.unit || '—'}</td>
-                                    )}
-                                    {inventoryDisplay.isVisible('price') && (
-                                      <td>
-                                        {Math.max(0, Number(product.purchasePrice) || 0).toLocaleString('fr-FR')} XPF
-                                      </td>
-                                    )}
-                                    {inventoryDisplay.isVisible('value') && (
-                                      <td>
-                                        {value > 0 ? '+' : ''}
-                                        {value.toLocaleString('fr-FR')} XPF
-                                      </td>
-                                    )}
-                                  </tr>
-                                )
-                              }
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      <div
-                        style={{
-                          display: 'grid',
-                          gridTemplateColumns:
-                            'repeat(auto-fit,minmax(150px,1fr))',
-                          gap: 10,
-                          marginTop: 12,
-                        }}
-                      >
-                        <div>
-                          <strong>
-                            Théorique :
-                          </strong>{' '}
-                          {
-                            group.theoreticalTotal
-                          }
-                        </div>
-
-                        <div>
-                          <strong>
-                            Réel :
-                          </strong>{' '}
-                          {
-                            group.realTotal
-                          }
-                        </div>
-
-                        <div>
-                          <strong>
-                            Consommation :
-                          </strong>{' '}
-                          {group.diffTotal >
-                          0
-                            ? '+'
-                            : ''}
-                          {
-                            group.diffTotal
-                          }
-                        </div>
-
-                        <div>
-                          <strong>
-                            Valeur :
-                          </strong>{' '}
-                          {group.valueTotal >
-                          0
-                            ? '+'
-                            : ''}
-                          {group.valueTotal.toLocaleString(
-                            'fr-FR'
-                          )}{' '}
-                          XPF
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </Card>
-              )
-            }
-          )}
-
-          <Card>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                gap: 12,
-                marginBottom: 14,
-                flexWrap: 'wrap',
-              }}
-            >
-              <div>
-                <h2 style={{ margin: 0 }}>
-                  Récapitulatif consommation
-                </h2>
-                <div
-                  style={{
-                    marginTop: 4,
-                    fontSize: 12,
-                    color: '#667085',
-                  }}
-                >
-                  Moyennes calculées sur{' '}
-                  {activeInventory.durationDays} jour
-                  {activeInventory.durationDays > 1 ? 's' : ''}
-                  {' · '}
-                  {activeInventory.guestCount} invité
-                  {activeInventory.guestCount > 1 ? 's' : ''}
-                </div>
-              </div>
-
-              <Badge tone="info">
-                {productConsumptionSummary.length} produit
-                {productConsumptionSummary.length > 1 ? 's' : ''} consommé
-                {productConsumptionSummary.length > 1 ? 's' : ''}
-              </Badge>
-            </div>
-
-            <div className="tableWrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Produit</th>
-                    <th>Consommation totale</th>
-                    <th>Moyenne / jour</th>
-                    <th>Moyenne / invité</th>
-                    <th>Moyenne / invité / jour</th>
-                    <th>Valeur consommée</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {productConsumptionSummary.length === 0 ? (
-                    <tr>
-                      <td colSpan={6}>
-                        Aucune consommation enregistrée pour le moment.
-                      </td>
-                    </tr>
-                  ) : (
-                    productConsumptionSummary.map((row) => (
-                      <tr key={row.product.id}>
-                        <td>
-                          <div style={{ fontWeight: 700 }}>
-                            {row.product.name}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: 11,
-                              color: '#667085',
-                              marginTop: 3,
-                            }}
-                          >
-                            {row.product.internalRef}
-                          </div>
-                        </td>
-
-                        <td>
-                          {row.consumption.toLocaleString('fr-FR', {
-                            maximumFractionDigits: 2,
-                          })}{' '}
-                          {row.product.unit}
-                        </td>
-
-                        <td>
-                          {row.perDay.toLocaleString('fr-FR', {
-                            maximumFractionDigits: 2,
-                          })}
-                        </td>
-
-                        <td>
-                          {row.perGuest.toLocaleString('fr-FR', {
-                            maximumFractionDigits: 2,
-                          })}
-                        </td>
-
-                        <td>
-                          <strong>
-                            {row.perGuestPerDay.toLocaleString('fr-FR', {
-                              maximumFractionDigits: 3,
-                            })}
-                          </strong>
-                        </td>
-
-                        <td>
-                          {row.value.toLocaleString('fr-FR')} XPF
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-
-          <div
-            style={{
-              display: 'flex',
-              justifyContent:
-                'flex-end',
-              gap: 10,
-              marginTop: 18,
-              flexWrap: 'wrap',
-            }}
-          >
-            <button
-              className="button secondary"
-              onClick={cancelInventory}
-            >
-              Annuler
-            </button>
-
-            <button
-              className="button"
-              onClick={closeInventory}
-            >
-              Clôturer l&apos;inventaire
-              global
-            </button>
-          </div>
-        </>
-      )}
-
-      {history.length > 0 && (
-        <Card>
-          <div
-            style={{
-              display: 'flex',
-              justifyContent:
-                'space-between',
-              alignItems: 'center',
-              gap: 12,
-              marginBottom: 14,
-            }}
-          >
-            <h2 style={{ margin: 0 }}>
-              Historique des inventaires
-            </h2>
-
-            <Badge tone="neutral">
-              {history.length}
-            </Badge>
-          </div>
-
-          <div className="tableWrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Inventaire</th>
-                  <th>Type</th>
-                  <th>Périmètre</th>
-                  <th>Date</th>
-                  <th>Consommations</th>
-                  <th>Valeur consommée</th>
-                  <th></th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {history.map(
-                  (inventory) => {
-                    const gaps =
-                      inventory.lines.filter(
-                        (line) =>
-                          line.diff !== 0
-                      ).length
-
-                    const value =
-                      inventory.lines.reduce(
-                        (sum, line) =>
-                          sum +
-                          line.value,
-                        0
-                      )
-
-                    const locationCount =
-                      inventory.locations
-                        ?.length ||
-                      new Set(
-                        inventory.lines
-                          .map(
-                            (line) =>
-                              line.location
-                          )
-                          .filter(Boolean)
-                      ).size ||
-                      1
-
-                    return (
-                      <tr
-                        key={
-                          inventory.id
-                        }
-                      >
-                        <td>
-                          <strong>
-                            {
-                              inventory.id
-                            }
-                          </strong>
-
-                          {inventory.name && (
-                            <div
-                              style={{
-                                fontSize: 11,
-                                color: '#667085',
-                                marginTop: 3,
-                              }}
-                            >
-                              {
-                                inventory.name
-                              }
-                            </div>
-                          )}
-
-                          {(inventory.guestCount ||
-                            inventory.durationDays) && (
-                            <div
-                              style={{
-                                fontSize: 10,
-                                color: '#98a2b3',
-                                marginTop: 3,
-                              }}
-                            >
-                              {inventory.durationDays || 1} jour
-                              {(inventory.durationDays || 1) > 1 ? 's' : ''}
-                              {' · '}
-                              {inventory.guestCount || 1} invité
-                              {(inventory.guestCount || 1) > 1 ? 's' : ''}
-                            </div>
-                          )}
-                        </td>
-
-                        <td>
-                          {
-                            inventory.type
-                          }
-                        </td>
-
-                        <td>
-                          {inventory.location ===
-                          'GLOBAL'
-                            ? `Global · ${locationCount} lieux`
-                            : inventory.location}
-                        </td>
-
-                        <td>
-                          {new Date(
-                            inventory.date
-                          ).toLocaleDateString(
-                            'fr-FR'
-                          )}
-                        </td>
-
-                        <td>
-                          <Badge
-                            tone={
-                              gaps === 0
-                                ? 'good'
-                                : 'danger'
-                            }
-                          >
-                            {gaps}{' '}
-                            consommation
-                            {gaps > 1
-                              ? 's'
-                              : ''}
-                          </Badge>
-                        </td>
-
-                        <td>
-                          {value > 0
-                            ? '+'
-                            : ''}
-                          {value.toLocaleString(
-                            'fr-FR'
-                          )}{' '}
-                          XPF
-                        </td>
-
-                        <td>
-                          <div
-                            style={{
-                              display:
-                                'flex',
-                              gap: 7,
-                              flexWrap:
-                                'wrap',
-                            }}
-                          >
-                            <button
-                              className="button secondary small"
-                              onClick={() =>
-                                reopenHistoricalInventory(
-                                  inventory.id
-                                )
-                              }
-                              disabled={
-                                activeInventory !==
-                                null
-                              }
-                            >
-                              Recomptage
-                            </button>
-
-                            <button
-                              className="button secondary small"
-                              onClick={() =>
-                                deleteHistoricalInventory(
-                                  inventory.id
-                                )
-                              }
-                            >
-                              Supprimer
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  }
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
-
-
-
-      {closeOpen && activeInventory && (
+      <div
+        className="printOnly"
+        style={{
+          display: 'none',
+        }}
+      >
         <div
           style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 1200,
-            background: 'rgba(15,23,42,.68)',
-            display: 'grid',
-            placeItems: 'center',
-            padding: 18,
-          }}
-          onMouseDown={(event) => {
-            if (event.currentTarget === event.target) {
-              setCloseOpen(false)
-            }
+            textAlign: 'center',
+            marginBottom: 10,
           }}
         >
           <div
             style={{
-              width: 'min(620px, 100%)',
-              background: '#111827',
-              color: '#fff',
-              borderRadius: 18,
-              padding: 24,
-              boxShadow:
-                '0 25px 80px rgba(0,0,0,.45)',
+              fontSize: 16,
+              fontWeight: 900,
             }}
           >
-            <h2 style={{ margin: 0 }}>
-              Clôturer l&apos;inventaire
-            </h2>
+            NUKUTEPIPI · NUKUSTOCK
+          </div>
 
-            <div
-              style={{
-                marginTop: 6,
-                color: '#aab4c3',
-                fontSize: 13,
-                lineHeight: 1.5,
-              }}
-            >
-              {activeInventory.id} · {activeInventory.purpose}
-            </div>
+          <div
+            style={{
+              marginTop: 3,
+              fontSize: 12,
+              fontWeight: 700,
+            }}
+          >
+            État du stock disponible
+          </div>
 
-            <div
-              style={{
-                marginTop: 18,
-                padding: 14,
-                borderRadius: 12,
-                background: 'rgba(255,255,255,.05)',
-                border:
-                  '1px solid rgba(255,255,255,.10)',
-              }}
-            >
-              <label
-                style={{
-                  display: 'flex',
-                  gap: 12,
-                  alignItems: 'flex-start',
-                  cursor: 'pointer',
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={applyCountToStock}
-                  onChange={(event) =>
-                    setApplyCountToStock(
-                      event.target.checked
-                    )
-                  }
-                  style={{ marginTop: 3 }}
-                />
-
-                <span>
-                  <strong
-                    style={{
-                      display: 'block',
-                      fontSize: 14,
-                    }}
-                  >
-                    Utiliser le comptage réel comme nouveau stock
-                  </strong>
-
-                  <span
-                    style={{
-                      display: 'block',
-                      marginTop: 5,
-                      color: '#aab4c3',
-                      fontSize: 12,
-                      lineHeight: 1.45,
-                    }}
-                  >
-                    Si cette option est cochée, les quantités comptées remplaceront les quantités théoriques par lieu. Si elle est décochée, l&apos;inventaire sera uniquement enregistré dans l&apos;historique.
-                  </span>
-                </span>
-              </label>
-            </div>
-
-            {applyCountToStock && (
-              <div
-                style={{
-                  marginTop: 12,
-                  padding: 12,
-                  borderRadius: 10,
-                  background: 'rgba(245,158,11,.12)',
-                  border: '1px solid rgba(245,158,11,.30)',
-                  color: '#fde68a',
-                  fontSize: 12,
-                  lineHeight: 1.45,
-                }}
-              >
-                Attention : cette action modifiera réellement le stock de NukuStock après validation.
-              </div>
-            )}
-
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'flex-end',
-                gap: 10,
-                marginTop: 22,
-              }}
-            >
-              <button
-                className="button secondary"
-                type="button"
-                onClick={() =>
-                  setCloseOpen(false)
-                }
-              >
-                Annuler
-              </button>
-
-              <button
-                className="button"
-                type="button"
-                onClick={finalizeInventory}
-              >
-                {applyCountToStock
-                  ? 'Valider et mettre le stock à jour'
-                  : 'Clôturer sans modifier le stock'}
-              </button>
-            </div>
+          <div
+            style={{
+              marginTop: 4,
+              fontSize: 9,
+            }}
+          >
+            Date d'impression :{' '}
+            {new Date().toLocaleDateString('fr-FR')}{' '}
+            {new Date().toLocaleTimeString('fr-FR', {
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
           </div>
         </div>
-      )}
 
-      {printColumnsOpen && activeInventory && (
         <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: 8,
+            marginBottom: 10,
+            fontSize: 9,
+          }}
+        >
+          <div
+            style={{
+              gridColumn: '1 / -1',
+              textAlign: 'center',
+              fontSize: 11,
+              fontWeight: 900,
+              padding: '5px 0',
+              borderTop: '1px solid #000',
+              borderBottom: '1px solid #000',
+            }}
+          >
+            ZONE : {zoneFilter}
+          </div>
+
+          <div>
+            <strong>Références :</strong>{' '}
+            {filteredProductIds.size}
+          </div>
+
+          <div>
+            <strong>Stock total :</strong>{' '}
+            {totalQty.toLocaleString('fr-FR')}
+          </div>
+        </div>
+
+        <div
+          style={{
+            marginBottom: 8,
+            fontSize: 8,
+            textAlign: 'center',
+          }}
+        >
+          Impression simplifiée : la zone est indiquée en en-tête et les numéros de lot ne sont pas imprimés.
+        </div>
+      </div>
+
+      <div
+        style={{
+          padding: 12,
+          borderRadius: 12,
+          marginBottom: 16,
+          background:
+            'rgba(59,130,246,.08)',
+          border:
+            '1px solid rgba(59,130,246,.18)',
+          fontSize: 12,
+          lineHeight: 1.5,
+        }}
+      >
+        <strong>
+          Consultation uniquement.
+        </strong>{' '}
+        Les quantités, DLUO/DLC,
+        lots et lieux de stockage ne
+        peuvent pas être modifiés ici.
+        Pour effectuer une entrée ou
+        modifier le stock, utilise
+        l&apos;onglet{' '}
+        <strong>Produits</strong>.
+      </div>
+
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns:
+            'repeat(auto-fit,minmax(170px,1fr))',
+          gap: 12,
+          marginBottom: 16,
+        }}
+      >
+        <div style={statBox}>
+          <div
+            style={{
+              fontSize: 11,
+              color: '#667085',
+            }}
+          >
+            Références affichées
+          </div>
+
+          <div
+            style={{
+              fontSize: 24,
+              fontWeight: 800,
+              marginTop: 4,
+            }}
+          >
+            {filteredProductIds.size}
+          </div>
+        </div>
+
+        <div style={statBox}>
+          <div
+            style={{
+              fontSize: 11,
+              color: '#667085',
+            }}
+          >
+            Stock disponible
+          </div>
+
+          <div
+            style={{
+              fontSize: 24,
+              fontWeight: 800,
+              marginTop: 4,
+            }}
+          >
+            {totalQty.toLocaleString(
+              'fr-FR'
+            )}
+          </div>
+        </div>
+
+        <div style={statBox}>
+          <div
+            style={{
+              fontSize: 11,
+              color: '#667085',
+            }}
+          >
+            Valeur du stock
+          </div>
+
+          <div
+            style={{
+              fontSize: 20,
+              fontWeight: 800,
+              marginTop: 4,
+            }}
+          >
+            {totalValue.toLocaleString(
+              'fr-FR'
+            )}{' '}
+            XPF
+          </div>
+        </div>
+
+        <div style={statBox}>
+          <div
+            style={{
+              fontSize: 11,
+              color: '#667085',
+            }}
+          >
+            Lots périmés
+          </div>
+
+          <div
+            style={{
+              fontSize: 24,
+              fontWeight: 800,
+              marginTop: 4,
+            }}
+          >
+            {expiredCount}
+          </div>
+        </div>
+
+        <div style={statBox}>
+          <div
+            style={{
+              fontSize: 11,
+              color: '#667085',
+            }}
+          >
+            DLUO &lt; 1 mois
+          </div>
+
+          <div
+            style={{
+              fontSize: 24,
+              fontWeight: 800,
+              marginTop: 4,
+            }}
+          >
+            {underOneMonthCount}
+          </div>
+        </div>
+      </div>
+
+      <Card>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns:
+              'repeat(auto-fit,minmax(180px,1fr))',
+            gap: 10,
+          }}
+        >
+          <input
+            className="input"
+            placeholder="Rechercher..."
+            value={search}
+            onChange={(event) =>
+              setSearch(
+                event.target.value
+              )
+            }
+          />
+
+          <select
+            className="select"
+            value={zoneFilter}
+            onChange={(event) =>
+              setZoneFilter(
+                event.target.value as ZoneFilter
+              )
+            }
+          >
+            <option value="All">
+              Toutes les zones
+            </option>
+            <option value="Beverage">
+              Beverage
+            </option>
+            <option value="Food">
+              Food
+            </option>
+            <option value="Matériel & Accessoires">
+              Matériel & Accessoires
+            </option>
+          </select>
+
+          <select
+            className="select"
+            value={categoryFilter}
+            onChange={(event) => {
+              setCategoryFilter(
+                event.target.value
+              )
+              setSubcategoryFilter(
+                'Toutes'
+              )
+            }}
+          >
+            <option value="Toutes">
+              Toutes les catégories
+            </option>
+
+            {categories.map(
+              (category) => (
+                <option
+                  key={category}
+                  value={category}
+                >
+                  {category}
+                </option>
+              )
+            )}
+          </select>
+
+          <select
+            className="select"
+            value={
+              subcategoryFilter
+            }
+            onChange={(event) =>
+              setSubcategoryFilter(
+                event.target.value
+              )
+            }
+          >
+            <option value="Toutes">
+              Toutes les
+              sous-catégories
+            </option>
+
+            {subcategories.map(
+              (subcategory) => (
+                <option
+                  key={subcategory}
+                  value={subcategory}
+                >
+                  {subcategory}
+                </option>
+              )
+            )}
+          </select>
+
+          <select
+            className="select"
+            value={supplierFilter}
+            onChange={(event) =>
+              setSupplierFilter(
+                event.target.value
+              )
+            }
+          >
+            <option value="Tous">
+              Tous les fournisseurs
+            </option>
+
+            {suppliers.map(
+              (supplier) => (
+                <option
+                  key={supplier}
+                  value={supplier}
+                >
+                  {supplier}
+                </option>
+              )
+            )}
+          </select>
+
+
+          <select
+            className="select"
+            value={locationFilter}
+            onChange={(event) =>
+              setLocationFilter(
+                event.target.value
+              )
+            }
+          >
+            <option value="Tous">
+              Tous les lieux
+            </option>
+
+            {locations.map(
+              (location) => (
+                <option
+                  key={location}
+                  value={location}
+                >
+                  {location}
+                </option>
+              )
+            )}
+          </select>
+
+          <select
+            className="select"
+            value={quantityFilter}
+            onChange={(event) =>
+              setQuantityFilter(
+                event.target
+                  .value as QuantityFilter
+              )
+            }
+          >
+            <option value="Tous">
+              Toutes les quantités
+            </option>
+            <option value="Rupture">
+              Stock = 0
+            </option>
+            <option value="1-10">
+              1 à 10
+            </option>
+            <option value="11-50">
+              11 à 50
+            </option>
+            <option value="51-100">
+              51 à 100
+            </option>
+            <option value="100+">
+              Plus de 100
+            </option>
+            <option value="Sous minimum">
+              Sous stock minimum
+            </option>
+          </select>
+
+          <select
+            className="select"
+            value={expiryFilter}
+            onChange={(event) =>
+              setExpiryFilter(
+                event.target
+                  .value as ExpiryFilter
+              )
+            }
+          >
+            <option value="Toutes">
+              Toutes les DLUO/DLC
+            </option>
+            <option value="Périmé">
+              Périmé
+            </option>
+            <option value="Moins d'un mois">
+              Moins d&apos;un mois
+            </option>
+            <option value="De 1 à 3 mois">
+              1 à 3 mois
+            </option>
+            <option value="De 3 à 6 mois">
+              3 à 6 mois
+            </option>
+            <option value="De 6 mois à 1 an">
+              6 mois à 1 an
+            </option>
+            <option value="+ d'un an">
+              Plus d&apos;un an
+            </option>
+            <option value="Sans DLUO">
+              Sans DLUO
+            </option>
+          </select>
+
+          <button
+            className="button secondary"
+            type="button"
+            onClick={resetFilters}
+          >
+            Réinitialiser filtres
+          </button>
+        </div>
+      </Card>
+
+      <Card>
+        <div style={{ overflowX: 'auto' }}>
+          {(() => {
+            const cols = [
+              stockDisplay.isVisible('reference') && '150px',
+              stockDisplay.isVisible('photo') && '76px',
+              stockDisplay.isVisible('qrProduct') && '76px',
+              stockDisplay.isVisible('product') && 'minmax(230px,2fr)',
+              stockDisplay.isVisible('zone') && '135px',
+              stockDisplay.isVisible('category') && '150px',
+              stockDisplay.isVisible('qrCategory') && '76px',
+              stockDisplay.isVisible('subcategory') && '165px',
+              stockDisplay.isVisible('qrSubcategory') && '76px',
+              stockDisplay.isVisible('location') && '160px',
+              stockDisplay.isVisible('qrLocation') && '76px',
+              stockDisplay.isVisible('lot') && '145px',
+              stockDisplay.isVisible('expiry') && '135px',
+              stockDisplay.isVisible('quantity') && '120px',
+              stockDisplay.isVisible('price') && '120px',
+              stockDisplay.isVisible('value') && '120px',
+              stockDisplay.isVisible('unitWeight') && '125px',
+              stockDisplay.isVisible('caseWeight') && '165px',
+              stockDisplay.isVisible('totalWeight') && '145px',
+              '120px',
+            ].filter(Boolean).join(' ')
+
+            const minWidth = Math.max(
+              850,
+              stockDisplay.visible.length * 105
+            )
+
+            const qrBox = (
+              value: string,
+              title: string
+            ) => (
+              <div
+                className="screenOnly"
+                title={title}
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 10,
+                  background: '#fff',
+                  border: '1px solid #e5e7eb',
+                  display: 'grid',
+                  placeItems: 'center',
+                  padding: 4,
+                }}
+              >
+                <QRCodeSVG
+                  value={value}
+                  size={54}
+                  level="M"
+                  marginSize={0}
+                  title={title}
+                />
+              </div>
+            )
+
+            return (
+              <div style={{ minWidth }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: cols,
+                    gap: 12,
+                    padding: '0 0 12px',
+                    fontWeight: 700,
+                    alignItems: 'center',
+                  }}
+                >
+                  {stockDisplay.isVisible('reference') && <div>Référence</div>}
+                  {stockDisplay.isVisible('photo') && <div>Photo</div>}
+                  {stockDisplay.isVisible('qrProduct') && <div>QR Produit</div>}
+                  {stockDisplay.isVisible('product') && (
+                    <button style={thButton} onClick={() => toggleSort('product')}>
+                      Produit{sortIndicator('product')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('zone') && <div>Zone</div>}
+                  {stockDisplay.isVisible('category') && (
+                    <button style={thButton} onClick={() => toggleSort('category')}>
+                      Catégorie{sortIndicator('category')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('qrCategory') && <div>QR Cat.</div>}
+                  {stockDisplay.isVisible('subcategory') && (
+                    <button style={thButton} onClick={() => toggleSort('subcategory')}>
+                      Sous-catégorie{sortIndicator('subcategory')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('qrSubcategory') && <div>QR Sous-cat.</div>}
+                  {stockDisplay.isVisible('location') && (
+                    <button style={thButton} onClick={() => toggleSort('location')}>
+                      Lieu{sortIndicator('location')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('qrLocation') && <div>QR Lieu</div>}
+                  {stockDisplay.isVisible('lot') && <div>Lot</div>}
+                  {stockDisplay.isVisible('expiry') && (
+                    <button style={thButton} onClick={() => toggleSort('expiry')}>
+                      DLUO / DLC{sortIndicator('expiry')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('quantity') && (
+                    <button style={thButton} onClick={() => toggleSort('quantity')}>
+                      Disponible{sortIndicator('quantity')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('price') && (
+                    <button style={thButton} onClick={() => toggleSort('price')}>
+                      Prix{sortIndicator('price')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('value') && (
+                    <button style={thButton} onClick={() => toggleSort('value')}>
+                      Valeur{sortIndicator('value')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('unitWeight') && <div>Poids unitaire</div>}
+                  {stockDisplay.isVisible('caseWeight') && <div>Poids conditionnement</div>}
+                  {stockDisplay.isVisible('totalWeight') && <div>Poids total stock</div>}
+                  <div className="screenOnly">Action</div>
+                </div>
+
+                {filteredRows.map(({ product, lot, quantity, value }, index) => (
+                  <div
+                    key={`${product.id}-${lot.id}-${index}`}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: cols,
+                      gap: 12,
+                      padding: '13px 0',
+                      borderTop: '1px solid rgba(255,255,255,.08)',
+                      alignItems: 'center',
+                    }}
+                  >
+                    {stockDisplay.isVisible('reference') && (
+                      <strong style={{ fontSize: 11, letterSpacing: '.03em' }}>
+                        {product.internalRef || '—'}
+                      </strong>
+                    )}
+
+                    {stockDisplay.isVisible('photo') && (
+                      <div className="screenOnly">
+                        {getProductPhoto(product) ? (
+                          <div
+                            style={{
+                              width: 64,
+                              height: 64,
+                              borderRadius: 10,
+                              background: '#fff',
+                              border: '1px solid #e5e7eb',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              overflow: 'hidden',
+                              padding: 4,
+                            }}
+                          >
+                            <img
+                              src={getProductPhoto(product)}
+                              alt={product.name || 'Produit'}
+                              loading="lazy"
+                              style={{
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'contain',
+                                display: 'block',
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <div
+                            style={{
+                              width: 64,
+                              height: 64,
+                              borderRadius: 10,
+                              border: '1px dashed #cbd5e1',
+                              display: 'grid',
+                              placeItems: 'center',
+                              fontSize: 10,
+                              opacity: 0.5,
+                            }}
+                          >
+                            PHOTO
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {stockDisplay.isVisible('qrProduct') &&
+                      qrBox(
+                        `NUKUSTOCK|PRODUCT|${product.internalRef || product.id}`,
+                        `QR Produit ${product.internalRef || product.name}`
+                      )}
+
+                    {stockDisplay.isVisible('product') && (
+                      <div>
+                        <div style={{ fontWeight: 800 }}>{product.name}</div>
+                        <div style={{ marginTop: 3, fontSize: 11, opacity: 0.65 }}>
+                          {[product.packaging].filter(Boolean).join(' · ')}
+                        </div>
+                      </div>
+                    )}
+
+                    {stockDisplay.isVisible('zone') && (
+                      <div><Badge tone="info">{detectProductZone(product)}</Badge></div>
+                    )}
+
+                    {stockDisplay.isVisible('category') && (
+                      <div>{product.category || '—'}</div>
+                    )}
+
+                    {stockDisplay.isVisible('qrCategory') &&
+                      qrBox(
+                        `NUKUSTOCK|CATEGORY|${product.category || 'Sans catégorie'}`,
+                        `QR Catégorie ${product.category || ''}`
+                      )}
+
+                    {stockDisplay.isVisible('subcategory') && (
+                      <div>{product.subcategory || '—'}</div>
+                    )}
+
+                    {stockDisplay.isVisible('qrSubcategory') &&
+                      qrBox(
+                        `NUKUSTOCK|SUBCATEGORY|${product.subcategory || 'Sans sous-catégorie'}`,
+                        `QR Sous-catégorie ${product.subcategory || ''}`
+                      )}
+
+                    {stockDisplay.isVisible('location') && (
+                      <div>{lot.location || 'Non affecté'}</div>
+                    )}
+
+                    {stockDisplay.isVisible('qrLocation') &&
+                      qrBox(
+                        `NUKUSTOCK|LOCATION|${lot.location || 'Non affecté'}`,
+                        `QR Lieu ${lot.location || 'Non affecté'}`
+                      )}
+
+                    {stockDisplay.isVisible('lot') && (
+                      <div>{lot.lotNumber || '—'}</div>
+                    )}
+
+                    {stockDisplay.isVisible('expiry') && (
+                      <div>
+                        {lot.expiry ? (
+                          <Badge tone={getExpiryTone(lot.expiry)}>
+                            {new Date(`${lot.expiry}T00:00:00`).toLocaleDateString('fr-FR')}
+                          </Badge>
+                        ) : (
+                          <span style={{ opacity: 0.5, fontSize: 12 }}>Sans DLUO</span>
+                        )}
+                      </div>
+                    )}
+
+                    {stockDisplay.isVisible('quantity') && (
+                      <div>
+                        <Badge
+                          tone={
+                            quantity <= 0
+                              ? 'danger'
+                              : quantity < Math.max(0, Number(product.minStock) || 0)
+                              ? 'warn'
+                              : 'good'
+                          }
+                        >
+                          {quantity} {product.unit}
+                        </Badge>
+                      </div>
+                    )}
+
+                    {stockDisplay.isVisible('price') && (
+                      <div>
+                        {Math.max(0, Number(product.purchasePrice) || 0).toLocaleString('fr-FR')} XPF
+                      </div>
+                    )}
+
+                    {stockDisplay.isVisible('value') && (
+                      <div>{value.toLocaleString('fr-FR')} XPF</div>
+                    )}
+
+                    {stockDisplay.isVisible('unitWeight') && (
+                      <div style={{ fontWeight: 700 }}>
+                        {formatWeightKg(product.netUnitWeightKg)}
+                      </div>
+                    )}
+
+                    {stockDisplay.isVisible('caseWeight') && (
+                      <div style={{ fontWeight: 700 }}>
+                        {formatWeightKg(product.caseWeightKg)}
+                      </div>
+                    )}
+
+                    {stockDisplay.isVisible('totalWeight') && (
+                      <div>
+                        <strong>
+                          {formatWeightKg(
+                            quantity * Number(product.netUnitWeightKg || 0)
+                          )}
+                        </strong>
+                        {quantity > 0 && Number(product.netUnitWeightKg || 0) > 0 && (
+                          <div
+                            style={{
+                              marginTop: 3,
+                              fontSize: 10,
+                              opacity: 0.6,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {quantity} × {formatWeightKg(product.netUnitWeightKg)}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="screenOnly">
+                      <button
+                        className="button small"
+                        type="button"
+                        disabled={quantity <= 0 || !lot.location}
+                        onClick={() => openTransfer(product, lot, quantity)}
+                      >
+                        Transférer
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          })()}
+        </div>
+      </Card>
+
+      <style jsx global>{`
+        @media print {
+          @page {
+            size: A4 landscape;
+            margin: 10mm;
+          }
+        }
+      `}</style>
+
+      {printColumnsOpen && (
+        <div
+          className="screenOnly"
           style={{
             position: 'fixed',
             inset: 0,
-            zIndex: 1100,
-            background: 'rgba(15,23,42,.64)',
+            zIndex: 1000,
+            background: 'rgba(15,23,42,.58)',
             display: 'grid',
             placeItems: 'center',
             padding: 18,
@@ -3034,12 +2432,10 @@ export default function Inventory() {
               width: 'min(620px, 100%)',
               maxHeight: '90vh',
               overflowY: 'auto',
-              background: '#111827',
-              color: '#fff',
+              background: '#fff',
               borderRadius: 18,
               padding: 22,
-              boxShadow:
-                '0 25px 80px rgba(0,0,0,.45)',
+              boxShadow: '0 24px 70px rgba(15,23,42,.25)',
             }}
           >
             <h2 style={{ margin: 0 }}>
@@ -3048,11 +2444,11 @@ export default function Inventory() {
             <p
               style={{
                 margin: '6px 0 18px',
-                color: '#aab4c3',
+                color: '#667085',
                 fontSize: 13,
               }}
             >
-              Choisis les informations à faire apparaître dans l&apos;inventaire imprimé.
+              Coche uniquement les informations que tu veux voir sur l&apos;impression du stock.
             </p>
 
             <div
@@ -3063,40 +2459,35 @@ export default function Inventory() {
                 gap: 9,
               }}
             >
-              {INVENTORY_PRINT_COLUMNS.map(
-                (column) => (
-                  <label
-                    key={column.key}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 9,
-                      padding: '10px 12px',
-                      border:
-                        '1px solid rgba(255,255,255,.12)',
-                      background:
-                        'rgba(255,255,255,.04)',
-                      borderRadius: 11,
-                      cursor: 'pointer',
-                      fontSize: 13,
-                      fontWeight: 700,
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={inventoryPrintColumns.includes(
+              {STOCK_PRINT_COLUMNS.map((column) => (
+                <label
+                  key={column.key}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 9,
+                    padding: '10px 12px',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: 11,
+                    cursor: 'pointer',
+                    fontSize: 13,
+                    fontWeight: 700,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={stockPrintColumns.includes(
+                      column.key
+                    )}
+                    onChange={() =>
+                      toggleStockPrintColumn(
                         column.key
-                      )}
-                      onChange={() =>
-                        toggleInventoryPrintColumn(
-                          column.key
-                        )
-                      }
-                    />
-                    {column.label}
-                  </label>
-                )
-              )}
+                      )
+                    }
+                  />
+                  {column.label}
+                </label>
+              ))}
             </div>
 
             <div
@@ -3111,8 +2502,8 @@ export default function Inventory() {
                 className="button secondary small"
                 type="button"
                 onClick={() =>
-                  setInventoryPrintColumns(
-                    INVENTORY_PRINT_COLUMNS.map(
+                  setStockPrintColumns(
+                    STOCK_PRINT_COLUMNS.map(
                       (column) => column.key
                     )
                   )
@@ -3124,8 +2515,8 @@ export default function Inventory() {
                 className="button secondary small"
                 type="button"
                 onClick={() =>
-                  setInventoryPrintColumns(
-                    DEFAULT_INVENTORY_PRINT_COLUMNS
+                  setStockPrintColumns(
+                    DEFAULT_STOCK_PRINT_COLUMNS
                   )
                 }
               >
@@ -3135,7 +2526,7 @@ export default function Inventory() {
                 className="button secondary small"
                 type="button"
                 onClick={() =>
-                  setInventoryPrintColumns([])
+                  setStockPrintColumns([])
                 }
               >
                 Tout décocher
@@ -3162,7 +2553,7 @@ export default function Inventory() {
               <button
                 className="button"
                 type="button"
-                onClick={printInventory}
+                onClick={printStock}
               >
                 Imprimer
               </button>
@@ -3171,32 +2562,139 @@ export default function Inventory() {
         </div>
       )}
 
-      {createOpen && (
+
+      {transferOpen && (() => {
+        const product = items.find((item) => item.id === transferProductId)
+        const sourceLot = product?.lots.find((lot) => lot.id === transferLotId)
+        const available = Math.max(0, Number(sourceLot?.quantity) || 0)
+
+        return (
+          <div
+            className="screenOnly"
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 1400,
+              background: 'rgba(15,23,42,.65)',
+              display: 'grid',
+              placeItems: 'center',
+              padding: 18,
+            }}
+            onMouseDown={(event) => {
+              if (event.currentTarget === event.target) setTransferOpen(false)
+            }}
+          >
+            <div
+              style={{
+                width: 'min(560px,100%)',
+                maxHeight: '92vh',
+                overflowY: 'auto',
+                background: '#fff',
+                color: '#101828',
+                borderRadius: 18,
+                padding: 24,
+                boxShadow: '0 25px 80px rgba(0,0,0,.30)',
+              }}
+            >
+              <h2 style={{ margin: 0 }}>Transférer le stock</h2>
+              <div style={{ marginTop: 6, color: '#667085', fontSize: 13 }}>
+                {product?.name || 'Produit'}
+              </div>
+
+              <div style={{ display: 'grid', gap: 14, marginTop: 20 }}>
+                <div style={{ padding: 12, borderRadius: 12, background: '#f8fafc', border: '1px solid #e5e7eb' }}>
+                  <strong>Lieu source :</strong> {transferFromLocation}<br />
+                  <strong>Disponible :</strong> {available} {product?.unit || ''}<br />
+                  <strong>DLUO / DLC :</strong>{' '}
+                  {sourceLot?.expiry
+                    ? new Date(`${sourceLot.expiry}T00:00:00`).toLocaleDateString('fr-FR')
+                    : 'Sans DLUO'}
+                  {sourceLot?.lotNumber ? <><br /><strong>Lot :</strong> {sourceLot.lotNumber}</> : null}
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: 6, fontSize: 12, fontWeight: 800 }}>
+                    Lieu destination
+                  </label>
+                  <select
+                    className="input"
+                    style={{ width: '100%' }}
+                    value={transferToLocation}
+                    onChange={(event) => setTransferToLocation(event.target.value)}
+                  >
+                    <option value="">Choisir un lieu</option>
+                    {quickEntryLocations
+                      .filter((location) => location !== transferFromLocation)
+                      .map((location) => (
+                        <option key={location} value={location}>{location}</option>
+                      ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: 6, fontSize: 12, fontWeight: 800 }}>
+                    Quantité à transférer
+                  </label>
+                  <input
+                    className="input"
+                    style={{ width: '100%' }}
+                    type="number"
+                    min="0.01"
+                    max={available}
+                    step="0.01"
+                    value={transferQuantity}
+                    onChange={(event) =>
+                      setTransferQuantity(Math.max(0, Number(event.target.value) || 0))
+                    }
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 22 }}>
+                <button className="button secondary" type="button" onClick={() => setTransferOpen(false)}>
+                  Annuler
+                </button>
+                <button className="button" type="button" onClick={saveTransfer}>
+                  Confirmer le transfert
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {quickEntryOpen && (
         <div
-          className="inventoryCreateBackdrop"
+          className="screenOnly"
           style={{
             position: 'fixed',
             inset: 0,
-            background:
-              'rgba(0,0,0,.68)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent:
-              'center',
-            padding: 20,
-            zIndex: 999,
+            zIndex: 1300,
+            background: 'rgba(15,23,42,.65)',
+            display: 'grid',
+            placeItems: 'center',
+            padding: 18,
+          }}
+          onMouseDown={(event) => {
+            if (
+              event.currentTarget ===
+              event.target
+            ) {
+              setQuickEntryOpen(false)
+            }
           }}
         >
           <div
-            className="inventoryCreateModal"
             style={{
-              width:
-                'min(620px, 100%)',
-              background: '#111827',
+              width: 'min(720px,100%)',
+              maxHeight: '92vh',
+              overflowY: 'auto',
+              background: '#fff',
+              color: '#101828',
               borderRadius: 18,
               padding: 24,
               boxShadow:
-                '0 25px 80px rgba(0,0,0,.45)',
+                '0 25px 80px rgba(0,0,0,.30)',
             }}
           >
             <div
@@ -3204,33 +2702,30 @@ export default function Inventory() {
                 display: 'flex',
                 justifyContent:
                   'space-between',
-                alignItems:
-                  'center',
-                gap: 12,
-                marginBottom: 22,
+                gap: 14,
+                alignItems: 'flex-start',
               }}
             >
               <div>
                 <h2 style={{ margin: 0 }}>
-                  Créer un inventaire global
+                  Entrée rapide de stock
                 </h2>
-
                 <div
                   style={{
                     marginTop: 5,
+                    color: '#667085',
                     fontSize: 12,
-                    opacity: 0.65,
                   }}
                 >
-                  Choisis d&apos;abord la famille d&apos;inventaire.
-                  Les lieux seront intégrés automatiquement.
+                  Ajoute immédiatement le stock sans créer de commande fournisseur.
                 </div>
               </div>
 
               <button
                 className="button secondary small"
+                type="button"
                 onClick={() =>
-                  setCreateOpen(false)
+                  setQuickEntryOpen(false)
                 }
               >
                 Fermer
@@ -3238,319 +2733,86 @@ export default function Inventory() {
             </div>
 
             <div
-              className="inventoryCreateGrid"
               style={{
                 display: 'grid',
                 gridTemplateColumns:
-                  '1fr 1fr',
-                gap: 16,
+                  'repeat(2,minmax(0,1fr))',
+                gap: 14,
+                marginTop: 20,
               }}
             >
               <div
                 style={{
-                  gridColumn:
-                    '1 / -1',
-                }}
-              >
-                <label
-                  style={labelStyle}
-                >
-                  Nom / commentaire
-                  (facultatif)
-                </label>
-
-                <input
-                  className="input"
-                  style={{
-                    width: '100%',
-                  }}
-                  value={newName}
-                  onChange={(event) =>
-                    setNewName(
-                      event.target.value
-                    )
-                  }
-                  placeholder="Ex. Inventaire ouverture août"
-                />
-              </div>
-
-              <div
-                style={{
                   gridColumn: '1 / -1',
                 }}
               >
-                <label style={labelStyle}>
-                  Utilisation de l&apos;inventaire
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  Produit
                 </label>
-
-                <div
-                  className="inventoryPurposeGrid"
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns:
-                      'repeat(auto-fit,minmax(160px,1fr))',
-                    gap: 10,
-                  }}
-                >
-                  {(
-                    [
-                      'Stock initial',
-                      'Contrôle',
-                      'Séjour',
-                    ] as InventoryPurpose[]
-                  ).map((purpose) => (
-                    <button
-                      key={purpose}
-                      type="button"
-                      className={
-                        newPurpose === purpose
-                          ? 'button'
-                          : 'button secondary'
-                      }
-                      onClick={() =>
-                        setNewPurpose(purpose)
-                      }
-                    >
-                      {purpose}
-                    </button>
-                  ))}
-                </div>
-
-                <div
-                  style={{
-                    marginTop: 8,
-                    fontSize: 11,
-                    opacity: 0.68,
-                    lineHeight: 1.45,
-                  }}
-                >
-                  {newPurpose === 'Stock initial'
-                    ? 'Le comptage peut devenir le stock réel de référence à la clôture.'
-                    : newPurpose === 'Contrôle'
-                    ? 'Mesure les écarts sans modifier le stock, sauf si tu choisis de les appliquer à la clôture.'
-                    : 'Calcule les consommations et ratios du séjour. Le comptage final peut être appliqué au stock à la clôture.'}
-                </div>
-              </div>
-
-              <div
-                style={{
-                  gridColumn: '1 / -1',
-                }}
-              >
-                <label style={labelStyle}>
-                  Mode de saisie
-                </label>
-
-                <div
-                  className="inventoryEntryModeGrid"
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns:
-                      'repeat(2,minmax(0,1fr))',
-                    gap: 10,
-                  }}
-                >
-                  {(
-                    [
-                      'Saisie classique',
-                      'Scan QR',
-                    ] as InventoryEntryMode[]
-                  ).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      className={
-                        newEntryMode === mode
-                          ? 'button'
-                          : 'button secondary'
-                      }
-                      onClick={() =>
-                        setNewEntryMode(mode)
-                      }
-                    >
-                      {mode}
-                    </button>
-                  ))}
-                </div>
-
-                <div
-                  style={{
-                    marginTop: 8,
-                    fontSize: 11,
-                    opacity: 0.68,
-                    lineHeight: 1.45,
-                  }}
-                >
-                  {newEntryMode === 'Scan QR'
-                    ? 'Tu photographies d’abord le QR du lieu, puis le QR du produit. NukuStock affecte automatiquement le comptage au bon lieu.'
-                    : 'Le comptage reste organisé dans les tableaux classiques par lieu de stockage.'}
-                </div>
-              </div>
-
-              <div>
-                <label style={labelStyle}>
-                  Famille d&apos;inventaire
-                </label>
-
                 <select
                   className="input"
                   style={{ width: '100%' }}
-                  value={newScope}
+                  value={quickProductId}
                   onChange={(event) =>
-                    setNewScope(
-                      event.target.value as InventoryScope
-                    )
-                  }
-                >
-                  {inventoryScopes.map((scope) => (
-                    <option key={scope} value={scope}>
-                      Inventaire {scope}
-                    </option>
-                  ))}
-                </select>
-
-                <div
-                  style={{
-                    marginTop: 6,
-                    fontSize: 11,
-                    opacity: 0.65,
-                    lineHeight: 1.35,
-                  }}
-                >
-                  {newScope === 'Tous les inventaires'
-                    ? 'Affiche tous les produits : Beverage + Food + Matériel & Verrerie.'
-                    : newScope === 'Beverage'
-                    ? 'Boissons, alcools, vins, bières, softs, jus et eaux.'
-                    : newScope === 'Food'
-                    ? 'Produits alimentaires et denrées cuisine.'
-                    : 'Matériel, équipements, ustensiles et verrerie.'}
-                </div>
-              </div>
-
-              <div>
-                <label
-                  style={labelStyle}
-                >
-                  Type d&apos;inventaire
-                </label>
-
-                <select
-                  className="input"
-                  style={{
-                    width: '100%',
-                  }}
-                  value={newType}
-                  onChange={(event) =>
-                    setNewType(
+                    setQuickProductId(
                       event.target.value
                     )
                   }
                 >
-                  {inventoryTypes.map(
-                    (inventoryType) => (
+                  <option value="">
+                    Choisir un produit
+                  </option>
+                  {[...items]
+                    .sort((a, b) =>
+                      a.name.localeCompare(
+                        b.name,
+                        'fr'
+                      )
+                    )
+                    .map((product) => (
                       <option
-                        key={
-                          inventoryType
-                        }
-                        value={
-                          inventoryType
-                        }
+                        key={product.id}
+                        value={product.id}
                       >
-                        {
-                          inventoryType
-                        }
+                        {product.internalRef
+                          ? `${product.internalRef} · `
+                          : ''}
+                        {product.name}
                       </option>
-                    )
-                  )}
+                    ))}
                 </select>
               </div>
 
               <div>
-                <label
-                  style={labelStyle}
-                >
-                  Date de l&apos;inventaire
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  Quantité
                 </label>
-
                 <input
-                  type="date"
                   className="input"
-                  style={{
-                    width: '100%',
-                  }}
-                  value={newDate}
-                  onChange={(event) =>
-                    setNewDate(
-                      event.target.value
-                    )
-                  }
-                />
-              </div>
-
-              <div>
-                <label
-                  style={labelStyle}
-                >
-                  Début du séjour
-                </label>
-
-                <input
-                  type="date"
-                  className="input"
-                  style={{
-                    width: '100%',
-                  }}
-                  value={stayStartDate}
-                  onChange={(event) =>
-                    setStayStartDate(
-                      event.target.value
-                    )
-                  }
-                />
-              </div>
-
-              <div>
-                <label
-                  style={labelStyle}
-                >
-                  Fin du séjour
-                </label>
-
-                <input
-                  type="date"
-                  className="input"
-                  style={{
-                    width: '100%',
-                  }}
-                  value={stayEndDate}
-                  onChange={(event) =>
-                    setStayEndDate(
-                      event.target.value
-                    )
-                  }
-                />
-              </div>
-
-              <div>
-                <label
-                  style={labelStyle}
-                >
-                  Nombre d&apos;invités
-                </label>
-
-                <input
+                  style={{ width: '100%' }}
                   type="number"
-                  min="1"
-                  className="input"
-                  style={{
-                    width: '100%',
-                  }}
-                  value={guestCount}
+                  min="0.01"
+                  step="0.01"
+                  value={quickQuantity}
                   onChange={(event) =>
-                    setGuestCount(
+                    setQuickQuantity(
                       Math.max(
-                        1,
-                        Number(event.target.value) || 1
+                        0,
+                        Number(
+                          event.target.value
+                        ) || 0
                       )
                     )
                   }
@@ -3558,59 +2820,165 @@ export default function Inventory() {
               </div>
 
               <div>
-                <label
-                  style={labelStyle}
-                >
-                  Durée du séjour
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  Lieu de stockage
                 </label>
+                <select
+                  className="input"
+                  style={{ width: '100%' }}
+                  value={quickLocation}
+                  onChange={(event) =>
+                    setQuickLocation(
+                      event.target.value
+                    )
+                  }
+                >
+                  <option value="">
+                    Choisir un lieu
+                  </option>
+                  {quickEntryLocations.map(
+                    (location) => (
+                      <option
+                        key={location}
+                        value={location}
+                      >
+                        {location}
+                      </option>
+                    )
+                  )}
+                </select>
+              </div>
 
-                <div
+              <div>
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  Lot (facultatif)
+                </label>
+                <input
+                  className="input"
+                  style={{ width: '100%' }}
+                  value={quickLotNumber}
+                  onChange={(event) =>
+                    setQuickLotNumber(
+                      event.target.value
+                    )
+                  }
+                  placeholder="Ex. LOT-2408"
+                />
+              </div>
+
+              <div>
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  DLUO / DLC (facultatif)
+                </label>
+                <input
+                  className="input"
+                  style={{ width: '100%' }}
+                  type="date"
+                  value={quickExpiry}
+                  onChange={(event) =>
+                    setQuickExpiry(
+                      event.target.value
+                    )
+                  }
+                />
+              </div>
+
+              <div
+                style={{
+                  gridColumn: '1 / -1',
+                }}
+              >
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  Note spéciale
+                </label>
+                <textarea
                   className="input"
                   style={{
                     width: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    fontWeight: 700,
+                    minHeight: 90,
+                    paddingTop: 10,
+                    resize: 'vertical',
                   }}
-                >
-                  {calculateStayDays(
-                    stayStartDate,
-                    stayEndDate
-                  )}{' '}
-                  jour
-                  {calculateStayDays(
-                    stayStartDate,
-                    stayEndDate
-                  ) > 1
-                    ? 's'
-                    : ''}
-                </div>
+                  value={quickNote}
+                  onChange={(event) =>
+                    setQuickNote(
+                      event.target.value
+                    )
+                  }
+                  placeholder="Ex. Livraison urgente, facture à récupérer demain."
+                />
               </div>
+
+              <label
+                style={{
+                  gridColumn: '1 / -1',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 10,
+                  padding: 13,
+                  borderRadius: 12,
+                  background: '#fff7e6',
+                  border:
+                    '1px solid #f4c56a',
+                  cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={
+                    quickNeedsRegularization
+                  }
+                  onChange={(event) =>
+                    setQuickNeedsRegularization(
+                      event.target.checked
+                    )
+                  }
+                  style={{ marginTop: 3 }}
+                />
+                <span>
+                  <strong>
+                    À régulariser
+                  </strong>
+                  <span
+                    style={{
+                      display: 'block',
+                      marginTop: 3,
+                      color: '#667085',
+                      fontSize: 11,
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    Le stock est ajouté tout de suite. Les documents, fournisseur, facture, BC et prix pourront être complétés plus tard dans Mouvements.
+                  </span>
+                </span>
+              </label>
             </div>
 
             <div
-              style={{
-                marginTop: 18,
-                padding: 12,
-                borderRadius: 10,
-                background:
-                  'rgba(255,255,255,.05)',
-                fontSize: 12,
-                lineHeight: 1.5,
-              }}
-            >
-              Cet inventaire couvrira tous les
-              lieux ayant du stock. Pendant le
-              comptage, chaque lieu sera affiché
-              séparément. À la clôture, NukuStock
-              conservera également la durée du séjour
-              et le nombre d&apos;invités afin de calculer
-              les consommations moyennes par jour,
-              par invité et par invité/jour.
-            </div>
-
-            <div
-              className="inventoryCreateActions"
               style={{
                 display: 'flex',
                 justifyContent:
@@ -3621,8 +2989,9 @@ export default function Inventory() {
             >
               <button
                 className="button secondary"
+                type="button"
                 onClick={() =>
-                  setCreateOpen(false)
+                  setQuickEntryOpen(false)
                 }
               >
                 Annuler
@@ -3630,164 +2999,17 @@ export default function Inventory() {
 
               <button
                 className="button"
-                onClick={createInventory}
+                type="button"
+                onClick={saveQuickEntry}
               >
-                Créer l&apos;inventaire global
+                Valider l&apos;entrée
               </button>
             </div>
           </div>
+
         </div>
       )}
 
-      <style jsx global>{`
-        @media (max-width: 767px) {
-          .inventoryCreateBackdrop {
-            align-items: stretch !important;
-            justify-content: stretch !important;
-            padding: 0 !important;
-            overflow: hidden !important;
-          }
-
-          .inventoryCreateModal {
-            width: 100vw !important;
-            max-width: 100vw !important;
-            height: 100dvh !important;
-            max-height: 100dvh !important;
-            margin: 0 !important;
-            padding:
-              calc(14px + env(safe-area-inset-top))
-              14px
-              calc(100px + env(safe-area-inset-bottom))
-              14px !important;
-            border-radius: 0 !important;
-            box-sizing: border-box !important;
-            overflow-y: auto !important;
-            overflow-x: hidden !important;
-            -webkit-overflow-scrolling: touch !important;
-            overscroll-behavior: contain !important;
-          }
-
-          .inventoryCreateModal > div:first-child {
-            position: sticky !important;
-            top: calc(-14px - env(safe-area-inset-top)) !important;
-            z-index: 20 !important;
-            width: calc(100% + 28px) !important;
-            margin:
-              calc(-14px - env(safe-area-inset-top))
-              -14px
-              16px !important;
-            padding:
-              calc(14px + env(safe-area-inset-top))
-              14px
-              12px !important;
-            box-sizing: border-box !important;
-            background: #111827 !important;
-            border-bottom: 1px solid rgba(255,255,255,.08) !important;
-          }
-
-          .inventoryCreateModal > div:first-child h2 {
-            font-size: 20px !important;
-            line-height: 1.15 !important;
-          }
-
-          .inventoryCreateGrid {
-            grid-template-columns: 1fr !important;
-            gap: 14px !important;
-          }
-
-          .inventoryCreateGrid > * {
-            grid-column: 1 !important;
-            width: 100% !important;
-            max-width: 100% !important;
-            min-width: 0 !important;
-            box-sizing: border-box !important;
-          }
-
-          .inventoryCreateModal input,
-          .inventoryCreateModal select,
-          .inventoryCreateModal textarea,
-          .inventoryCreateModal .input {
-            width: 100% !important;
-            max-width: 100% !important;
-            min-width: 0 !important;
-            box-sizing: border-box !important;
-            font-size: 16px !important;
-          }
-
-          .inventoryCreateModal input,
-          .inventoryCreateModal select,
-          .inventoryCreateModal .input {
-            min-height: 50px !important;
-          }
-
-          .inventoryPurposeGrid {
-            grid-template-columns: 1fr !important;
-            gap: 8px !important;
-          }
-
-          .inventoryPurposeGrid button {
-            width: 100% !important;
-            min-height: 52px !important;
-            font-size: 16px !important;
-          }
-
-          .inventoryEntryModeGrid {
-            grid-template-columns: 1fr 1fr !important;
-            gap: 8px !important;
-          }
-
-          .inventoryEntryModeGrid button {
-            width: 100% !important;
-            min-width: 0 !important;
-            min-height: 54px !important;
-            padding: 8px 10px !important;
-            white-space: normal !important;
-            line-height: 1.15 !important;
-            font-size: 15px !important;
-          }
-
-          .inventoryCreateActions {
-            position: fixed !important;
-            left: 0 !important;
-            right: 0 !important;
-            bottom: 0 !important;
-            z-index: 30 !important;
-            display: grid !important;
-            grid-template-columns: 1fr 1.35fr !important;
-            gap: 8px !important;
-            width: 100vw !important;
-            margin: 0 !important;
-            padding:
-              10px
-              12px
-              calc(10px + env(safe-area-inset-bottom)) !important;
-            box-sizing: border-box !important;
-            background: rgba(255,255,255,.98) !important;
-            border-top: 1px solid #e5e7eb !important;
-            box-shadow: 0 -8px 24px rgba(15,23,42,.14) !important;
-          }
-
-          .inventoryCreateActions button {
-            width: 100% !important;
-            min-width: 0 !important;
-            min-height: 50px !important;
-            padding: 10px !important;
-            white-space: normal !important;
-            line-height: 1.15 !important;
-            font-size: 14px !important;
-          }
-        }
-
-        @media (max-width: 390px) {
-          .inventoryEntryModeGrid {
-            grid-template-columns: 1fr !important;
-          }
-
-          .inventoryCreateActions {
-            grid-template-columns: 1fr !important;
-          }
-        }
-      `}</style>
     </Page>
   )
 }
