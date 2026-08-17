@@ -1196,7 +1196,7 @@ export function useUnifiedRequests() {
     const requestsChannel =
       supabase
         .channel(
-          'nukustock-internal-requests-realtime'
+          `nukustock-internal-requests-realtime-${crypto.randomUUID()}`
         )
         .on(
           'postgres_changes',
