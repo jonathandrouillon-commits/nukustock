@@ -960,6 +960,8 @@ function BarPlanningPage() {
     useState(false)
   const [showMonthlyDetails, setShowMonthlyDetails] =
     useState(false)
+  const [staffManagerMode, setStaffManagerMode] =
+    useState<'add' | 'remove' | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [supabaseReady, setSupabaseReady] = useState(false)
   const remoteApplyingRef = useRef(false)
@@ -2463,47 +2465,112 @@ function BarPlanningPage() {
       0
     )
 
+  const currentSavedPlanning =
+    savedPlannings.find(
+      item => item.weekStart === weekStart
+    )
+
+  const deleteCurrentPlanning = () => {
+    if (!currentSavedPlanning) {
+      window.alert(
+        'Aucun planning sauvegardé pour cette semaine.'
+      )
+      return
+    }
+
+    deleteSavedPlanning(
+      currentSavedPlanning.id
+    )
+  }
+
   return (
     <Page
       title="Planning Bar"
       subtitle={supabaseReady ? "Synchronisé en temps réel StockNuku ↔ BarNuku" : "Connexion à la synchronisation…"}
       action={
         <div className="topActions noPrint">
-          <div className="topNavGroup">
+          <div className="planningMainButtons">
             <button
+              type="button"
               className={`btn ${planningView === 'dashboard' ? 'activeTab' : ''}`}
-              onClick={() => setPlanningView('dashboard')}
+              onClick={() =>
+                setPlanningView('dashboard')
+              }
             >
               Dashboard
             </button>
 
             <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                setPlanningView('planning')
+                createNewPlanning()
+              }}
+            >
+              + Nouveau planning
+            </button>
+
+            <button
+              type="button"
+              className="btn danger"
+              onClick={deleteCurrentPlanning}
+              disabled={!currentSavedPlanning}
+            >
+              Supprimer planning
+            </button>
+
+            <button
+              type="button"
+              className="btn primary"
+              onClick={() =>
+                saveCurrentPlanning()
+              }
+            >
+              Sauvegarder planning
+            </button>
+
+            <button
+              type="button"
+              className="btn"
+              onClick={() =>
+                setStaffManagerMode('add')
+              }
+            >
+              + Ajouter staff
+            </button>
+
+            <button
+              type="button"
+              className="btn"
+              onClick={() =>
+                setStaffManagerMode('remove')
+              }
+            >
+              Supprimer staff
+            </button>
+          </div>
+
+          <div className="topActionGroup">
+            <button
+              type="button"
               className={`btn ${planningView === 'planning' ? 'activeTab' : ''}`}
-              onClick={() => setPlanningView('planning')}
+              onClick={() =>
+                setPlanningView('planning')
+              }
             >
               Planning
             </button>
 
             <button
+              type="button"
               className={`btn ${planningView === 'saved' ? 'activeTab' : ''}`}
-              onClick={() => setPlanningView('saved')}
+              onClick={() =>
+                setPlanningView('saved')
+              }
             >
               Sauvegardés ({uniqueSavedPlannings.length})
             </button>
-          </div>
-
-          <div className="topActionGroup">
-            {(planningView === 'planning' ||
-              planningView === 'dashboard') && (
-              <button
-                className="btn primary"
-                onClick={() =>
-                  saveCurrentPlanning()
-                }
-              >
-                Sauvegarder planning
-              </button>
-            )}
 
             <div className="actionDropdown">
               <button
@@ -2601,7 +2668,7 @@ function BarPlanningPage() {
                       void shareNative()
                     }}
                   >
-                    Partage du téléphone
+                    Partage système
                   </button>
                 </div>
               )}
@@ -3152,18 +3219,6 @@ function BarPlanningPage() {
             </div>
           </div>
 
-          <div className="addEmployee">
-            <label>Ajouter un employé</label>
-            <div>
-              <input
-                value={newEmployee}
-                placeholder="Nom de l'employé"
-                onChange={e => setNewEmployee(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && addEmployee()}
-              />
-              <button className="btn primary" onClick={addEmployee}>+ Ajouter</button>
-            </div>
-          </div>
         </div>
       </Card>
 
@@ -3291,13 +3346,6 @@ function BarPlanningPage() {
                           : 'Valider semaine'}
                       </button>
 
-                      <button
-                        className="deleteEmployee noPrint"
-                        onClick={() => removeEmployee(employee.id)}
-                        title="Supprimer l'employé"
-                      >
-                        Supprimer
-                      </button>
                     </th>
 
                     {days.map(day => {
@@ -3674,8 +3722,119 @@ function BarPlanningPage() {
         </>
       )}
 
+      {staffManagerMode && (
+        <div className="staffManagerBackdrop noPrint">
+          <div className="staffManagerModal">
+            <div className="staffManagerHeader">
+              <div>
+                <span>ÉQUIPE BAR</span>
+                <h2>
+                  {staffManagerMode === 'add'
+                    ? 'Ajouter un staff'
+                    : 'Supprimer un staff'}
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                className="staffManagerClose"
+                onClick={() =>
+                  setStaffManagerMode(null)
+                }
+              >
+                ×
+              </button>
+            </div>
+
+            {staffManagerMode === 'add' ? (
+              <div className="staffAddPanel">
+                <label>
+                  Nom du staff
+                </label>
+                <input
+                  autoFocus
+                  value={newEmployee}
+                  placeholder="Nom du staff"
+                  onChange={event =>
+                    setNewEmployee(
+                      event.target.value
+                    )
+                  }
+                  onKeyDown={event => {
+                    if (
+                      event.key === 'Enter'
+                    ) {
+                      addEmployee()
+                      setStaffManagerMode(null)
+                    }
+                  }}
+                />
+
+                <button
+                  type="button"
+                  className="btn primary"
+                  onClick={() => {
+                    addEmployee()
+                    setStaffManagerMode(null)
+                  }}
+                >
+                  + Ajouter le staff
+                </button>
+              </div>
+            ) : (
+              <div className="staffRemoveList">
+                {employees.map(employee => (
+                  <div
+                    className="staffRemoveRow"
+                    key={employee.id}
+                  >
+                    <div>
+                      <strong>
+                        {employee.name}
+                      </strong>
+                      <small>
+                        {employee.role}
+                      </small>
+                    </div>
+
+                    <button
+                      type="button"
+                      className="btn danger"
+                      onClick={() =>
+                        removeEmployee(
+                          employee.id
+                        )
+                      }
+                    >
+                      Supprimer
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <style jsx>{`
         .topActions { display:flex; align-items:center; justify-content:flex-end; gap:10px; flex-wrap:wrap; }
+        .planningMainButtons { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+        .planningMainButtons .btn { min-height:40px; }
+        .planningMainButtons .btn:disabled { opacity:.45; cursor:not-allowed; }
+
+        .staffManagerBackdrop { position:fixed; inset:0; z-index:3000; display:grid; place-items:center; padding:20px; background:rgba(15,23,42,.64); }
+        .staffManagerModal { width:min(560px,100%); max-height:min(720px,90vh); overflow:auto; border-radius:16px; background:#fff; padding:20px; box-shadow:0 24px 70px rgba(15,23,42,.28); }
+        .staffManagerHeader { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:18px; }
+        .staffManagerHeader span { color:#667085; font-size:10px; font-weight:900; letter-spacing:.08em; }
+        .staffManagerHeader h2 { margin:4px 0 0; font-size:20px; }
+        .staffManagerClose { width:38px; height:38px; border:1px solid #e4e7ec; border-radius:10px; background:#fff; cursor:pointer; font-size:22px; }
+        .staffAddPanel { display:grid; gap:10px; }
+        .staffAddPanel label { color:#344054; font-size:11px; font-weight:800; }
+        .staffAddPanel input { width:100%; min-height:44px; border:1px solid #d0d5dd; border-radius:9px; padding:0 11px; font:inherit; }
+        .staffRemoveList { display:grid; gap:8px; }
+        .staffRemoveRow { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px; border:1px solid #e4e7ec; border-radius:10px; }
+        .staffRemoveRow > div { display:flex; flex-direction:column; min-width:0; }
+        .staffRemoveRow small { margin-top:3px; color:#667085; font-size:10px; }
         .topNavGroup, .topActionGroup { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
         .topNavGroup { padding:4px; border:1px solid #e4e7ec; border-radius:12px; background:#f8fafc; }
         .actionDropdown { position:relative; }
