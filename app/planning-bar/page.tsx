@@ -2251,8 +2251,79 @@ function BarPlanningPage() {
       saveCurrent?: boolean
     }
   ) => {
-    // On sauvegarde la semaine actuellement affichée uniquement
-    // si elle contient réellement des données.
+    // BARNUKU = lecture seule :
+    // - ne sauvegarde jamais la semaine courante en naviguant
+    // - ne vide jamais le planning si la semaine cible n'existe pas
+    // - charge uniquement une semaine réellement présente dans Supabase
+    if (isBarNukuPortal) {
+      const {
+        data: remoteRow,
+        error: remoteError,
+      } = await supabase
+        .from('bar_plannings')
+        .select(
+          'id,planning_id,week_start,week_end,name,status,employees,planning,special_day_info,weekly_signatures,created_at,updated_at'
+        )
+        .eq('week_start', targetWeekStart)
+        .maybeSingle()
+
+      if (remoteError) {
+        console.error(
+          'Navigation BarNuku :',
+          remoteError
+        )
+        window.alert(
+          'Impossible de charger cette semaine.'
+        )
+        return
+      }
+
+      if (!remoteRow) {
+        window.alert(
+          'Aucun planning publié pour cette semaine.'
+        )
+        return
+      }
+
+      const remotePlanning =
+        savedPlanningFromDb(
+          remoteRow as BarPlanningDbRow
+        )
+
+      if (
+        !planningHasContent(
+          remotePlanning.planning
+        )
+      ) {
+        window.alert(
+          'Le planning de cette semaine est vide. La semaine actuelle reste affichée.'
+        )
+        return
+      }
+
+      loadSavedPlanning(
+        remotePlanning
+      )
+
+      setSavedPlannings(current => {
+        const withoutTarget =
+          current.filter(
+            item =>
+              item.weekStart !==
+              targetWeekStart
+          )
+
+        return dedupePlanningsByWeek([
+          remotePlanning,
+          ...withoutTarget,
+        ])
+      })
+
+      return
+    }
+
+    // STOCKNUKU / BACK OFFICE :
+    // sauvegarde la semaine courante seulement si elle contient des données.
     if (
       options?.saveCurrent !== false &&
       planningHasContent(planning)
@@ -2283,9 +2354,6 @@ function BarPlanningPage() {
       )
     }
 
-    // IMPORTANT :
-    // les flèches Précédent / Suivant interrogent d'abord Supabase.
-    // Elles ne se basent plus seulement sur le cache local du navigateur.
     const {
       data: remoteRow,
       error: remoteError,
@@ -2309,7 +2377,6 @@ function BarPlanningPage() {
           remoteRow as BarPlanningDbRow
         )
 
-      // Une version Supabase remplie est toujours prioritaire.
       if (
         planningHasContent(
           remotePlanning.planning
@@ -2341,7 +2408,6 @@ function BarPlanningPage() {
       }
     }
 
-    // Fallback local / historique si aucune version Supabase exploitable.
     const localSavedWeek =
       savedPlannings.find(
         item =>
@@ -2370,8 +2436,7 @@ function BarPlanningPage() {
       return
     }
 
-    // C'est uniquement ici qu'une semaine réellement inexistante
-    // s'ouvre sur une grille vide.
+    // Nouvelle semaine réelle côté back-office uniquement.
     setWeekStart(targetWeekStart)
     setCurrentSavedPlanningId(null)
     setPlanning({})
@@ -2392,7 +2457,11 @@ function BarPlanningPage() {
     )
 
     void openWeek(
-      isoDate(d)
+      isoDate(d),
+      {
+        saveCurrent:
+          !isBarNukuPortal,
+      }
     )
   }
 
