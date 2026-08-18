@@ -8,6 +8,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import { Card, Page } from '@/components/ui'
+import { supabase } from '@/lib/supabase'
 
 type Employee = {
   id: string
@@ -54,6 +55,72 @@ type SavedPlanning = {
   planning: PlanningData
   specialDayInfo: SpecialDayInfo
   weeklySignatures: WeeklySignatures
+}
+
+
+type BarPlanningDbRow = {
+  id: string
+  planning_id: string
+  week_start: string
+  week_end: string
+  name: string
+  status: PlanningStatus
+  employees: Employee[]
+  planning: PlanningData
+  special_day_info: SpecialDayInfo
+  weekly_signatures: WeeklySignatures
+  created_at: string
+  updated_at: string
+}
+
+function savedPlanningFromDb(
+  row: BarPlanningDbRow
+): SavedPlanning {
+  return {
+    id: row.planning_id,
+    name: row.name,
+    weekStart: row.week_start,
+    weekEnd: row.week_end,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    employees: Array.isArray(row.employees)
+      ? row.employees
+      : [],
+    planning:
+      row.planning &&
+      typeof row.planning === 'object'
+        ? row.planning
+        : {},
+    specialDayInfo:
+      row.special_day_info &&
+      typeof row.special_day_info === 'object'
+        ? row.special_day_info
+        : {},
+    weeklySignatures:
+      row.weekly_signatures &&
+      typeof row.weekly_signatures === 'object'
+        ? row.weekly_signatures
+        : {},
+  }
+}
+
+function savedPlanningToDb(
+  saved: SavedPlanning
+) {
+  return {
+    planning_id: saved.id,
+    week_start: saved.weekStart,
+    week_end: saved.weekEnd,
+    name: saved.name,
+    status: saved.status,
+    employees: saved.employees,
+    planning: saved.planning,
+    special_day_info: saved.specialDayInfo,
+    weekly_signatures: saved.weeklySignatures,
+    created_at: saved.createdAt,
+    updated_at: saved.updatedAt,
+  }
 }
 
 const EMPLOYEES_KEY = 'nukustock_bar_planning_employees_v1'
@@ -894,6 +961,185 @@ function BarPlanningPage() {
   const [showMonthlyDetails, setShowMonthlyDetails] =
     useState(false)
   const [loaded, setLoaded] = useState(false)
+  const [supabaseReady, setSupabaseReady] = useState(false)
+  const remoteApplyingRef = useRef(false)
+  const autoSaveTimerRef = useRef<number | null>(null)
+
+  const weekEndFor = (start: string) => {
+    const end = new Date(`${start}T12:00:00`)
+    end.setDate(end.getDate() + 6)
+    return isoDate(end)
+  }
+
+  const buildCurrentSnapshot = (): SavedPlanning => {
+    const now = new Date().toISOString()
+    const existing =
+      savedPlannings.find(
+        item => item.weekStart === weekStart
+      )
+
+    const id =
+      existing?.id ||
+      currentSavedPlanningId ||
+      `planning-${weekStart}`
+
+    const base = new Date(`${weekStart}T12:00:00`)
+    const currentDays = Array.from(
+      { length: 7 },
+      (_, index) => {
+        const day = new Date(base)
+        day.setDate(base.getDate() + index)
+        return day
+      }
+    )
+
+    return {
+      id,
+      name: `Planning Bar — semaine du ${formatDate(currentDays[0])} au ${formatDate(currentDays[6])}`,
+      weekStart,
+      weekEnd: weekEndFor(weekStart),
+      status: existing?.status || 'En cours',
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      employees: employees.map(employee => ({
+        ...employee,
+      })),
+      planning: employees.reduce<PlanningData>(
+        (result, employee) => {
+          const employeeDays: Record<string, DayPlanning> = {}
+
+          currentDays.forEach(day => {
+            const dateKey = isoDate(day)
+            const currentDay =
+              planning[employee.id]?.[dateKey]
+
+            if (currentDay) {
+              employeeDays[dateKey] =
+                JSON.parse(
+                  JSON.stringify(currentDay)
+                )
+            }
+          })
+
+          if (Object.keys(employeeDays).length) {
+            result[employee.id] = employeeDays
+          }
+
+          return result
+        },
+        {}
+      ),
+      specialDayInfo:
+        currentDays.reduce<SpecialDayInfo>(
+          (result, day) => {
+            const dateKey = isoDate(day)
+            const info = specialDayInfo[dateKey]
+
+            if (info) {
+              result[dateKey] = info
+            }
+
+            return result
+          },
+          {}
+        ),
+      weeklySignatures:
+        employees.reduce<WeeklySignatures>(
+          (result, employee) => {
+            const key =
+              `${weekStart}:${employee.id}`
+
+            const signature =
+              weeklySignatures[key] ||
+              existing?.weeklySignatures?.[key]
+
+            if (signature) {
+              result[key] =
+                JSON.parse(
+                  JSON.stringify(signature)
+                )
+            }
+
+            return result
+          },
+          {
+            ...(existing?.weeklySignatures || {}),
+          }
+        ),
+    }
+  }
+
+  const syncPlanningToSupabase = async (
+    snapshot: SavedPlanning
+  ) => {
+    const { error } = await supabase
+      .from('bar_plannings')
+      .upsert(
+        savedPlanningToDb(snapshot),
+        {
+          onConflict: 'week_start',
+        }
+      )
+
+    if (error) {
+      console.error(
+        'Synchronisation planning Supabase :',
+        error
+      )
+    }
+  }
+
+  const applyRemotePlanning = (
+    saved: SavedPlanning
+  ) => {
+    remoteApplyingRef.current = true
+
+    setSavedPlannings(current => {
+      const withoutSameWeek =
+        current.filter(
+          item =>
+            item.weekStart !== saved.weekStart
+        )
+
+      return dedupePlanningsByWeek([
+        saved,
+        ...withoutSameWeek,
+      ])
+    })
+
+    if (saved.weekStart === weekStart) {
+      setEmployees(
+        saved.employees.map(
+          (employee, index) => ({
+            ...employee,
+            role:
+              employee.role ||
+              employeeRole(
+                employee.id,
+                employee.name
+              ),
+            color:
+              EMPLOYEE_COLORS[
+                index %
+                  EMPLOYEE_COLORS.length
+              ],
+          })
+        )
+      )
+      setPlanning(saved.planning || {})
+      setSpecialDayInfo(
+        saved.specialDayInfo || {}
+      )
+      setWeeklySignatures(
+        saved.weeklySignatures || {}
+      )
+      setCurrentSavedPlanningId(saved.id)
+    }
+
+    window.setTimeout(() => {
+      remoteApplyingRef.current = false
+    }, 0)
+  }
 
   useEffect(() => {
     try {
@@ -992,6 +1238,256 @@ function BarPlanningPage() {
     specialDayInfo,
     savedPlannings,
     loaded,
+  ])
+
+
+  useEffect(() => {
+    if (!loaded) return
+
+    let active = true
+
+    const initialiseSupabase = async () => {
+      const { data, error } = await supabase
+        .from('bar_plannings')
+        .select(
+          'id,planning_id,week_start,week_end,name,status,employees,planning,special_day_info,weekly_signatures,created_at,updated_at'
+        )
+        .order('week_start', {
+          ascending: false,
+        })
+
+      if (!active) return
+
+      if (error) {
+        console.error(
+          'Chargement plannings Supabase :',
+          error
+        )
+        setSupabaseReady(true)
+        return
+      }
+
+      const remotePlannings =
+        (data || []).map(row =>
+          savedPlanningFromDb(
+            row as BarPlanningDbRow
+          )
+        )
+
+      const remoteByWeek =
+        new Map(
+          remotePlannings.map(item => [
+            item.weekStart,
+            item,
+          ])
+        )
+
+      const localPlannings =
+        dedupePlanningsByWeek(
+          savedPlannings
+        )
+
+      const merged =
+        dedupePlanningsByWeek([
+          ...remotePlannings,
+          ...localPlannings.map(local => {
+            const remote =
+              remoteByWeek.get(
+                local.weekStart
+              )
+
+            if (!remote) return local
+
+            const remoteTime =
+              new Date(
+                remote.updatedAt
+              ).getTime()
+
+            const localTime =
+              new Date(
+                local.updatedAt
+              ).getTime()
+
+            const newest =
+              remoteTime >= localTime
+                ? remote
+                : local
+
+            return {
+              ...newest,
+              weeklySignatures: {
+                ...(local.weeklySignatures ||
+                  {}),
+                ...(remote.weeklySignatures ||
+                  {}),
+              },
+            }
+          }),
+        ])
+
+      setSavedPlannings(merged)
+
+      const selectedRemote =
+        merged.find(
+          item =>
+            item.weekStart === weekStart
+        )
+
+      if (selectedRemote) {
+        applyRemotePlanning(
+          selectedRemote
+        )
+      }
+
+      for (const local of localPlannings) {
+        const remote =
+          remoteByWeek.get(
+            local.weekStart
+          )
+
+        const shouldUpload =
+          !remote ||
+          new Date(
+            local.updatedAt
+          ).getTime() >
+            new Date(
+              remote.updatedAt
+            ).getTime()
+
+        if (shouldUpload) {
+          await syncPlanningToSupabase({
+            ...local,
+            weeklySignatures: {
+              ...(local.weeklySignatures ||
+                {}),
+              ...(remote?.weeklySignatures ||
+                {}),
+            },
+          })
+        }
+      }
+
+      setSupabaseReady(true)
+    }
+
+    void initialiseSupabase()
+
+    const channel = supabase
+      .channel(
+        'bar-plannings-realtime'
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'bar_plannings',
+        },
+        payload => {
+          if (
+            payload.eventType === 'DELETE'
+          ) {
+            const oldRow =
+              payload.old as Partial<BarPlanningDbRow>
+
+            if (oldRow.week_start) {
+              setSavedPlannings(
+                current =>
+                  current.filter(
+                    item =>
+                      item.weekStart !==
+                      oldRow.week_start
+                  )
+              )
+            }
+
+            return
+          }
+
+          const row =
+            payload.new as BarPlanningDbRow
+
+          applyRemotePlanning(
+            savedPlanningFromDb(row)
+          )
+        }
+      )
+      .subscribe()
+
+    return () => {
+      active = false
+      void supabase.removeChannel(
+        channel
+      )
+    }
+  }, [loaded])
+
+  useEffect(() => {
+    if (
+      !loaded ||
+      !supabaseReady ||
+      remoteApplyingRef.current
+    ) {
+      return
+    }
+
+    if (
+      autoSaveTimerRef.current !==
+      null
+    ) {
+      window.clearTimeout(
+        autoSaveTimerRef.current
+      )
+    }
+
+    autoSaveTimerRef.current =
+      window.setTimeout(() => {
+        const snapshot =
+          buildCurrentSnapshot()
+
+        setSavedPlannings(
+          current => {
+            const withoutSameWeek =
+              current.filter(
+                item =>
+                  item.weekStart !==
+                  snapshot.weekStart
+              )
+
+            return dedupePlanningsByWeek([
+              snapshot,
+              ...withoutSameWeek,
+            ])
+          }
+        )
+
+        setCurrentSavedPlanningId(
+          snapshot.id
+        )
+
+        void syncPlanningToSupabase(
+          snapshot
+        )
+      }, 700)
+
+    return () => {
+      if (
+        autoSaveTimerRef.current !==
+        null
+      ) {
+        window.clearTimeout(
+          autoSaveTimerRef.current
+        )
+      }
+    }
+  }, [
+    loaded,
+    supabaseReady,
+    weekStart,
+    employees,
+    planning,
+    specialDayInfo,
+    weeklySignatures,
   ])
 
   const days = useMemo(() => {
@@ -1793,6 +2289,10 @@ function BarPlanningPage() {
 
     setCurrentSavedPlanningId(id)
 
+    void syncPlanningToSupabase(
+      snapshot
+    )
+
     if (showConfirmation) {
       window.alert(
         'Planning sauvegardé.'
@@ -1826,16 +2326,30 @@ function BarPlanningPage() {
     id: string,
     status: PlanningStatus
   ) => {
+    const currentItem =
+      savedPlannings.find(
+        item => item.id === id
+      )
+
+    if (!currentItem) return
+
+    const updated: SavedPlanning = {
+      ...currentItem,
+      status,
+      updatedAt:
+        new Date().toISOString(),
+    }
+
     setSavedPlannings(current =>
       current.map(item =>
         item.id === id
-          ? {
-              ...item,
-              status,
-              updatedAt: new Date().toISOString(),
-            }
+          ? updated
           : item
       )
+    )
+
+    void syncPlanningToSupabase(
+      updated
     )
   }
 
@@ -1852,6 +2366,14 @@ function BarPlanningPage() {
     if (currentSavedPlanningId === id) {
       setCurrentSavedPlanningId(null)
     }
+
+    void supabase
+      .from('bar_plannings')
+      .delete()
+      .eq(
+        'week_start',
+        item.weekStart
+      )
   }
 
   const uniqueSavedPlannings =
@@ -1944,7 +2466,7 @@ function BarPlanningPage() {
   return (
     <Page
       title="Planning Bar"
-      subtitle="Planning hebdomadaire de l'équipe bar"
+      subtitle={supabaseReady ? "Synchronisé en temps réel StockNuku ↔ BarNuku" : "Connexion à la synchronisation…"}
       action={
         <div className="topActions noPrint">
           <div className="topNavGroup">
