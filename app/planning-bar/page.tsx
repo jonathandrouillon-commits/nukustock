@@ -1005,6 +1005,9 @@ function BarPlanningPage() {
   })
   const remoteApplyingRef = useRef(false)
   const autoSaveTimerRef = useRef<number | null>(null)
+  const periodicSaveRef = useRef<number | null>(null)
+  const [lastAutoSaveAt, setLastAutoSaveAt] =
+    useState<string | null>(null)
 
   const weekEndFor = (start: string) => {
     const end = new Date(`${start}T12:00:00`)
@@ -1110,9 +1113,50 @@ function BarPlanningPage() {
     }
   }
 
-  const syncPlanningToSupabase = async (
+  const planningHasContent = (
+    value: PlanningData
+  ) =>
+    Object.values(value || {}).some(
+      employeeDays =>
+        Object.values(
+          employeeDays || {}
+        ).some(day =>
+          Boolean(
+            day.off ||
+            day.start ||
+            day.end ||
+            day.start2 ||
+            day.end2 ||
+            day.validated
+          )
+        )
+    )
+
+  const safeSyncPlanningToSupabase = async (
     snapshot: SavedPlanning
   ) => {
+    // Sécurité : une sauvegarde automatique vide ne doit jamais
+    // écraser un planning déjà rempli dans Supabase.
+    if (!planningHasContent(snapshot.planning)) {
+      const { data: existing } = await supabase
+        .from('bar_plannings')
+        .select('planning')
+        .eq('week_start', snapshot.weekStart)
+        .maybeSingle()
+
+      if (
+        existing?.planning &&
+        planningHasContent(
+          existing.planning as PlanningData
+        )
+      ) {
+        console.warn(
+          'Autosave ignoré : planning local vide, version Supabase remplie.'
+        )
+        return false
+      }
+    }
+
     const { error } = await supabase
       .from('bar_plannings')
       .upsert(
@@ -1127,7 +1171,21 @@ function BarPlanningPage() {
         'Synchronisation planning Supabase :',
         error
       )
+      return false
     }
+
+    setLastAutoSaveAt(
+      new Date().toISOString()
+    )
+    return true
+  }
+
+  const syncPlanningToSupabase = async (
+    snapshot: SavedPlanning
+  ) => {
+    await safeSyncPlanningToSupabase(
+      snapshot
+    )
   }
 
   const applyRemotePlanning = (
@@ -1829,6 +1887,85 @@ function BarPlanningPage() {
   }, [
     loaded,
     supabaseReady,
+    weekStart,
+    employees,
+    planning,
+    specialDayInfo,
+    weeklySignatures,
+  ])
+
+
+  useEffect(() => {
+    if (
+      !loaded ||
+      !supabaseReady ||
+      isBarNukuPortal
+    ) {
+      return
+    }
+
+    if (periodicSaveRef.current !== null) {
+      window.clearInterval(
+        periodicSaveRef.current
+      )
+    }
+
+    periodicSaveRef.current =
+      window.setInterval(() => {
+        if (remoteApplyingRef.current) {
+          return
+        }
+
+        const snapshot =
+          buildCurrentSnapshot()
+
+        // Une semaine totalement vide n'a rien à sauvegarder.
+        // Surtout, elle ne peut pas remplacer une semaine existante remplie.
+        if (
+          !planningHasContent(
+            snapshot.planning
+          )
+        ) {
+          return
+        }
+
+        setSavedPlannings(current => {
+          const withoutSameWeek =
+            current.filter(
+              item =>
+                item.weekStart !==
+                snapshot.weekStart
+            )
+
+          return dedupePlanningsByWeek([
+            snapshot,
+            ...withoutSameWeek,
+          ])
+        })
+
+        setCurrentSavedPlanningId(
+          snapshot.id
+        )
+
+        void safeSyncPlanningToSupabase(
+          snapshot
+        )
+      }, 30000)
+
+    return () => {
+      if (
+        periodicSaveRef.current !== null
+      ) {
+        window.clearInterval(
+          periodicSaveRef.current
+        )
+        periodicSaveRef.current = null
+      }
+    }
+  }, [
+    loaded,
+    supabaseReady,
+    isBarNukuPortal,
     weekStart,
     employees,
     planning,
@@ -2831,7 +2968,11 @@ function BarPlanningPage() {
   return (
     <Page
       title="Planning Bar"
-      subtitle={supabaseReady ? "Synchronisé en temps réel StockNuku ↔ BarNuku" : "Connexion à la synchronisation…"}
+      subtitle={
+        supabaseReady
+          ? `Synchronisé StockNuku ↔ BarNuku · sauvegarde auto toutes les 30 s${lastAutoSaveAt ? ` · dernière ${new Date(lastAutoSaveAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}`
+          : "Connexion à la synchronisation…"
+      }
       action={
         <div className="topActions noPrint">
           {!isBarNukuPortal && (
