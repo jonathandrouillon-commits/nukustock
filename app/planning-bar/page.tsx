@@ -58,6 +58,27 @@ type SavedPlanning = {
 }
 
 
+
+type AdjustmentStatus =
+  | 'En attente'
+  | 'Acceptée'
+  | 'Refusée'
+
+type AdjustmentRequest = {
+  id: string
+  week_start: string
+  employee_id: string
+  employee_name: string
+  date_key: string
+  original_day: DayPlanning
+  requested_day: DayPlanning
+  comment?: string | null
+  status: AdjustmentStatus
+  created_at: string
+  decided_at?: string | null
+  decided_by?: string | null
+}
+
 type BarPlanningDbRow = {
   id: string
   planning_id: string
@@ -962,8 +983,26 @@ function BarPlanningPage() {
     useState(false)
   const [staffManagerMode, setStaffManagerMode] =
     useState<'add' | 'remove' | null>(null)
+  const [isBarNukuPortal, setIsBarNukuPortal] =
+    useState(false)
   const [loaded, setLoaded] = useState(false)
   const [supabaseReady, setSupabaseReady] = useState(false)
+  const [adjustmentRequests, setAdjustmentRequests] =
+    useState<AdjustmentRequest[]>([])
+  const [adjustmentModal, setAdjustmentModal] = useState<{
+    employeeId: string
+    dateKey: string
+  } | null>(null)
+  const [adjustmentForm, setAdjustmentForm] = useState({
+    start: '',
+    end: '',
+    split: false,
+    start2: '',
+    end2: '',
+    breakMinutes: 30,
+    off: false,
+    comment: '',
+  })
   const remoteApplyingRef = useRef(false)
   const autoSaveTimerRef = useRef<number | null>(null)
 
@@ -1142,6 +1181,289 @@ function BarPlanningPage() {
       remoteApplyingRef.current = false
     }, 0)
   }
+
+
+  const loadAdjustmentRequests = async () => {
+    const { data, error } = await supabase
+      .from('bar_planning_adjustment_requests')
+      .select(
+        'id,week_start,employee_id,employee_name,date_key,original_day,requested_day,comment,status,created_at,decided_at,decided_by'
+      )
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error(
+        'Chargement demandes ajustement :',
+        error
+      )
+      return
+    }
+
+    setAdjustmentRequests(
+      (data || []) as AdjustmentRequest[]
+    )
+  }
+
+  const openAdjustmentRequest = (
+    employeeId: string,
+    dateKey: string
+  ) => {
+    const current =
+      getDay(employeeId, dateKey)
+
+    setAdjustmentForm({
+      start: current.start || '',
+      end: current.end || '',
+      split: Boolean(current.split),
+      start2: current.start2 || '',
+      end2: current.end2 || '',
+      breakMinutes:
+        Number(current.breakMinutes || 0),
+      off: Boolean(current.off),
+      comment: '',
+    })
+
+    setAdjustmentModal({
+      employeeId,
+      dateKey,
+    })
+  }
+
+  const submitAdjustmentRequest = async () => {
+    if (!adjustmentModal) return
+
+    const employee =
+      employees.find(
+        item =>
+          item.id ===
+          adjustmentModal.employeeId
+      )
+
+    if (!employee) return
+
+    const originalDay =
+      getDay(
+        adjustmentModal.employeeId,
+        adjustmentModal.dateKey
+      )
+
+    const requestedDay: DayPlanning = {
+      ...originalDay,
+      start: adjustmentForm.start,
+      end: adjustmentForm.end,
+      split: adjustmentForm.split,
+      start2: adjustmentForm.start2,
+      end2: adjustmentForm.end2,
+      breakMinutes:
+        Number(
+          adjustmentForm.breakMinutes
+        ) || 0,
+      off: adjustmentForm.off,
+      validated: false,
+      validatedAt: undefined,
+    }
+
+    const { error } = await supabase
+      .from(
+        'bar_planning_adjustment_requests'
+      )
+      .insert({
+        week_start: weekStart,
+        employee_id: employee.id,
+        employee_name: employee.name,
+        date_key:
+          adjustmentModal.dateKey,
+        original_day: originalDay,
+        requested_day: requestedDay,
+        comment:
+          adjustmentForm.comment.trim() ||
+          null,
+        status: 'En attente',
+      })
+
+    if (error) {
+      window.alert(
+        `Impossible d'envoyer la demande : ${error.message}`
+      )
+      return
+    }
+
+    setAdjustmentModal(null)
+    await loadAdjustmentRequests()
+    window.alert(
+      'Demande d’ajustement envoyée.'
+    )
+  }
+
+  const acceptAdjustmentRequest = async (
+    request: AdjustmentRequest
+  ) => {
+    const now =
+      new Date().toISOString()
+
+    const validatedDay: DayPlanning = {
+      ...(request.requested_day ||
+        request.original_day),
+      validated: true,
+      validatedAt: now,
+    }
+
+    const planningForWeek =
+      savedPlannings.find(
+        item =>
+          item.weekStart ===
+          request.week_start
+      )
+
+    const sourcePlanning =
+      planningForWeek?.planning ||
+      (weekStart === request.week_start
+        ? planning
+        : {})
+
+    const updatedPlanning: PlanningData = {
+      ...sourcePlanning,
+      [request.employee_id]: {
+        ...(sourcePlanning[
+          request.employee_id
+        ] || {}),
+        [request.date_key]:
+          validatedDay,
+      },
+    }
+
+    const updatedSaved: SavedPlanning =
+      planningForWeek
+        ? {
+            ...planningForWeek,
+            planning:
+              updatedPlanning,
+            updatedAt: now,
+          }
+        : {
+            id:
+              `planning-${request.week_start}`,
+            name:
+              `Planning Bar — semaine du ${request.week_start}`,
+            weekStart:
+              request.week_start,
+            weekEnd:
+              weekEndFor(
+                request.week_start
+              ),
+            status: 'En cours',
+            createdAt: now,
+            updatedAt: now,
+            employees:
+              employees.map(e => ({
+                ...e,
+              })),
+            planning:
+              updatedPlanning,
+            specialDayInfo: {},
+            weeklySignatures: {},
+          }
+
+    const { error: planningError } =
+      await supabase
+        .from('bar_plannings')
+        .upsert(
+          savedPlanningToDb(
+            updatedSaved
+          ),
+          {
+            onConflict:
+              'week_start',
+          }
+        )
+
+    if (planningError) {
+      window.alert(
+        `Impossible de modifier le planning : ${planningError.message}`
+      )
+      return
+    }
+
+    const { error: requestError } =
+      await supabase
+        .from(
+          'bar_planning_adjustment_requests'
+        )
+        .update({
+          status: 'Acceptée',
+          decided_at: now,
+        })
+        .eq('id', request.id)
+
+    if (requestError) {
+      window.alert(
+        `Planning modifié mais demande non clôturée : ${requestError.message}`
+      )
+      return
+    }
+
+    setSavedPlannings(
+      current => {
+        const others =
+          current.filter(
+            item =>
+              item.weekStart !==
+              request.week_start
+          )
+
+        return dedupePlanningsByWeek([
+          updatedSaved,
+          ...others,
+        ])
+      }
+    )
+
+    if (
+      weekStart ===
+      request.week_start
+    ) {
+      setPlanning(
+        updatedPlanning
+      )
+      setCurrentSavedPlanningId(
+        updatedSaved.id
+      )
+    }
+
+    await loadAdjustmentRequests()
+  }
+
+  const rejectAdjustmentRequest = async (
+    request: AdjustmentRequest
+  ) => {
+    const { error } = await supabase
+      .from(
+        'bar_planning_adjustment_requests'
+      )
+      .update({
+        status: 'Refusée',
+        decided_at:
+          new Date().toISOString(),
+      })
+      .eq('id', request.id)
+
+    if (error) {
+      window.alert(
+        `Impossible de refuser : ${error.message}`
+      )
+      return
+    }
+
+    await loadAdjustmentRequests()
+  }
+
+  useEffect(() => {
+    setIsBarNukuPortal(
+      window.location.hostname
+        .toLowerCase() ===
+        'barnuku.fenuaprobartender.com'
+    )
+  }, [])
 
   useEffect(() => {
     try {
@@ -1370,6 +1692,7 @@ function BarPlanningPage() {
       }
 
       setSupabaseReady(true)
+      void loadAdjustmentRequests()
     }
 
     void initialiseSupabase()
@@ -1416,10 +1739,31 @@ function BarPlanningPage() {
       )
       .subscribe()
 
+    const adjustmentChannel = supabase
+      .channel(
+        'bar-planning-adjustments-realtime'
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table:
+            'bar_planning_adjustment_requests',
+        },
+        () => {
+          void loadAdjustmentRequests()
+        }
+      )
+      .subscribe()
+
     return () => {
       active = false
       void supabase.removeChannel(
         channel
+      )
+      void supabase.removeChannel(
+        adjustmentChannel
       )
     }
   }, [loaded])
@@ -1510,6 +1854,7 @@ function BarPlanningPage() {
     patch: Partial<DayPlanning>,
     force = false
   ) => {
+    if (isBarNukuPortal && !force) return
     const currentDay = getDay(employeeId, dateKey)
 
     if (currentDay.validated && !force) return
@@ -2489,6 +2834,7 @@ function BarPlanningPage() {
       subtitle={supabaseReady ? "Synchronisé en temps réel StockNuku ↔ BarNuku" : "Connexion à la synchronisation…"}
       action={
         <div className="topActions noPrint">
+          {!isBarNukuPortal && (
           <div className="planningMainButtons">
             <button
               type="button"
@@ -2550,6 +2896,7 @@ function BarPlanningPage() {
               Supprimer staff
             </button>
           </div>
+          )}
 
           <div className="topActionGroup">
             <button
@@ -2572,6 +2919,8 @@ function BarPlanningPage() {
               Sauvegardés ({uniqueSavedPlannings.length})
             </button>
 
+            {!isBarNukuPortal && (
+            <>
             <div className="actionDropdown">
               <button
                 className="btn"
@@ -2673,6 +3022,8 @@ function BarPlanningPage() {
                 </div>
               )}
             </div>
+            </>
+            )}
           </div>
         </div>
       }
@@ -3722,6 +4073,153 @@ function BarPlanningPage() {
         </>
       )}
 
+      {adjustmentModal && (
+        <div className="staffManagerBackdrop noPrint">
+          <div className="staffManagerModal">
+            <div className="staffManagerHeader">
+              <div>
+                <span>DEMANDE D’AJUSTEMENT</span>
+                <h2>
+                  Modifier mes heures
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                className="staffManagerClose"
+                onClick={() =>
+                  setAdjustmentModal(null)
+                }
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="adjustmentFormGrid">
+              <label>
+                <span>Début</span>
+                <input
+                  type="time"
+                  value={
+                    adjustmentForm.start
+                  }
+                  onChange={event =>
+                    setAdjustmentForm(
+                      current => ({
+                        ...current,
+                        start:
+                          event.target.value,
+                      })
+                    )
+                  }
+                />
+              </label>
+
+              <label>
+                <span>Fin</span>
+                <input
+                  type="time"
+                  value={
+                    adjustmentForm.end
+                  }
+                  onChange={event =>
+                    setAdjustmentForm(
+                      current => ({
+                        ...current,
+                        end:
+                          event.target.value,
+                      })
+                    )
+                  }
+                />
+              </label>
+
+              <label>
+                <span>Pause (min)</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={
+                    adjustmentForm.breakMinutes
+                  }
+                  onChange={event =>
+                    setAdjustmentForm(
+                      current => ({
+                        ...current,
+                        breakMinutes:
+                          Number(
+                            event.target.value
+                          ) || 0,
+                      })
+                    )
+                  }
+                />
+              </label>
+
+              <label className="adjustmentCheckbox">
+                <input
+                  type="checkbox"
+                  checked={
+                    adjustmentForm.off
+                  }
+                  onChange={event =>
+                    setAdjustmentForm(
+                      current => ({
+                        ...current,
+                        off:
+                          event.target.checked,
+                      })
+                    )
+                  }
+                />
+                <span>OFF</span>
+              </label>
+
+              <label className="adjustmentFull">
+                <span>Commentaire</span>
+                <textarea
+                  value={
+                    adjustmentForm.comment
+                  }
+                  onChange={event =>
+                    setAdjustmentForm(
+                      current => ({
+                        ...current,
+                        comment:
+                          event.target.value,
+                      })
+                    )
+                  }
+                  placeholder="Explique l’ajustement demandé"
+                />
+              </label>
+            </div>
+
+            <div className="egModalActions">
+              <button
+                type="button"
+                className="btn"
+                onClick={() =>
+                  setAdjustmentModal(null)
+                }
+              >
+                Annuler
+              </button>
+
+              <button
+                type="button"
+                className="btn primary"
+                onClick={() =>
+                  void submitAdjustmentRequest()
+                }
+              >
+                Envoyer la demande
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {staffManagerMode && (
         <div className="staffManagerBackdrop noPrint">
           <div className="staffManagerModal">
@@ -3821,6 +4319,27 @@ function BarPlanningPage() {
         .planningMainButtons { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
         .planningMainButtons .btn { min-height:40px; }
         .planningMainButtons .btn:disabled { opacity:.45; cursor:not-allowed; }
+
+
+        .adjustmentAdminPanel { margin-bottom:14px; border:1px solid #f0b429; border-radius:12px; background:#fffaf0; padding:14px; }
+        .adjustmentAdminHeader { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+        .adjustmentAdminHeader span { color:#b54708; font-size:10px; font-weight:900; letter-spacing:.08em; }
+        .adjustmentAdminHeader h2 { margin:4px 0 0; font-size:17px; }
+        .adjustmentAdminHeader > strong { min-width:32px; height:32px; display:grid; place-items:center; border-radius:999px; background:#f79009; color:#fff; }
+        .adjustmentAdminList { display:grid; gap:8px; margin-top:12px; }
+        .adjustmentAdminRow { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:10px; border:1px solid #fedf89; border-radius:9px; background:#fff; }
+        .adjustmentAdminText { display:flex; flex-direction:column; gap:3px; min-width:0; }
+        .adjustmentAdminText span,.adjustmentAdminText small,.adjustmentAdminText em { color:#667085; font-size:11px; }
+        .adjustmentAdminActions { display:flex; gap:7px; flex-wrap:wrap; }
+        .adjustmentRequestButton { width:100%; min-height:30px; border:1px solid #84adff; border-radius:7px; background:#eff4ff; color:#155eef; cursor:pointer; font-size:10px; font-weight:800; }
+        .adjustmentFormGrid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+        .adjustmentFormGrid label { display:grid; gap:5px; }
+        .adjustmentFormGrid label > span { color:#344054; font-size:11px; font-weight:800; }
+        .adjustmentFormGrid input,.adjustmentFormGrid textarea { width:100%; min-height:42px; border:1px solid #d0d5dd; border-radius:8px; padding:0 10px; font:inherit; }
+        .adjustmentFormGrid textarea { min-height:90px; padding-top:10px; resize:vertical; }
+        .adjustmentCheckbox { display:flex !important; grid-template-columns:auto 1fr; align-items:center; }
+        .adjustmentCheckbox input { width:18px !important; min-height:18px !important; }
+        .adjustmentFull { grid-column:1/-1; }
 
         .staffManagerBackdrop { position:fixed; inset:0; z-index:3000; display:grid; place-items:center; padding:20px; background:rgba(15,23,42,.64); }
         .staffManagerModal { width:min(560px,100%); max-height:min(720px,90vh); overflow:auto; border-radius:16px; background:#fff; padding:20px; box-shadow:0 24px 70px rgba(15,23,42,.28); }
