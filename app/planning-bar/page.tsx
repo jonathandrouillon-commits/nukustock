@@ -1191,6 +1191,28 @@ function BarPlanningPage() {
   const applyRemotePlanning = (
     saved: SavedPlanning
   ) => {
+    const localSameWeek =
+      savedPlannings.find(
+        item =>
+          item.weekStart ===
+          saved.weekStart
+      )
+
+    if (
+      !planningHasContent(
+        saved.planning
+      ) &&
+      localSameWeek &&
+      planningHasContent(
+        localSameWeek.planning
+      )
+    ) {
+      console.warn(
+        'Realtime ignoré : version Supabase vide, version locale remplie.'
+      )
+      return
+    }
+
     remoteApplyingRef.current = true
 
     setSavedPlannings(current => {
@@ -1680,6 +1702,16 @@ function BarPlanningPage() {
 
             if (!remote) return local
 
+            const remoteHasPlanning =
+              planningHasContent(
+                remote.planning
+              )
+
+            const localHasPlanning =
+              planningHasContent(
+                local.planning
+              )
+
             const remoteTime =
               new Date(
                 remote.updatedAt
@@ -1690,10 +1722,19 @@ function BarPlanningPage() {
                 local.updatedAt
               ).getTime()
 
+            // Règle de sécurité :
+            // une version remplie gagne toujours contre une version vide,
+            // même si la version vide a un updatedAt plus récent.
             const newest =
-              remoteTime >= localTime
+              remoteHasPlanning &&
+              !localHasPlanning
                 ? remote
-                : local
+                : localHasPlanning &&
+                    !remoteHasPlanning
+                  ? local
+                  : remoteTime >= localTime
+                    ? remote
+                    : local
 
             return {
               ...newest,
@@ -1709,11 +1750,20 @@ function BarPlanningPage() {
 
       setSavedPlannings(merged)
 
+      const directRemote =
+        remoteByWeek.get(weekStart)
+
       const selectedRemote =
-        merged.find(
-          item =>
-            item.weekStart === weekStart
+        directRemote &&
+        planningHasContent(
+          directRemote.planning
         )
+          ? directRemote
+          : merged.find(
+              item =>
+                item.weekStart ===
+                weekStart
+            )
 
       if (selectedRemote) {
         applyRemotePlanning(
@@ -2195,36 +2245,135 @@ function BarPlanningPage() {
     })
   }
 
-  const openWeek = (
+  const openWeek = async (
     targetWeekStart: string,
     options?: {
       saveCurrent?: boolean
     }
   ) => {
+    // On sauvegarde la semaine actuellement affichée uniquement
+    // si elle contient réellement des données.
     if (
-      options?.saveCurrent !== false
+      options?.saveCurrent !== false &&
+      planningHasContent(planning)
     ) {
-      saveCurrentPlanning(false)
+      const currentSnapshot =
+        buildCurrentSnapshot()
+
+      setSavedPlannings(current => {
+        const withoutCurrentWeek =
+          current.filter(
+            item =>
+              item.weekStart !==
+              currentSnapshot.weekStart
+          )
+
+        return dedupePlanningsByWeek([
+          currentSnapshot,
+          ...withoutCurrentWeek,
+        ])
+      })
+
+      setCurrentSavedPlanningId(
+        currentSnapshot.id
+      )
+
+      await safeSyncPlanningToSupabase(
+        currentSnapshot
+      )
     }
 
-    const savedWeek =
+    // IMPORTANT :
+    // les flèches Précédent / Suivant interrogent d'abord Supabase.
+    // Elles ne se basent plus seulement sur le cache local du navigateur.
+    const {
+      data: remoteRow,
+      error: remoteError,
+    } = await supabase
+      .from('bar_plannings')
+      .select(
+        'id,planning_id,week_start,week_end,name,status,employees,planning,special_day_info,weekly_signatures,created_at,updated_at'
+      )
+      .eq(
+        'week_start',
+        targetWeekStart
+      )
+      .maybeSingle()
+
+    if (
+      !remoteError &&
+      remoteRow
+    ) {
+      const remotePlanning =
+        savedPlanningFromDb(
+          remoteRow as BarPlanningDbRow
+        )
+
+      // Une version Supabase remplie est toujours prioritaire.
+      if (
+        planningHasContent(
+          remotePlanning.planning
+        ) ||
+        Object.keys(
+          remotePlanning.weeklySignatures ||
+            {}
+        ).length > 0
+      ) {
+        loadSavedPlanning(
+          remotePlanning
+        )
+
+        setSavedPlannings(current => {
+          const withoutTarget =
+            current.filter(
+              item =>
+                item.weekStart !==
+                targetWeekStart
+            )
+
+          return dedupePlanningsByWeek([
+            remotePlanning,
+            ...withoutTarget,
+          ])
+        })
+
+        return
+      }
+    }
+
+    // Fallback local / historique si aucune version Supabase exploitable.
+    const localSavedWeek =
       savedPlannings.find(
+        item =>
+          item.weekStart ===
+          targetWeekStart &&
+          (
+            planningHasContent(
+              item.planning
+            ) ||
+            Object.keys(
+              item.weeklySignatures ||
+                {}
+            ).length > 0
+          )
+      ) ||
+      HISTORICAL_PLANNINGS.find(
         item =>
           item.weekStart ===
           targetWeekStart
       )
 
-    if (savedWeek) {
-      loadSavedPlanning(savedWeek)
+    if (localSavedWeek) {
+      loadSavedPlanning(
+        localSavedWeek
+      )
       return
     }
 
+    // C'est uniquement ici qu'une semaine réellement inexistante
+    // s'ouvre sur une grille vide.
     setWeekStart(targetWeekStart)
     setCurrentSavedPlanningId(null)
-
-    // Nouvelle semaine : on garde l'équipe,
-    // mais on ne réutilise pas les horaires
-    // de la semaine précédente.
     setPlanning({})
     setSpecialDayInfo({})
     setWeeklySignatures({})
@@ -2242,7 +2391,7 @@ function BarPlanningPage() {
         offset * 7
     )
 
-    openWeek(
+    void openWeek(
       isoDate(d)
     )
   }
