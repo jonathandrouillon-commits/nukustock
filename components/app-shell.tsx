@@ -118,6 +118,7 @@ const navGroups: NavGroup[] = [
     label: 'BAR TEAM',
     icon: '♟',
     items: [
+      { href: '/bar', label: 'Traitement Réquisitions', icon: '☷' },
       { href: '/planning-bar', label: 'Planning', icon: '▦' },
       { href: '/checklist-setup', label: 'Check List & Set Up', icon: '☑' },
     ],
@@ -1005,23 +1006,6 @@ export function AppShell({
         <nav className="nskSidebarNav">
           {isBarNuku ? (
             <>
-              <Link
-                href="/bar"
-                className={
-                  isActive(pathname, '/bar')
-                    ? 'active'
-                    : ''
-                }
-              >
-                <span
-                  className="nskSidebarIcon"
-                  aria-hidden="true"
-                >
-                  ◉
-                </span>
-                <span>Accueil Bar</span>
-              </Link>
-
               <div className="nskNavGroup">
                 <button
                   type="button"
@@ -1592,14 +1576,7 @@ export function AppShell({
 
       <nav className={`nskMobileNav ${isBarNuku ? 'nskBarMobileNav' : ''}`}>
         {(isBarNuku
-          ? [
-              {
-                href: '/bar',
-                label: 'Accueil',
-                icon: '◉',
-              },
-              ...barTeamItems,
-            ]
+          ? barTeamItems
           : navItems.filter((item) =>
               mobileQuickLinks.includes(item.href)
             )
