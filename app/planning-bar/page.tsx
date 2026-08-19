@@ -985,6 +985,16 @@ function BarPlanningPage() {
     useState<'add' | 'remove' | null>(null)
   const [isBarNukuPortal, setIsBarNukuPortal] =
     useState(false)
+  const [barNukuEmployeeId, setBarNukuEmployeeId] =
+    useState<string | null>(null)
+  const [barNukuIdentityReady, setBarNukuIdentityReady] =
+    useState(false)
+  const [barNukuShowOnlyMine, setBarNukuShowOnlyMine] =
+    useState(false)
+  const [newPlanningModalOpen, setNewPlanningModalOpen] =
+    useState(false)
+  const [newPlanningDate, setNewPlanningDate] =
+    useState(weekStart)
   const [loaded, setLoaded] = useState(false)
   const [supabaseReady, setSupabaseReady] = useState(false)
   const [adjustmentRequests, setAdjustmentRequests] =
@@ -1288,6 +1298,10 @@ function BarPlanningPage() {
     employeeId: string,
     dateKey: string
   ) => {
+    if (
+      isBarNukuPortal &&
+      employeeId !== barNukuEmployeeId
+    ) return
     const current =
       getDay(employeeId, dateKey)
 
@@ -1544,6 +1558,75 @@ function BarPlanningPage() {
         'barnuku.fenuaprobartender.com'
     )
   }, [])
+
+  useEffect(() => {
+    if (!isBarNukuPortal) {
+      setBarNukuIdentityReady(true)
+      return
+    }
+
+    let active = true
+
+    const resolveBarNukuEmployee = async () => {
+      const { data } = await supabase.auth.getUser()
+      if (!active) return
+
+      const user = data.user
+      if (!user) {
+        setBarNukuEmployeeId(null)
+        setBarNukuIdentityReady(true)
+        return
+      }
+
+      const metadata = user.user_metadata || {}
+      const candidates = [
+        metadata.employee_id,
+        metadata.employeeId,
+        metadata.name,
+        metadata.full_name,
+        metadata.display_name,
+        user.email?.split('@')[0],
+      ]
+        .filter(Boolean)
+        .map(value =>
+          String(value)
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z0-9]/g, '')
+        )
+
+      const matched = employees.find(employee => {
+        const id = employee.id
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^a-z0-9]/g, '')
+
+        const name = employee.name
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^a-z0-9]/g, '')
+
+        return candidates.some(candidate =>
+          candidate === id ||
+          candidate === name ||
+          candidate.startsWith(id) ||
+          candidate.startsWith(name)
+        )
+      })
+
+      setBarNukuEmployeeId(matched?.id || null)
+      setBarNukuIdentityReady(true)
+    }
+
+    void resolveBarNukuEmployee()
+
+    return () => {
+      active = false
+    }
+  }, [isBarNukuPortal, employees])
 
   useEffect(() => {
     try {
@@ -2062,6 +2145,10 @@ function BarPlanningPage() {
     employeeId: string,
     dateKey: string
   ) => {
+    if (
+      isBarNukuPortal &&
+      employeeId !== barNukuEmployeeId
+    ) return
     const current = getDay(employeeId, dateKey)
 
     if (!current.off && (!current.start || !current.end)) {
@@ -2091,6 +2178,10 @@ function BarPlanningPage() {
   const validateWeek = (
     employeeId: string
   ) => {
+    if (
+      isBarNukuPortal &&
+      employeeId !== barNukuEmployeeId
+    ) return
     const employee =
       employees.find(
         item =>
@@ -2197,6 +2288,7 @@ function BarPlanningPage() {
     employeeId: string,
     dateKey: string
   ) => {
+    if (isBarNukuPortal) return
     updateDay(
       employeeId,
       dateKey,
@@ -2466,22 +2558,103 @@ function BarPlanningPage() {
   }
 
   const createNewPlanning = () => {
-    const confirmed =
-      window.confirm(
-        'Créer un nouveau planning pour cette semaine ? Le planning actuel sera sauvegardé avant de repartir sur une grille vide.'
-      )
+    if (isBarNukuPortal) return
 
-    if (!confirmed) {
+    setNewPlanningDate(weekStart)
+    setNewPlanningModalOpen(true)
+  }
+
+  const confirmCreateNewPlanning = async () => {
+    if (!newPlanningDate) {
+      window.alert(
+        'Choisis une date pour le nouveau planning.'
+      )
       return
     }
 
-    saveCurrentPlanning(false)
+    // Peu importe le jour choisi :
+    // on ramène automatiquement au lundi de cette semaine.
+    const selectedDate =
+      new Date(
+        `${newPlanningDate}T12:00:00`
+      )
 
+    const selectedMonday =
+      isoDate(
+        mondayOf(selectedDate)
+      )
+
+    const selectedSundayDate =
+      new Date(
+        `${selectedMonday}T12:00:00`
+      )
+    selectedSundayDate.setDate(
+      selectedSundayDate.getDate() + 6
+    )
+    const selectedSunday =
+      isoDate(selectedSundayDate)
+
+    const existingRemote =
+      await supabase
+        .from('bar_plannings')
+        .select('week_start,name,status')
+        .eq(
+          'week_start',
+          selectedMonday
+        )
+        .maybeSingle()
+
+    if (existingRemote.data) {
+      const openExisting =
+        window.confirm(
+          `Un planning existe déjà pour la semaine du ${formatShortDateForList(selectedMonday)} au ${formatShortDateForList(selectedSunday)}.\n\nVoulez-vous ouvrir ce planning existant ?`
+        )
+
+      if (openExisting) {
+        setNewPlanningModalOpen(false)
+        await openWeek(
+          selectedMonday,
+          {
+            saveCurrent: true,
+          }
+        )
+      }
+
+      return
+    }
+
+    if (
+      planningHasContent(planning)
+    ) {
+      const currentSnapshot =
+        buildCurrentSnapshot()
+
+      setSavedPlannings(current => {
+        const withoutCurrent =
+          current.filter(
+            item =>
+              item.weekStart !==
+              currentSnapshot.weekStart
+          )
+
+        return dedupePlanningsByWeek([
+          currentSnapshot,
+          ...withoutCurrent,
+        ])
+      })
+
+      await safeSyncPlanningToSupabase(
+        currentSnapshot
+      )
+    }
+
+    setWeekStart(selectedMonday)
     setCurrentSavedPlanningId(null)
     setPlanning({})
     setSpecialDayInfo({})
     setWeeklySignatures({})
     setPlanningView('planning')
+    setNewPlanningModalOpen(false)
   }
 
   const copyPreviousWeek = () => {
@@ -2521,6 +2694,10 @@ function BarPlanningPage() {
     employeeId: string,
     signatureDataUrl: string
   ) => {
+    if (
+      isBarNukuPortal &&
+      employeeId !== barNukuEmployeeId
+    ) return
     const key = signatureKeyFor(employeeId)
     const signature: WeeklySignature = {
       signed: true,
@@ -2552,6 +2729,7 @@ function BarPlanningPage() {
   }
 
   const clearWeeklySignature = (employeeId: string) => {
+    if (isBarNukuPortal) return
     const key = signatureKeyFor(employeeId)
     const next = { ...weeklySignatures }
     delete next[key]
@@ -3854,6 +4032,18 @@ function BarPlanningPage() {
 
       {planningView === 'planning' && (
         <>
+          {isBarNukuPortal &&
+            barNukuIdentityReady &&
+            !barNukuEmployeeId && (
+              <Card>
+                <div style={{ padding: 16 }}>
+                  <strong>Compte BarNuku non associé à un membre du staff.</strong>
+                  <div style={{ marginTop: 6 }}>
+                    Aucun planning ne peut être validé, modifié ou signé avec ce compte.
+                  </div>
+                </div>
+              </Card>
+            )}
       <div className="planningShareArea">
       <Card>
         <div className="toolbar noPrint">
@@ -3911,24 +4101,51 @@ function BarPlanningPage() {
                 Cette semaine
               </button>
 
-              <button
-                type="button"
-                className="btn primary"
-                onClick={createNewPlanning}
-              >
-                + Nouveau planning
-              </button>
+              {!isBarNukuPortal && (
+                <>
+                  <button
+                    type="button"
+                    className="btn primary"
+                    onClick={createNewPlanning}
+                  >
+                    + Nouveau planning
+                  </button>
 
-              <button
-                type="button"
-                className="btn"
-                onClick={copyPreviousWeek}
-              >
-                Copier précédente
-              </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={copyPreviousWeek}
+                  >
+                    Copier précédente
+                  </button>
+                </>
+              )}
+
+              {isBarNukuPortal &&
+                barNukuEmployeeId && (
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() =>
+                      setBarNukuShowOnlyMine(
+                        current => !current
+                      )
+                    }
+                  >
+                    {barNukuShowOnlyMine
+                      ? 'Afficher toute l’équipe'
+                      : 'Afficher uniquement ma ligne'}
+                  </button>
+                )}
             </div>
           </div>
 
+          {isBarNukuPortal && (
+            <div className="barNukuReadOnlyNote">
+              Planning global en lecture seule · tu peux valider tes journées,
+              demander un ajustement et signer ta semaine.
+            </div>
+          )}
         </div>
       </Card>
 
@@ -3967,6 +4184,7 @@ function BarPlanningPage() {
                       <textarea
                         className="specialInfoInput"
                         value={specialDayInfo[key] || ''}
+                        readOnly={isBarNukuPortal}
                         onChange={event =>
                           setSpecialDayInfo(current => ({
                             ...current,
@@ -3985,7 +4203,13 @@ function BarPlanningPage() {
             </thead>
 
             <tbody>
-              {employees.map(employee => {
+              {(isBarNukuPortal &&
+                barNukuShowOnlyMine
+                ? employees.filter(employee =>
+                    employee.id === barNukuEmployeeId
+                  )
+                : employees
+              ).map(employee => {
                 const total = days.reduce((sum, day) => {
                   const d = getDay(employee.id, isoDate(day))
 
@@ -4034,27 +4258,29 @@ function BarPlanningPage() {
                         </small>
                       </div>
 
-                      <button
-                        type="button"
-                        className="validateWeekBtn noPrint"
-                        disabled={
-                          isWeekFullyValidated(
+                      {!isBarNukuPortal && (
+                        <button
+                          type="button"
+                          className="validateWeekBtn noPrint"
+                          disabled={
+                            isWeekFullyValidated(
+                              employee.id
+                            )
+                          }
+                          onClick={() =>
+                            validateWeek(
+                              employee.id
+                            )
+                          }
+                          title="Valider les 7 jours de la semaine"
+                        >
+                          {isWeekFullyValidated(
                             employee.id
                           )
-                        }
-                        onClick={() =>
-                          validateWeek(
-                            employee.id
-                          )
-                        }
-                        title="Valider les 7 jours de la semaine"
-                      >
-                        {isWeekFullyValidated(
-                          employee.id
-                        )
-                          ? '✓ Semaine validée'
-                          : 'Valider semaine'}
-                      </button>
+                            ? '✓ Semaine validée'
+                            : 'Valider semaine'}
+                        </button>
+                      )}
 
                     </th>
 
@@ -4102,7 +4328,7 @@ function BarPlanningPage() {
                             <input
                               type="checkbox"
                               checked={d.off}
-                              disabled={d.validated}
+                              disabled={d.validated || isBarNukuPortal}
                               onChange={e =>
                                 updateDay(employee.id, key, {
                                   off: e.target.checked,
@@ -4128,28 +4354,45 @@ function BarPlanningPage() {
                                 {d.validated ? (
                                   <>
                                     <span className="validatedBadge">✓ Validé</span>
-                                    <button
-                                      type="button"
-                                      className="unlockBtn"
-                                      onClick={() =>
-                                        unlockDay(employee.id, key)
-                                      }
-                                    >
-                                      Modifier
-                                    </button>
+                                    {!isBarNukuPortal && (
+                                      <button
+                                        type="button"
+                                        className="unlockBtn"
+                                        onClick={() =>
+                                          unlockDay(employee.id, key)
+                                        }
+                                      >
+                                        Modifier
+                                      </button>
+                                    )}
                                   </>
                                 ) : (
-                                  <button
-                                    type="button"
-                                    className="validateBtn"
-                                    onClick={() =>
-                                      validateDay(employee.id, key)
-                                    }
-                                  >
-                                    Valider journée
-                                  </button>
+                                  (!isBarNukuPortal ||
+                                    employee.id === barNukuEmployeeId) ? (
+                                    <button
+                                      type="button"
+                                      className="validateBtn"
+                                      onClick={() =>
+                                        validateDay(employee.id, key)
+                                      }
+                                    >
+                                      Valider journée
+                                    </button>
+                                  ) : null
                                 )}
                               </div>
+                              {isBarNukuPortal &&
+                                employee.id === barNukuEmployeeId && (
+                                  <button
+                                    type="button"
+                                    className="adjustmentRequestButton noPrint"
+                                    onClick={() =>
+                                      openAdjustmentRequest(employee.id, key)
+                                    }
+                                  >
+                                    Demander une modification d&apos;heures
+                                  </button>
+                                )}
                             </>
                           ) : (
                             <>
@@ -4157,7 +4400,7 @@ function BarPlanningPage() {
                                 <input
                                   type="checkbox"
                                   checked={d.split}
-                                  disabled={d.validated}
+                                  disabled={d.validated || isBarNukuPortal}
                                   onChange={e =>
                                     updateDay(employee.id, key, {
                                       split: e.target.checked,
@@ -4176,7 +4419,7 @@ function BarPlanningPage() {
                               <div className="times">
                                 <select
                                   value={d.start}
-                                  disabled={d.validated}
+                                  disabled={d.validated || isBarNukuPortal}
                                   onChange={e =>
                                     updateDay(employee.id, key, {
                                       start: e.target.value,
@@ -4195,7 +4438,7 @@ function BarPlanningPage() {
 
                                 <select
                                   value={d.end}
-                                  disabled={d.validated}
+                                  disabled={d.validated || isBarNukuPortal}
                                   onChange={e =>
                                     updateDay(employee.id, key, {
                                       end: e.target.value,
@@ -4215,7 +4458,7 @@ function BarPlanningPage() {
                                 <div className="times secondShift">
                                   <select
                                     value={d.start2}
-                                    disabled={d.validated}
+                                    disabled={d.validated || isBarNukuPortal}
                                     onChange={e =>
                                       updateDay(employee.id, key, {
                                         start2: e.target.value,
@@ -4234,7 +4477,7 @@ function BarPlanningPage() {
 
                                   <select
                                     value={d.end2}
-                                    disabled={d.validated}
+                                    disabled={d.validated || isBarNukuPortal}
                                     onChange={e =>
                                       updateDay(employee.id, key, {
                                         end2: e.target.value,
@@ -4259,7 +4502,7 @@ function BarPlanningPage() {
                                 </span>
                                 <select
                                   value={d.breakMinutes}
-                                  disabled={d.validated}
+                                  disabled={d.validated || isBarNukuPortal}
                                   onChange={e =>
                                     updateDay(employee.id, key, {
                                       breakMinutes: Number(e.target.value),
@@ -4286,28 +4529,45 @@ function BarPlanningPage() {
                                 {d.validated ? (
                                   <>
                                     <span className="validatedBadge">✓ Validé</span>
-                                    <button
-                                      type="button"
-                                      className="unlockBtn"
-                                      onClick={() =>
-                                        unlockDay(employee.id, key)
-                                      }
-                                    >
-                                      Modifier
-                                    </button>
+                                    {!isBarNukuPortal && (
+                                      <button
+                                        type="button"
+                                        className="unlockBtn"
+                                        onClick={() =>
+                                          unlockDay(employee.id, key)
+                                        }
+                                      >
+                                        Modifier
+                                      </button>
+                                    )}
                                   </>
                                 ) : (
-                                  <button
-                                    type="button"
-                                    className="validateBtn"
-                                    onClick={() =>
-                                      validateDay(employee.id, key)
-                                    }
-                                  >
-                                    Valider journée
-                                  </button>
+                                  (!isBarNukuPortal ||
+                                    employee.id === barNukuEmployeeId) ? (
+                                    <button
+                                      type="button"
+                                      className="validateBtn"
+                                      onClick={() =>
+                                        validateDay(employee.id, key)
+                                      }
+                                    >
+                                      Valider journée
+                                    </button>
+                                  ) : null
                                 )}
                               </div>
+                              {isBarNukuPortal &&
+                                employee.id === barNukuEmployeeId && (
+                                  <button
+                                    type="button"
+                                    className="adjustmentRequestButton noPrint"
+                                    onClick={() =>
+                                      openAdjustmentRequest(employee.id, key)
+                                    }
+                                  >
+                                    Demander une modification d&apos;heures
+                                  </button>
+                                )}
                             </>
                           )}
                         </td>
@@ -4337,7 +4597,12 @@ function BarPlanningPage() {
           </div>
 
           <div className="signatureGrid">
-            {employees.map(employee => {
+            {(isBarNukuPortal
+              ? employees.filter(employee =>
+                  employee.id === barNukuEmployeeId
+                )
+              : employees
+            ).map(employee => {
               const complete = isWeekFullyValidated(employee.id)
               const signature =
                 weeklySignatures[signatureKeyFor(employee.id)]
@@ -4374,13 +4639,15 @@ function BarPlanningPage() {
                         Signé le{' '}
                         {new Date(signature.signedAt).toLocaleString('fr-FR')}
                       </div>
-                      <button
-                        type="button"
-                        className="unlockBtn noPrint"
-                        onClick={() => clearWeeklySignature(employee.id)}
-                      >
-                        Effacer la signature
-                      </button>
+                      {!isBarNukuPortal && (
+                        <button
+                          type="button"
+                          className="unlockBtn noPrint"
+                          onClick={() => clearWeeklySignature(employee.id)}
+                        >
+                          Effacer la signature
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <button
@@ -4430,6 +4697,101 @@ function BarPlanningPage() {
       )}
       </div>
         </>
+      )}
+
+      {newPlanningModalOpen && !isBarNukuPortal && (
+        <div className="staffManagerBackdrop noPrint">
+          <div className="staffManagerModal newPlanningModal">
+            <div className="staffManagerHeader">
+              <div>
+                <span>NOUVEAU PLANNING</span>
+                <h2>
+                  Choisir la semaine
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                className="staffManagerClose"
+                onClick={() =>
+                  setNewPlanningModalOpen(false)
+                }
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="newPlanningDatePanel">
+              <label>
+                <span>
+                  Choisis n’importe quel jour de la semaine
+                </span>
+                <input
+                  type="date"
+                  value={newPlanningDate}
+                  onChange={event =>
+                    setNewPlanningDate(
+                      event.target.value
+                    )
+                  }
+                />
+              </label>
+
+              {newPlanningDate && (() => {
+                const monday =
+                  mondayOf(
+                    new Date(
+                      `${newPlanningDate}T12:00:00`
+                    )
+                  )
+
+                const sunday =
+                  new Date(monday)
+                sunday.setDate(
+                  sunday.getDate() + 6
+                )
+
+                return (
+                  <div className="newPlanningWeekPreview">
+                    <small>
+                      Le planning créé sera :
+                    </small>
+                    <strong>
+                      Du {formatShortDateForList(
+                        isoDate(monday)
+                      )}{' '}
+                      au {formatShortDateForList(
+                        isoDate(sunday)
+                      )}
+                    </strong>
+                  </div>
+                )
+              })()}
+            </div>
+
+            <div className="egModalActions">
+              <button
+                type="button"
+                className="btn"
+                onClick={() =>
+                  setNewPlanningModalOpen(false)
+                }
+              >
+                Annuler
+              </button>
+
+              <button
+                type="button"
+                className="btn primary"
+                onClick={() =>
+                  void confirmCreateNewPlanning()
+                }
+              >
+                Créer ce planning
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {adjustmentModal && (
@@ -4680,6 +5042,50 @@ function BarPlanningPage() {
         .planningMainButtons .btn:disabled { opacity:.45; cursor:not-allowed; }
 
 
+
+        .newPlanningModal {
+          max-width: 500px;
+        }
+        .newPlanningDatePanel {
+          display: grid;
+          gap: 14px;
+        }
+        .newPlanningDatePanel label {
+          display: grid;
+          gap: 7px;
+        }
+        .newPlanningDatePanel label > span {
+          color: #344054;
+          font-size: 12px;
+          font-weight: 800;
+        }
+        .newPlanningDatePanel input[type="date"] {
+          width: 100%;
+          min-height: 46px;
+          padding: 0 12px;
+          border: 1px solid #d0d5dd;
+          border-radius: 9px;
+          background: #fff;
+          color: #101828;
+          font: inherit;
+        }
+        .newPlanningWeekPreview {
+          display: grid;
+          gap: 4px;
+          padding: 13px;
+          border: 1px solid #dbe4f0;
+          border-radius: 10px;
+          background: #f8fafc;
+        }
+        .newPlanningWeekPreview small {
+          color: #667085;
+          font-size: 10px;
+          font-weight: 700;
+        }
+        .newPlanningWeekPreview strong {
+          font-size: 14px;
+        }
+
         .adjustmentAdminPanel { margin-bottom:14px; border:1px solid #f0b429; border-radius:12px; background:#fffaf0; padding:14px; }
         .adjustmentAdminHeader { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
         .adjustmentAdminHeader span { color:#b54708; font-size:10px; font-weight:900; letter-spacing:.08em; }
@@ -4821,6 +5227,13 @@ function BarPlanningPage() {
         .btn.primary { background:#101828; color:#fff; border-color:#101828; }
         .toolbar { display:flex; align-items:end; justify-content:space-between; gap:18px; flex-wrap:wrap; }
         .weekControls { flex:1; min-width:440px; }
+        .barNukuReadOnlyNote {
+          width:100%;
+          margin-top:8px;
+          color:#667085;
+          font-size:11px;
+          font-weight:700;
+        }
         .weekControlRow { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
         .toolbar label { display:block; font-size:11px; font-weight:900; color:#667085; margin-bottom:6px; text-transform:uppercase; letter-spacing:.05em; }
         .toolbar input { min-height:40px; border:1px solid #d0d5dd; border-radius:10px; padding:0 10px; }
