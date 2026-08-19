@@ -28,8 +28,7 @@ function currentHost() {
     return ''
   }
 
-  return window.location.hostname
-    .toLowerCase()
+  return window.location.hostname.toLowerCase()
 }
 
 function isRequisitionHost() {
@@ -92,7 +91,10 @@ export default function LoginPage() {
   const [
     installPrompt,
     setInstallPrompt,
-  ] = useState<BeforeInstallPromptEvent | null>(null)
+  ] =
+    useState<BeforeInstallPromptEvent | null>(
+      null
+    )
 
   const [
     appInstalled,
@@ -117,9 +119,11 @@ export default function LoginPage() {
     setRequisitionMode(
       requisition
     )
+
     setNukuStockMode(
       backOffice
     )
+
     setBarNukuMode(
       barPortal
     )
@@ -150,15 +154,18 @@ export default function LoginPage() {
       event: Event
     ) => {
       event.preventDefault()
+
       setInstallPrompt(
         event as BeforeInstallPromptEvent
       )
+
       setInstallMessage('')
     }
 
     const handleAppInstalled = () => {
       setAppInstalled(true)
       setInstallPrompt(null)
+
       setInstallMessage(
         'Application installée.'
       )
@@ -201,7 +208,8 @@ export default function LoginPage() {
       await installPrompt.userChoice
 
     if (
-      choice.outcome === 'accepted'
+      choice.outcome ===
+      'accepted'
     ) {
       setInstallMessage(
         'Installation lancée.'
@@ -219,6 +227,7 @@ export default function LoginPage() {
     event: FormEvent
   ) => {
     event.preventDefault()
+
     setError('')
 
     if (
@@ -260,9 +269,15 @@ export default function LoginPage() {
         return
       }
 
-      // On ne fait aucune lecture "profiles" ici.
-      // Le contrôle du rôle est fait par AuthGate
-      // sur la page protégée après la redirection.
+      /*
+       * IMPORTANT :
+       * aucune lecture de profiles ici.
+       *
+       * La connexion Supabase est créée,
+       * puis AuthGate contrôle les droits
+       * sur la page protégée.
+       */
+
       if (requisitionMode) {
         window.location.replace(
           '/requisition'
@@ -270,13 +285,23 @@ export default function LoginPage() {
         return
       }
 
+      /*
+       * BAR NUKU
+       *
+       * On arrive d'abord sur /bar.
+       * On ne force plus /planning-bar
+       * immédiatement après le login.
+       */
       if (barNukuMode) {
         window.location.replace(
-          '/planning-bar'
+          '/bar'
         )
         return
       }
 
+      /*
+       * NUKUSTOCK
+       */
       localStorage.setItem(
         'nukustock_login_zone',
         zone
@@ -304,6 +329,7 @@ export default function LoginPage() {
       setError(
         'La connexion a rencontré une erreur. Réessaie.'
       )
+
       setLoading(false)
     }
   }
@@ -320,8 +346,7 @@ export default function LoginPage() {
     >
       <section
         style={{
-          width:
-            'min(500px,100%)',
+          width: 'min(500px,100%)',
           background: '#fff',
           border:
             '1px solid #e5e7eb',
@@ -365,8 +390,7 @@ export default function LoginPage() {
 
             <h1
               style={{
-                margin:
-                  '2px 0 0',
+                margin: '2px 0 0',
                 fontSize: 22,
               }}
             >
@@ -390,8 +414,7 @@ export default function LoginPage() {
 
         <p
           style={{
-            margin:
-              '6px 0 22px',
+            margin: '6px 0 22px',
             color: '#667085',
           }}
         >
@@ -402,7 +425,8 @@ export default function LoginPage() {
             : 'Accéder à NukuStock'}
         </p>
 
-        {(requisitionMode || nukuStockMode) && (
+        {(requisitionMode ||
+          nukuStockMode) && (
           <div
             style={{
               marginBottom: 18,
@@ -416,8 +440,10 @@ export default function LoginPage() {
                   minHeight: 46,
                   padding: '0 14px',
                   display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
+                  alignItems:
+                    'center',
+                  justifyContent:
+                    'center',
                   border:
                     '1px solid #abefc6',
                   borderRadius: 12,
@@ -457,7 +483,8 @@ export default function LoginPage() {
                 style={{
                   color: '#667085',
                   fontSize: 11,
-                  textAlign: 'center',
+                  textAlign:
+                    'center',
                   lineHeight: 1.4,
                 }}
               >
@@ -498,8 +525,7 @@ export default function LoginPage() {
           <label>
             <span
               style={{
-                display:
-                  'block',
+                display: 'block',
                 fontSize: 12,
                 fontWeight: 700,
                 color: '#344054',
@@ -524,8 +550,7 @@ export default function LoginPage() {
                 border:
                   '1px solid #d0d5dd',
                 borderRadius: 12,
-                padding:
-                  '0 12px',
+                padding: '0 12px',
                 boxSizing:
                   'border-box',
               }}
@@ -535,8 +560,7 @@ export default function LoginPage() {
           <label>
             <span
               style={{
-                display:
-                  'block',
+                display: 'block',
                 fontSize: 12,
                 fontWeight: 700,
                 color: '#344054',
@@ -595,8 +619,7 @@ export default function LoginPage() {
                   borderRadius: 12,
                   padding:
                     '0 12px',
-                  background:
-                    '#fff',
+                  background: '#fff',
                   fontWeight: 700,
                   cursor: 'pointer',
                 }}
@@ -608,59 +631,62 @@ export default function LoginPage() {
             </div>
           </label>
 
-          {!requisitionMode && !barNukuMode && (
-            <label>
-              <span
-                style={{
-                  display:
-                    'block',
-                  fontSize: 12,
-                  fontWeight: 700,
-                  color: '#344054',
-                  marginBottom: 7,
-                }}
-              >
-                Zone de travail
-              </span>
+          {!requisitionMode &&
+            !barNukuMode && (
+              <label>
+                <span
+                  style={{
+                    display:
+                      'block',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color:
+                      '#344054',
+                    marginBottom: 7,
+                  }}
+                >
+                  Zone de travail
+                </span>
 
-              <select
-                value={zone}
-                onChange={(e) =>
-                  setZone(
-                    e.target
-                      .value as LoginZone
-                  )
-                }
-                style={{
-                  width: '100%',
-                  minHeight: 46,
-                  border:
-                    '1px solid #d0d5dd',
-                  borderRadius: 12,
-                  padding:
-                    '0 12px',
-                  background: '#fff',
-                  color: '#101828',
-                }}
-              >
-                <option value="All">
-                  All — Accès général
-                </option>
+                <select
+                  value={zone}
+                  onChange={(e) =>
+                    setZone(
+                      e.target
+                        .value as LoginZone
+                    )
+                  }
+                  style={{
+                    width: '100%',
+                    minHeight: 46,
+                    border:
+                      '1px solid #d0d5dd',
+                    borderRadius: 12,
+                    padding:
+                      '0 12px',
+                    background: '#fff',
+                    color:
+                      '#101828',
+                  }}
+                >
+                  <option value="All">
+                    All — Accès général
+                  </option>
 
-                <option value="Beverage">
-                  Beverage
-                </option>
+                  <option value="Beverage">
+                    Beverage
+                  </option>
 
-                <option value="Food">
-                  Food
-                </option>
+                  <option value="Food">
+                    Food
+                  </option>
 
-                <option value="Matériel & Accessoires">
-                  Matériel & Accessoires
-                </option>
-              </select>
-            </label>
-          )}
+                  <option value="Matériel & Accessoires">
+                    Matériel & Accessoires
+                  </option>
+                </select>
+              </label>
+            )}
 
           <button
             type="submit"
@@ -688,27 +714,28 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {!requisitionMode && !barNukuMode && (
-          <div
-            style={{
-              marginTop: 20,
-              textAlign: 'center',
-              fontSize: 13,
-              color: '#667085',
-            }}
-          >
-            Pas encore de compte ?{' '}
-            <Link
-              href="/register"
+        {!requisitionMode &&
+          !barNukuMode && (
+            <div
               style={{
-                color: '#2563eb',
-                fontWeight: 800,
+                marginTop: 20,
+                textAlign: 'center',
+                fontSize: 13,
+                color: '#667085',
               }}
             >
-              Créer un compte
-            </Link>
-          </div>
-        )}
+              Pas encore de compte ?{' '}
+              <Link
+                href="/register"
+                style={{
+                  color: '#2563eb',
+                  fontWeight: 800,
+                }}
+              >
+                Créer un compte
+              </Link>
+            </div>
+          )}
       </section>
     </main>
   )
