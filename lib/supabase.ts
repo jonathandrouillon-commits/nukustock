@@ -21,22 +21,6 @@ if (!supabaseKey) {
   )
 }
 
-const isBrowser =
-  typeof window !== 'undefined'
-
-const isBarNuku =
-  isBrowser &&
-  window.location.hostname
-    .toLowerCase() ===
-    'barnuku.fenuaprobartender.com'
-
-const authStorage =
-  isBrowser
-    ? isBarNuku
-      ? window.sessionStorage
-      : window.localStorage
-    : undefined
-
 const globalForSupabase =
   globalThis as unknown as {
     nukustockSupabase?: SupabaseClient
@@ -54,23 +38,23 @@ export const supabase =
         detectSessionInUrl: true,
 
         /*
-         * BAR NUKU :
-         * sessionStorage = session propre
-         * à chaque onglet.
-         *
-         * NUKUSTOCK :
-         * localStorage classique.
+         * LocalStorage :
+         * beaucoup plus fiable pour
+         * téléphone, tablette et PWA.
          */
-        ...(authStorage
-          ? {
-              storage:
-                authStorage,
-            }
-          : {}),
+        storage:
+          typeof window !== 'undefined'
+            ? window.localStorage
+            : undefined,
+
+        /*
+         * Clé propre à Bar/NukuStock.
+         */
+        storageKey:
+          'nukustock-auth-session',
       },
     }
   )
 
-globalForSupabase
-  .nukustockSupabase =
+globalForSupabase.nukustockSupabase =
   supabase
