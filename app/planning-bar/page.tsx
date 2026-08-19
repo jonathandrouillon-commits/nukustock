@@ -973,6 +973,8 @@ function BarPlanningPage() {
     )
   const [planningView, setPlanningView] =
     useState<'dashboard' | 'planning' | 'saved'>('dashboard')
+  const [planningSize, setPlanningSize] =
+    useState<'compact' | 'normal' | 'large'>('normal')
   const [currentSavedPlanningId, setCurrentSavedPlanningId] =
     useState<string | null>(null)
   const [exportMenuOpen, setExportMenuOpen] =
@@ -4171,6 +4173,56 @@ function BarPlanningPage() {
             </div>
           </div>
 
+          <div className="planningSizeControls noPrint">
+            <span>Affichage</span>
+            <div>
+              <button
+                type="button"
+                className={`sizeBtn ${
+                  planningSize === 'compact'
+                    ? 'active'
+                    : ''
+                }`}
+                onClick={() =>
+                  setPlanningSize('compact')
+                }
+                title="Réduire le planning"
+              >
+                −
+              </button>
+
+              <button
+                type="button"
+                className={`sizeBtn sizeLabel ${
+                  planningSize === 'normal'
+                    ? 'active'
+                    : ''
+                }`}
+                onClick={() =>
+                  setPlanningSize('normal')
+                }
+                title="Taille normale"
+              >
+                100%
+              </button>
+
+              <button
+                type="button"
+                className={`sizeBtn ${
+                  planningSize === 'large'
+                    ? 'active'
+                    : ''
+                }`}
+                onClick={() =>
+                  setPlanningSize('large')
+                }
+                title="Agrandir le planning"
+              >
+                +
+              </button>
+            </div>
+          </div>
+
           {barNukuReadOnly && (
             <div className="barNukuReadOnlyNote">
               Planning global en lecture seule · tu peux valider tes journées,
@@ -4188,7 +4240,7 @@ function BarPlanningPage() {
       </div>
 
       <Card>
-        <div className="tableWrap">
+        <div className={`tableWrap planningSize-${planningSize}`}>
           <table>
             <thead>
               <tr>
@@ -4355,28 +4407,58 @@ function BarPlanningPage() {
                               : { background: employee.color }
                           }
                         >
-                          <label className="offToggle noPrint">
-                            <input
-                              type="checkbox"
-                              checked={d.off}
-                              disabled={d.validated || barNukuReadOnly}
-                              onChange={e =>
-                                updateDay(employee.id, key, {
-                                  off: e.target.checked,
-                                  ...(e.target.checked
-                                    ? {
-                                        start: '',
-                                        end: '',
-                                        start2: '',
-                                        end2: '',
-                                        split: false,
-                                      }
-                                    : {}),
-                                })
-                              }
-                            />
-                            OFF
-                          </label>
+                          <div className="dayQuickControls noPrint">
+                            <label className="quickToggle">
+                              <input
+                                type="checkbox"
+                                checked={d.off}
+                                disabled={d.validated || barNukuReadOnly}
+                                onChange={e =>
+                                  updateDay(employee.id, key, {
+                                    off: e.target.checked,
+                                    ...(e.target.checked
+                                      ? {
+                                          start: '',
+                                          end: '',
+                                          start2: '',
+                                          end2: '',
+                                          split: false,
+                                        }
+                                      : {}),
+                                  })
+                                }
+                              />
+                              <span>OFF</span>
+                            </label>
+
+                            <label
+                              className={`quickToggle ${
+                                d.off ? 'disabledToggle' : ''
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={d.split}
+                                disabled={
+                                  d.off ||
+                                  d.validated ||
+                                  barNukuReadOnly
+                                }
+                                onChange={e =>
+                                  updateDay(employee.id, key, {
+                                    split: e.target.checked,
+                                    ...(e.target.checked
+                                      ? {}
+                                      : {
+                                          start2: '',
+                                          end2: '',
+                                        }),
+                                  })
+                                }
+                              />
+                              <span>Coupure</span>
+                            </label>
+                          </div>
 
                           {d.off ? (
                             <>
@@ -4427,26 +4509,6 @@ function BarPlanningPage() {
                             </>
                           ) : (
                             <>
-                              <label className="splitToggle noPrint">
-                                <input
-                                  type="checkbox"
-                                  checked={d.split}
-                                  disabled={d.validated || barNukuReadOnly}
-                                  onChange={e =>
-                                    updateDay(employee.id, key, {
-                                      split: e.target.checked,
-                                      ...(e.target.checked
-                                        ? {}
-                                        : {
-                                            start2: '',
-                                            end2: '',
-                                          }),
-                                    })
-                                  }
-                                />
-                                Coupure
-                              </label>
-
                               <div className="times">
                                 <select
                                   value={d.start}
@@ -4525,35 +4587,38 @@ function BarPlanningPage() {
                                 </div>
                               )}
 
-                              <div className="breakRow">
-                                <span>
-                                  {d.split
-                                    ? 'Pause totale'
-                                    : 'Pause'}
-                                </span>
-                                <select
-                                  value={d.breakMinutes}
-                                  disabled={d.validated || barNukuReadOnly}
-                                  onChange={e =>
-                                    updateDay(employee.id, key, {
-                                      breakMinutes: Number(e.target.value),
-                                    })
-                                  }
-                                >
-                                  <option value={0}>0 min</option>
-                                  <option value={15}>15 min</option>
-                                  <option value={30}>30 min</option>
-                                  <option value={45}>45 min</option>
-                                  <option value={60}>1 h</option>
-                                </select>
-                              </div>
+                              <div className="dayMetaRow">
+                                <div className="breakRow">
+                                  <span>
+                                    {d.split
+                                      ? 'Pause'
+                                      : 'Pause'}
+                                  </span>
+                                  <select
+                                    value={d.breakMinutes}
+                                    disabled={d.validated || barNukuReadOnly}
+                                    onChange={e =>
+                                      updateDay(employee.id, key, {
+                                        breakMinutes: Number(e.target.value),
+                                      })
+                                    }
+                                  >
+                                    <option value={0}>0</option>
+                                    <option value={15}>15</option>
+                                    <option value={30}>30</option>
+                                    <option value={45}>45</option>
+                                    <option value={60}>60</option>
+                                  </select>
+                                  <small>min</small>
+                                </div>
 
-                              <div className="worked">
-                                {d.start &&
-                                d.end &&
-                                (!d.split || (d.start2 && d.end2))
-                                  ? durationLabel(worked)
-                                  : '—'}
+                                <div className="worked">
+                                  {d.start &&
+                                  d.end &&
+                                  (!d.split || (d.start2 && d.end2))
+                                    ? durationLabel(worked)
+                                    : '—'}
+                                </div>
                               </div>
 
                               <div className="dayValidation noPrint">
@@ -5258,6 +5323,46 @@ function BarPlanningPage() {
         .btn.primary { background:#101828; color:#fff; border-color:#101828; }
         .toolbar { display:flex; align-items:end; justify-content:space-between; gap:18px; flex-wrap:wrap; }
         .weekControls { flex:1; min-width:440px; }
+        .planningSizeControls {
+          display:flex;
+          flex-direction:column;
+          align-items:flex-end;
+          gap:5px;
+        }
+        .planningSizeControls > span {
+          color:#667085;
+          font-size:9px;
+          font-weight:900;
+          text-transform:uppercase;
+          letter-spacing:.05em;
+        }
+        .planningSizeControls > div {
+          display:flex;
+          overflow:hidden;
+          border:1px solid #d0d5dd;
+          border-radius:9px;
+          background:#fff;
+        }
+        .sizeBtn {
+          min-width:34px;
+          height:34px;
+          border:0;
+          border-right:1px solid #e4e7ec;
+          background:#fff;
+          color:#344054;
+          font-size:15px;
+          font-weight:900;
+          cursor:pointer;
+        }
+        .sizeBtn:last-child { border-right:0; }
+        .sizeBtn.sizeLabel {
+          min-width:52px;
+          font-size:9px;
+        }
+        .sizeBtn.active {
+          background:#101828;
+          color:#fff;
+        }
         .barNukuReadOnlyNote {
           width:100%;
           margin-top:8px;
@@ -5270,42 +5375,170 @@ function BarPlanningPage() {
         .toolbar input { min-height:40px; border:1px solid #d0d5dd; border-radius:10px; padding:0 10px; }
         .addEmployee > div { display:flex; gap:8px; }
         .addEmployee input { min-width:230px; }
-        .tableWrap { overflow-x:auto; }
-        table { width:100%; border-collapse:collapse; min-width:1250px; }
+        .tableWrap {
+          overflow-x:auto;
+          --employee-width:118px;
+          --day-width:132px;
+          --day-height:104px;
+          --cell-pad:6px;
+          --time-font:11px;
+          --date-font:13px;
+          --weekday-font:10px;
+        }
+        table {
+          width:100%;
+          border-collapse:collapse;
+          min-width:
+            calc(
+              var(--employee-width) +
+              (7 * var(--day-width)) +
+              82px
+            );
+        }
         th, td { border:1px solid #98a2b3; }
-        thead th { background:#d0d1d2; padding:8px 6px; text-align:center; }
-        .employeeHead { min-width:130px; }
-        .date { font-size:15px; font-weight:900; }
-        .weekday { margin-top:3px; font-size:12px; text-transform:capitalize; }
+        thead th {
+          background:#d0d1d2;
+          padding:6px 4px;
+          text-align:center;
+        }
+        .employeeHead {
+          min-width:var(--employee-width);
+          width:var(--employee-width);
+        }
+        .date {
+          font-size:var(--date-font);
+          font-weight:900;
+        }
+        .weekday {
+          margin-top:2px;
+          font-size:var(--weekday-font);
+          text-transform:capitalize;
+        }
+
+        .planningSize-compact {
+          --employee-width:102px;
+          --day-width:112px;
+          --day-height:84px;
+          --cell-pad:4px;
+          --time-font:10px;
+          --date-font:11px;
+          --weekday-font:9px;
+        }
+
+        .planningSize-large {
+          --employee-width:145px;
+          --day-width:164px;
+          --day-height:132px;
+          --cell-pad:9px;
+          --time-font:13px;
+          --date-font:16px;
+          --weekday-font:12px;
+        }
         .specialInfoRow th { background:#f8fafc; padding:5px; vertical-align:top; }
         .specialInfoLabel { font-size:10px; font-weight:900; color:#475467; text-align:left; }
-        .specialInfoInput { width:100%; min-height:58px; resize:vertical; border:1px solid #d0d5dd; border-radius:7px; background:#fff; padding:6px; font-size:10px; line-height:1.3; }
+        .specialInfoInput { width:100%; min-height:48px; resize:vertical; border:1px solid #d0d5dd; border-radius:7px; background:#fff; padding:5px; font-size:9px; line-height:1.25; }
+        .planningSize-compact .specialInfoInput { min-height:34px; padding:4px; font-size:8px; }
+        .planningSize-large .specialInfoInput { min-height:64px; padding:7px; font-size:11px; }
         .employeeIdentity { display:flex; flex-direction:column; align-items:flex-start; }
-        .employeeIdentity strong { font-size:16px; line-height:1.1; }
+        .employeeIdentity strong { font-size:14px; line-height:1.05; }
+        .planningSize-compact .employeeIdentity strong { font-size:12px; }
+        .planningSize-large .employeeIdentity strong { font-size:16px; }
         .employeeRole { display:block; margin-top:3px; font-size:9px; color:#667085; font-weight:700; line-height:1.15; }
         .signatureEmployeeIdentity { display:flex; flex-direction:column; }
         .signatureEmployeeIdentity small { margin-top:2px; font-size:9px; color:#667085; font-weight:600; }
-        .employeeCell { padding:10px; text-align:left; min-width:130px; font-size:16px; background:#fff; }
+        .employeeCell { padding:var(--cell-pad); text-align:left; min-width:var(--employee-width); width:var(--employee-width); font-size:14px; background:#fff; }
         .deleteEmployee { margin-top:10px; border:0; background:none; color:#b42318; font-size:10px; font-weight:800; cursor:pointer; padding:0; }
-        td { min-width:150px; padding:8px; vertical-align:top; background:#fff; height:122px; }
+        td { min-width:var(--day-width); width:var(--day-width); padding:var(--cell-pad); vertical-align:top; background:#fff; height:var(--day-height); }
         .offCell { background:#ffd8b2; }
-        .offToggle { display:flex; justify-content:flex-end; align-items:center; gap:4px; font-size:10px; font-weight:900; margin-bottom:8px; }
-        .splitToggle { display:flex; justify-content:flex-end; align-items:center; gap:4px; font-size:10px; font-weight:900; margin-bottom:6px; color:#475467; }
-        .offText { display:grid; place-items:center; height:72px; font-size:18px; font-weight:900; font-style:italic; }
+        .dayQuickControls {
+          display:flex;
+          justify-content:space-between;
+          align-items:center;
+          gap:5px;
+          margin-bottom:5px;
+          padding-bottom:4px;
+          border-bottom:1px solid rgba(152,162,179,.35);
+        }
+        .quickToggle {
+          display:inline-flex;
+          align-items:center;
+          gap:3px;
+          min-width:0;
+          color:#475467;
+          font-size:9px;
+          font-weight:900;
+          white-space:nowrap;
+        }
+        .quickToggle input { margin:0; }
+        .quickToggle.disabledToggle { opacity:.45; }
+        .planningSize-compact .quickToggle { font-size:8px; gap:2px; }
+        .planningSize-large .quickToggle { font-size:10px; }
+        .offText { display:grid; place-items:center; min-height:42px; font-size:16px; font-weight:900; font-style:italic; }
+        .planningSize-compact .offText { min-height:30px; font-size:14px; }
+        .planningSize-large .offText { min-height:66px; font-size:20px; }
         .times { display:grid; grid-template-columns:1fr auto 1fr; gap:4px; align-items:center; }
-        .times select { width:100%; min-width:0; border:1px solid #d0d5dd; border-radius:7px; padding:6px 4px; font-size:12px; background:#fff; }
-        .secondShift { margin-top:6px; }
-        .breakRow { display:flex; justify-content:space-between; align-items:center; margin-top:8px; font-size:10px; color:#667085; }
-        .breakRow select { border:1px solid #d0d5dd; border-radius:6px; padding:3px; font-size:10px; }
-        .worked { margin-top:10px; text-align:center; font-size:15px; font-weight:900; font-style:italic; }
+        .times select { width:100%; min-width:0; border:1px solid #d0d5dd; border-radius:6px; padding:4px 3px; font-size:var(--time-font); background:#fff; }
+        .secondShift { margin-top:4px; }
+        .dayMetaRow {
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:5px;
+          margin-top:5px;
+        }
+        .breakRow {
+          display:flex;
+          align-items:center;
+          gap:3px;
+          margin:0;
+          color:#667085;
+          font-size:8px;
+        }
+        .breakRow select {
+          width:38px;
+          border:1px solid #d0d5dd;
+          border-radius:5px;
+          padding:2px 1px;
+          font-size:9px;
+          background:#fff;
+        }
+        .breakRow small {
+          font-size:7px;
+          color:#98a2b3;
+        }
+        .worked {
+          margin:0;
+          text-align:right;
+          font-size:12px;
+          font-weight:900;
+          font-style:italic;
+          white-space:nowrap;
+        }
+        .planningSize-compact .worked { font-size:10px; }
+        .planningSize-large .worked { font-size:15px; }
+        .planningSize-large .breakRow { font-size:10px; }
+        .planningSize-large .breakRow select { width:44px; font-size:10px; }
         .totalHead { min-width:90px; }
         .totalCell { min-width:90px; text-align:center; vertical-align:middle; font-size:18px; font-weight:900; background:#c9f0cf; }
         .totalCell.over { background:#ffc7ce; color:#b42318; }
         .printTitle { display:none; }
 
         .validatedCell { box-shadow: inset 0 0 0 2px #86efac; }
-        .dayValidation { margin-top:8px; display:flex; justify-content:center; align-items:center; gap:6px; flex-wrap:wrap; }
+        .dayValidation { margin-top:5px; display:flex; justify-content:center; align-items:center; gap:4px; flex-wrap:wrap; }
+        .planningSize-compact .dayValidation { margin-top:3px; }
         .validateBtn { border:0; border-radius:7px; background:#166534; color:#fff; padding:5px 8px; font-size:9px; font-weight:900; cursor:pointer; }
+        .planningSize-compact .validateBtn {
+          padding:3px 5px;
+          font-size:8px;
+        }
+        .planningSize-compact .validatedBadge {
+          padding:3px 5px;
+          font-size:8px;
+        }
+        .planningSize-compact .adjustmentRequestButton {
+          padding:4px 5px;
+          font-size:8px;
+        }
         .validatedBadge { padding:4px 7px; border-radius:999px; background:#dcfce7; color:#166534; font-size:9px; font-weight:900; }
         .unlockBtn { border:0; background:transparent; color:#475467; font-size:9px; font-weight:800; cursor:pointer; text-decoration:underline; }
         .signatureSection h2 { margin:0; font-size:18px; }
@@ -5336,6 +5569,10 @@ function BarPlanningPage() {
           .topActionGroup { justify-content:flex-end; }
           .weekControls { min-width:0; width:100%; }
           .weekControlRow { width:100%; }
+          .planningSizeControls {
+            width:100%;
+            align-items:flex-start;
+          }
           .weekControlRow input { flex:1; min-width:150px; }
           .dashboardStats { grid-template-columns:repeat(2,minmax(0,1fr)); }
           .monthlyCompactHead { align-items:flex-start; }
