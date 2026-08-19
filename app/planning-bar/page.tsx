@@ -975,6 +975,8 @@ function BarPlanningPage() {
     useState<'dashboard' | 'planning' | 'saved'>('dashboard')
   const [planningSize, setPlanningSize] =
     useState<'compact' | 'normal' | 'large'>('normal')
+  const [planningDevice, setPlanningDevice] =
+    useState<'pc' | 'tablet' | 'phone'>('pc')
   const [currentSavedPlanningId, setCurrentSavedPlanningId] =
     useState<string | null>(null)
   const [exportMenuOpen, setExportMenuOpen] =
@@ -4173,53 +4175,102 @@ function BarPlanningPage() {
             </div>
           </div>
 
-          <div className="planningSizeControls noPrint">
-            <span>Affichage</span>
-            <div>
-              <button
-                type="button"
-                className={`sizeBtn ${
-                  planningSize === 'compact'
-                    ? 'active'
-                    : ''
-                }`}
-                onClick={() =>
-                  setPlanningSize('compact')
-                }
-                title="Réduire le planning"
-              >
-                −
-              </button>
+          <div className="planningDisplayControls noPrint">
+            <div className="planningSizeControls">
+              <span>Taille</span>
+              <div>
+                <button
+                  type="button"
+                  className={`sizeBtn ${
+                    planningSize === 'compact'
+                      ? 'active'
+                      : ''
+                  }`}
+                  onClick={() =>
+                    setPlanningSize('compact')
+                  }
+                  title="Affichage compact"
+                >
+                  80%
+                </button>
 
-              <button
-                type="button"
-                className={`sizeBtn sizeLabel ${
-                  planningSize === 'normal'
-                    ? 'active'
-                    : ''
-                }`}
-                onClick={() =>
-                  setPlanningSize('normal')
-                }
-                title="Taille normale"
-              >
-                100%
-              </button>
+                <button
+                  type="button"
+                  className={`sizeBtn ${
+                    planningSize === 'normal'
+                      ? 'active'
+                      : ''
+                  }`}
+                  onClick={() =>
+                    setPlanningSize('normal')
+                  }
+                  title="Taille normale"
+                >
+                  100%
+                </button>
 
-              <button
-                type="button"
-                className={`sizeBtn ${
-                  planningSize === 'large'
-                    ? 'active'
-                    : ''
-                }`}
-                onClick={() =>
-                  setPlanningSize('large')
-                }
-                title="Agrandir le planning"
-              >
-                +
-              </button>
+                <button
+                  type="button"
+                  className={`sizeBtn ${
+                    planningSize === 'large'
+                      ? 'active'
+                      : ''
+                  }`}
+                  onClick={() =>
+                    setPlanningSize('large')
+                  }
+                  title="Affichage agrandi"
+                >
+                  120%
+                </button>
+              </div>
+            </div>
+
+            <div className="planningDeviceControls">
+              <span>Écran</span>
+              <div>
+                <button
+                  type="button"
+                  className={`deviceBtn ${
+                    planningDevice === 'pc'
+                      ? 'active'
+                      : ''
+                  }`}
+                  onClick={() =>
+                    setPlanningDevice('pc')
+                  }
+                >
+                  PC
+                </button>
+
+                <button
+                  type="button"
+                  className={`deviceBtn ${
+                    planningDevice === 'tablet'
+                      ? 'active'
+                      : ''
+                  }`}
+                  onClick={() =>
+                    setPlanningDevice('tablet')
+                  }
+                >
+                  Tablette
+                </button>
+
+                <button
+                  type="button"
+                  className={`deviceBtn ${
+                    planningDevice === 'phone'
+                      ? 'active'
+                      : ''
+                  }`}
+                  onClick={() =>
+                    setPlanningDevice('phone')
+                  }
+                >
+                  Téléphone
+                </button>
+              </div>
             </div>
           </div>
 
@@ -4240,7 +4291,7 @@ function BarPlanningPage() {
       </div>
 
       <Card>
-        <div className={`tableWrap planningSize-${planningSize}`}>
+        <div className={`tableWrap planningSize-${planningSize} planningDevice-${planningDevice}`}>
           <table>
             <thead>
               <tr>
@@ -5323,43 +5374,57 @@ function BarPlanningPage() {
         .btn.primary { background:#101828; color:#fff; border-color:#101828; }
         .toolbar { display:flex; align-items:end; justify-content:space-between; gap:18px; flex-wrap:wrap; }
         .weekControls { flex:1; min-width:440px; }
-        .planningSizeControls {
+        .planningDisplayControls {
+          display:flex;
+          align-items:flex-end;
+          gap:10px;
+          flex-wrap:wrap;
+        }
+        .planningSizeControls,
+        .planningDeviceControls {
           display:flex;
           flex-direction:column;
-          align-items:flex-end;
+          align-items:flex-start;
           gap:5px;
         }
-        .planningSizeControls > span {
+        .planningSizeControls > span,
+        .planningDeviceControls > span {
           color:#667085;
           font-size:9px;
           font-weight:900;
           text-transform:uppercase;
           letter-spacing:.05em;
         }
-        .planningSizeControls > div {
+        .planningSizeControls > div,
+        .planningDeviceControls > div {
           display:flex;
           overflow:hidden;
           border:1px solid #d0d5dd;
           border-radius:9px;
           background:#fff;
         }
-        .sizeBtn {
-          min-width:34px;
+        .sizeBtn,
+        .deviceBtn {
+          min-width:50px;
           height:34px;
+          padding:0 9px;
           border:0;
           border-right:1px solid #e4e7ec;
           background:#fff;
           color:#344054;
-          font-size:15px;
+          font-size:10px;
           font-weight:900;
           cursor:pointer;
         }
-        .sizeBtn:last-child { border-right:0; }
-        .sizeBtn.sizeLabel {
-          min-width:52px;
-          font-size:9px;
+        .deviceBtn {
+          min-width:66px;
         }
-        .sizeBtn.active {
+        .sizeBtn:last-child,
+        .deviceBtn:last-child {
+          border-right:0;
+        }
+        .sizeBtn.active,
+        .deviceBtn.active {
           background:#101828;
           color:#fff;
         }
@@ -5433,6 +5498,35 @@ function BarPlanningPage() {
           --time-font:13px;
           --date-font:16px;
           --weekday-font:12px;
+        }
+
+        .planningDevice-pc {
+          max-width:none;
+        }
+
+        .planningDevice-tablet {
+          max-width:1024px;
+          margin-left:auto;
+          margin-right:auto;
+          border-left:1px dashed #d0d5dd;
+          border-right:1px dashed #d0d5dd;
+        }
+
+        .planningDevice-phone {
+          max-width:430px;
+          margin-left:auto;
+          margin-right:auto;
+          border-left:1px dashed #d0d5dd;
+          border-right:1px dashed #d0d5dd;
+          border-radius:10px;
+        }
+
+        .planningDevice-phone table {
+          min-width:980px;
+        }
+
+        .planningDevice-tablet table {
+          min-width:1100px;
         }
         .specialInfoRow th { background:#f8fafc; padding:5px; vertical-align:top; }
         .specialInfoLabel { font-size:10px; font-weight:900; color:#475467; text-align:left; }
@@ -5569,9 +5663,18 @@ function BarPlanningPage() {
           .topActionGroup { justify-content:flex-end; }
           .weekControls { min-width:0; width:100%; }
           .weekControlRow { width:100%; }
-          .planningSizeControls {
+          .planningDisplayControls {
             width:100%;
             align-items:flex-start;
+          }
+          .planningSizeControls,
+          .planningDeviceControls {
+            align-items:flex-start;
+          }
+          .planningSizeControls > div,
+          .planningDeviceControls > div {
+            max-width:100%;
+            overflow-x:auto;
           }
           .weekControlRow input { flex:1; min-width:150px; }
           .dashboardStats { grid-template-columns:repeat(2,minmax(0,1fr)); }
