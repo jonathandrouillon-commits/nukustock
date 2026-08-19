@@ -11,6 +11,10 @@ import {
   useRouter,
 } from 'next/navigation'
 
+import type {
+  Session,
+} from '@supabase/supabase-js'
+
 import { supabase } from '@/lib/supabase'
 import { AppShell } from '@/components/app-shell'
 
@@ -29,24 +33,28 @@ type Profile = {
   active: boolean
 }
 
-function isRequisitionHost() {
-  if (typeof window === 'undefined') {
-    return false
+function currentHost() {
+  if (
+    typeof window ===
+    'undefined'
+  ) {
+    return ''
   }
 
+  return window.location.hostname
+    .toLowerCase()
+}
+
+function isRequisitionHost() {
   return (
-    window.location.hostname ===
+    currentHost() ===
     'requisitionnuku.fenuaprobartender.com'
   )
 }
 
 function isBarNukuHost() {
-  if (typeof window === 'undefined') {
-    return false
-  }
-
   return (
-    window.location.hostname ===
+    currentHost() ===
     'barnuku.fenuaprobartender.com'
   )
 }
@@ -54,34 +62,63 @@ function isBarNukuHost() {
 export default function AuthGate({
   children,
 }: AuthGateProps) {
-  const pathname = usePathname()
-  const router = useRouter()
+  const pathname =
+    usePathname()
 
-  const [checking, setChecking] =
-    useState(true)
+  const router =
+    useRouter()
 
-  const [authenticated, setAuthenticated] =
-    useState(false)
+  const [
+    checking,
+    setChecking,
+  ] = useState(true)
 
-  const [profile, setProfile] =
-    useState<Profile | null>(null)
+  const [
+    authenticated,
+    setAuthenticated,
+  ] = useState(false)
 
-  const [requisitionHost, setRequisitionHost] =
-    useState(false)
+  const [
+    profile,
+    setProfile,
+  ] =
+    useState<Profile | null>(
+      null
+    )
 
-  const [barNukuHost, setBarNukuHost] =
-    useState(false)
+  const [
+    requisitionHost,
+    setRequisitionHost,
+  ] = useState(false)
 
-  const isPublicRoute =
-    PUBLIC_ROUTES.includes(pathname)
+  const [
+    barNukuHost,
+    setBarNukuHost,
+  ] = useState(false)
 
+  /*
+   * =====================================================
+   * AUTHENTIFICATION
+   * =====================================================
+   *
+   * IMPORTANT :
+   * cet effet ne dépend PAS du pathname.
+   *
+   * Donc cliquer sur :
+   * Planning
+   * Cocktails Guy
+   * Fiches Produits
+   * Check List
+   *
+   * ne relance plus toute l'authentification.
+   */
   useEffect(() => {
     let active = true
 
     const requisitionDomain =
       isRequisitionHost()
 
-    const barNukuDomain =
+    const barDomain =
       isBarNukuHost()
 
     setRequisitionHost(
@@ -89,261 +126,464 @@ export default function AuthGate({
     )
 
     setBarNukuHost(
-      barNukuDomain
+      barDomain
     )
 
-    const resolveUser = async () => {
-      setChecking(true)
-
-      const {
-        data: {
-          session,
-        },
-        error: sessionError,
-      } =
-        await supabase.auth.getSession()
-
-      if (!active) {
-        return
-      }
-
-      if (
-        sessionError ||
-        !session?.user
-      ) {
-        setAuthenticated(false)
-        setProfile(null)
-        setChecking(false)
-
-        if (!isPublicRoute) {
-          router.replace('/login')
+    const applySession =
+      async (
+        session:
+          Session | null
+      ) => {
+        if (!active) {
+          return
         }
 
-        return
-      }
-
-      // BARNUKU :
-      // Les comptes équipe sont identifiés par app_metadata.
-      // Ils n'ont pas besoin d'une ligne dans public.profiles.
-      if (barNukuDomain) {
-        const employeeId =
-          String(
-            session.user.app_metadata
-              ?.employee_id || ''
-          ).trim()
-
-        const barRole =
-          String(
-            session.user.app_metadata
-              ?.bar_role || ''
-          ).trim()
-
-        const allowedRoles = [
-          'manager_admin',
-          'assistant_manager',
-          'staff',
-        ]
-
+        /*
+         * Pas de session.
+         */
         if (
-          !employeeId ||
-          !allowedRoles.includes(
-            barRole
-          )
+          !session?.user
         ) {
-          setAuthenticated(false)
-          setProfile(null)
-          setChecking(false)
+          setAuthenticated(
+            false
+          )
 
-          await supabase.auth.signOut({
-            scope: 'local',
+          setProfile(null)
+
+          return
+        }
+
+        /*
+         * ==================================
+         * BAR NUKU
+         * ==================================
+         */
+        if (barDomain) {
+          const employeeId =
+            String(
+              session.user
+                .app_metadata
+                ?.employee_id ||
+                ''
+            ).trim()
+
+          const barRole =
+            String(
+              session.user
+                .app_metadata
+                ?.bar_role ||
+                ''
+            ).trim()
+
+          const allowedRoles =
+            [
+              'manager_admin',
+              'assistant_manager',
+              'staff',
+            ]
+
+          /*
+           * Le compte n'est pas
+           * autorisé Bar Nuku.
+           *
+           * On bloque l'accès,
+           * mais on ne déclenche
+           * PAS un signOut ici.
+           *
+           * Cela évite les boucles
+           * de déconnexion Supabase.
+           */
+          if (
+            !employeeId ||
+            !allowedRoles.includes(
+              barRole
+            )
+          ) {
+            console.error(
+              'Compte BarNuku non autorisé',
+              {
+                email:
+                  session.user
+                    .email,
+                employeeId,
+                barRole,
+              }
+            )
+
+            setAuthenticated(
+              false
+            )
+
+            setProfile(null)
+
+            return
+          }
+
+          /*
+           * Compte BarNuku valide.
+           */
+          setAuthenticated(true)
+
+          setProfile({
+            id:
+              session.user.id,
+            role:
+              barRole,
+            active:
+              true,
           })
 
-          router.replace('/login')
           return
+        }
+
+        /*
+         * ==================================
+         * NUKUSTOCK /
+         * REQUISITION
+         * ==================================
+         */
+
+        const {
+          data:
+            profileData,
+          error:
+            profileError,
+        } =
+          await supabase
+            .from('profiles')
+            .select(
+              'id, role, active'
+            )
+            .eq(
+              'id',
+              session.user.id
+            )
+            .maybeSingle()
+
+        if (!active) {
+          return
+        }
+
+        if (
+          profileError ||
+          !profileData ||
+          profileData.active ===
+            false
+        ) {
+          console.error(
+            'Profil utilisateur invalide',
+            profileError
+          )
+
+          setAuthenticated(
+            false
+          )
+
+          setProfile(null)
+
+          return
+        }
+
+        const nextProfile =
+          profileData as Profile
+
+        /*
+         * Portail Réquisition.
+         */
+        if (
+          requisitionDomain
+        ) {
+          const allowed =
+            nextProfile.role ===
+              'requisitionnaire' ||
+            nextProfile.role ===
+              'admin'
+
+          if (!allowed) {
+            setAuthenticated(
+              false
+            )
+
+            setProfile(null)
+
+            return
+          }
         }
 
         setAuthenticated(true)
 
-        // Profil synthétique uniquement pour satisfaire
-        // le rendu AuthGate côté BarNuku.
-        setProfile({
-          id: session.user.id,
-          role: barRole,
-          active: true,
-        })
-
-        if (isPublicRoute) {
-          router.replace('/bar')
-        }
-
-        setChecking(false)
-        return
-      }
-
-      const {
-        data: profileData,
-        error: profileError,
-      } = await supabase
-        .from('profiles')
-        .select(
-          'id, role, active'
+        setProfile(
+          nextProfile
         )
-        .eq(
-          'id',
-          session.user.id
-        )
-        .maybeSingle()
-
-      if (!active) {
-        return
       }
 
-      if (
-        profileError ||
-        !profileData ||
-        profileData.active === false
-      ) {
-        setAuthenticated(false)
-        setProfile(null)
-        setChecking(false)
+    /*
+     * ==================================
+     * SESSION INITIALE
+     * ==================================
+     */
+    const initialize =
+      async () => {
+        setChecking(true)
 
-        await supabase.auth.signOut({
-          scope: 'local',
-        })
+        try {
+          const {
+            data,
+            error,
+          } =
+            await supabase.auth
+              .getSession()
 
-        router.replace('/login')
-        return
-      }
+          if (!active) {
+            return
+          }
 
-      const nextProfile =
-        profileData as Profile
+          if (error) {
+            console.error(
+              'Erreur session Supabase',
+              error
+            )
 
-      setAuthenticated(true)
-      setProfile(nextProfile)
+            setAuthenticated(
+              false
+            )
 
-      if (requisitionDomain) {
-        const allowed =
-          nextProfile.role ===
-            'requisitionnaire' ||
-          nextProfile.role ===
-            'admin'
+            setProfile(null)
 
-        if (!allowed) {
-          await supabase.auth.signOut({
-            scope: 'local',
-          })
+            return
+          }
 
-          setAuthenticated(false)
-          setProfile(null)
-          setChecking(false)
-          router.replace('/login')
-          return
-        }
-
-        if (isPublicRoute) {
-          router.replace(
-            '/requisition'
+          await applySession(
+            data.session
           )
-        } else if (
-          pathname !==
-            '/requisition' &&
-          !pathname.startsWith(
-            '/requisition/'
-          )
+        } catch (
+          caughtError
         ) {
-          router.replace(
-            '/requisition'
+          console.error(
+            'Erreur AuthGate',
+            caughtError
           )
+
+          if (active) {
+            setAuthenticated(
+              false
+            )
+
+            setProfile(null)
+          }
+        } finally {
+          if (active) {
+            setChecking(
+              false
+            )
+          }
         }
-
-        setChecking(false)
-        return
       }
 
-      if (
-        nextProfile.role ===
-        'requisitionnaire'
-      ) {
-        window.location.replace(
-          'https://requisitionnuku.fenuaprobartender.com/requisition'
-        )
-        return
-      }
+    void initialize()
 
-      if (isPublicRoute) {
-        router.replace('/')
-      }
-
-      setChecking(false)
-    }
-
-    void resolveUser()
-
+    /*
+     * ==================================
+     * ÉVÉNEMENTS SUPABASE
+     * ==================================
+     */
     const {
       data: {
         subscription,
       },
     } =
-      supabase.auth.onAuthStateChange(
-        (event, session) => {
-          if (!active) {
-            return
-          }
-
-          /*
-           * Ne jamais déconnecter l'utilisateur sur un événement
-           * transitoire de rafraîchissement de session.
-           * Le retour au login n'est déclenché que par une vraie
-           * déconnexion explicite.
-           */
-          if (
-            event === 'SIGNED_OUT'
-          ) {
-            setAuthenticated(false)
-            setProfile(null)
-
-            if (!isPublicRoute) {
-              router.replace(
-                '/login'
-              )
+      supabase.auth
+        .onAuthStateChange(
+          (
+            event,
+            session
+          ) => {
+            if (!active) {
+              return
             }
 
-            return
-          }
-
-          if (
-            session?.user &&
-            (
-              event === 'SIGNED_IN' ||
-              event === 'TOKEN_REFRESHED' ||
-              event === 'USER_UPDATED'
+            console.log(
+              'Supabase Auth:',
+              event
             )
-          ) {
-            setAuthenticated(true)
+
+            /*
+             * Vraie déconnexion.
+             */
+            if (
+              event ===
+              'SIGNED_OUT'
+            ) {
+              setAuthenticated(
+                false
+              )
+
+              setProfile(null)
+
+              return
+            }
+
+            /*
+             * Connexion ou
+             * renouvellement de token.
+             */
+            if (
+              event ===
+                'SIGNED_IN' ||
+              event ===
+                'TOKEN_REFRESHED' ||
+              event ===
+                'USER_UPDATED' ||
+              event ===
+                'INITIAL_SESSION'
+            ) {
+              void applySession(
+                session
+              )
+            }
           }
-        }
-      )
+        )
 
     return () => {
       active = false
+
       subscription.unsubscribe()
+    }
+  }, [])
+
+  /*
+   * =====================================================
+   * NAVIGATION / PROTECTION DES ROUTES
+   * =====================================================
+   *
+   * Ici on change seulement de page.
+   * On ne redemande pas la session Supabase.
+   */
+  useEffect(() => {
+    if (checking) {
+      return
+    }
+
+    const isPublicRoute =
+      PUBLIC_ROUTES.includes(
+        pathname
+      )
+
+    /*
+     * Pas connecté.
+     */
+    if (
+      !authenticated ||
+      !profile
+    ) {
+      if (
+        !isPublicRoute
+      ) {
+        router.replace(
+          '/login'
+        )
+      }
+
+      return
+    }
+
+    /*
+     * ==================================
+     * BAR NUKU
+     * ==================================
+     */
+    if (barNukuHost) {
+      /*
+       * Un utilisateur déjà connecté
+       * ne reste pas sur /login.
+       */
+      if (
+        isPublicRoute
+      ) {
+        router.replace(
+          '/bar'
+        )
+      }
+
+      return
+    }
+
+    /*
+     * ==================================
+     * REQUISITION NUKU
+     * ==================================
+     */
+    if (
+      requisitionHost
+    ) {
+      if (
+        pathname !==
+          '/requisition' &&
+        !pathname.startsWith(
+          '/requisition/'
+        )
+      ) {
+        router.replace(
+          '/requisition'
+        )
+      }
+
+      return
+    }
+
+    /*
+     * ==================================
+     * NUKUSTOCK
+     * ==================================
+     */
+
+    if (
+      profile.role ===
+      'requisitionnaire'
+    ) {
+      window.location.replace(
+        'https://requisitionnuku.fenuaprobartender.com/requisition'
+      )
+
+      return
+    }
+
+    if (
+      isPublicRoute
+    ) {
+      router.replace('/')
     }
   }, [
     pathname,
+    checking,
+    authenticated,
+    profile,
+    barNukuHost,
+    requisitionHost,
     router,
-    isPublicRoute,
   ])
 
+  /*
+   * =====================================================
+   * ÉCRAN DE CHARGEMENT
+   * =====================================================
+   */
   if (checking) {
     return (
       <div
         style={{
-          minHeight: '100vh',
-          display: 'grid',
-          placeItems: 'center',
-          background: '#f4f6f9',
-          color: '#667085',
-          fontWeight: 700,
+          minHeight:
+            '100vh',
+          display:
+            'grid',
+          placeItems:
+            'center',
+          background:
+            '#f4f6f9',
+          color:
+            '#667085',
+          fontWeight:
+            700,
         }}
       >
         Vérification de la session...
@@ -351,10 +591,27 @@ export default function AuthGate({
     )
   }
 
-  if (isPublicRoute) {
-    return <>{children}</>
+  const isPublicRoute =
+    PUBLIC_ROUTES.includes(
+      pathname
+    )
+
+  /*
+   * Login/Register toujours visibles.
+   */
+  if (
+    isPublicRoute
+  ) {
+    return (
+      <>
+        {children}
+      </>
+    )
   }
 
+  /*
+   * Route protégée sans session.
+   */
   if (
     !authenticated ||
     !profile
@@ -362,12 +619,33 @@ export default function AuthGate({
     return null
   }
 
-  if (requisitionHost) {
-    return <>{children}</>
+  /*
+   * ==================================
+   * PORTAIL REQUISITION
+   * ==================================
+   */
+  if (
+    requisitionHost
+  ) {
+    return (
+      <>
+        {children}
+      </>
+    )
   }
 
-  // BarNuku conserve AppShell :
-  // menu BAR TEAM + barre utilisateur + déconnexion.
+  /*
+   * ==================================
+   * BAR NUKU + NUKUSTOCK
+   * ==================================
+   *
+   * On conserve AppShell :
+   *
+   * - menu
+   * - identité utilisateur
+   * - changer utilisateur
+   * - déconnexion
+   */
   return (
     <AppShell>
       {children}
