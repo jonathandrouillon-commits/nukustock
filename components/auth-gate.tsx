@@ -43,6 +43,8 @@ function currentHost() {
 
   return window.location.hostname
     .toLowerCase()
+    .replace(/^www\./, '')
+    .trim()
 }
 
 function isRequisitionHost() {
@@ -96,22 +98,6 @@ export default function AuthGate({
     setBarNukuHost,
   ] = useState(false)
 
-  /*
-   * =====================================================
-   * AUTHENTIFICATION
-   * =====================================================
-   *
-   * IMPORTANT :
-   * cet effet ne dépend PAS du pathname.
-   *
-   * Donc cliquer sur :
-   * Planning
-   * Cocktails Guy
-   * Fiches Produits
-   * Check List
-   *
-   * ne relance plus toute l'authentification.
-   */
   useEffect(() => {
     let active = true
 
@@ -138,9 +124,6 @@ export default function AuthGate({
           return
         }
 
-        /*
-         * Pas de session.
-         */
         if (
           !session?.user
         ) {
@@ -154,9 +137,7 @@ export default function AuthGate({
         }
 
         /*
-         * ==================================
          * BAR NUKU
-         * ==================================
          */
         if (barDomain) {
           const employeeId =
@@ -182,17 +163,19 @@ export default function AuthGate({
               'staff',
             ]
 
-          /*
-           * Le compte n'est pas
-           * autorisé Bar Nuku.
-           *
-           * On bloque l'accès,
-           * mais on ne déclenche
-           * PAS un signOut ici.
-           *
-           * Cela évite les boucles
-           * de déconnexion Supabase.
-           */
+          console.log(
+            'BARNUKU AUTH',
+            {
+              email:
+                session.user
+                  .email,
+              employeeId,
+              barRole,
+              host:
+                currentHost(),
+            }
+          )
+
           if (
             !employeeId ||
             !allowedRoles.includes(
@@ -219,10 +202,9 @@ export default function AuthGate({
             return
           }
 
-          /*
-           * Compte BarNuku valide.
-           */
-          setAuthenticated(true)
+          setAuthenticated(
+            true
+          )
 
           setProfile({
             id:
@@ -237,12 +219,8 @@ export default function AuthGate({
         }
 
         /*
-         * ==================================
-         * NUKUSTOCK /
-         * REQUISITION
-         * ==================================
+         * NUKUSTOCK / REQUISITION
          */
-
         const {
           data:
             profileData,
@@ -271,7 +249,7 @@ export default function AuthGate({
             false
         ) {
           console.error(
-            'Profil utilisateur invalide',
+            'Profil invalide',
             profileError
           )
 
@@ -287,9 +265,6 @@ export default function AuthGate({
         const nextProfile =
           profileData as Profile
 
-        /*
-         * Portail Réquisition.
-         */
         if (
           requisitionDomain
         ) {
@@ -310,18 +285,15 @@ export default function AuthGate({
           }
         }
 
-        setAuthenticated(true)
+        setAuthenticated(
+          true
+        )
 
         setProfile(
           nextProfile
         )
       }
 
-    /*
-     * ==================================
-     * SESSION INITIALE
-     * ==================================
-     */
     const initialize =
       async () => {
         setChecking(true)
@@ -340,7 +312,7 @@ export default function AuthGate({
 
           if (error) {
             console.error(
-              'Erreur session Supabase',
+              'Erreur getSession',
               error
             )
 
@@ -382,11 +354,6 @@ export default function AuthGate({
 
     void initialize()
 
-    /*
-     * ==================================
-     * ÉVÉNEMENTS SUPABASE
-     * ==================================
-     */
     const {
       data: {
         subscription,
@@ -403,13 +370,10 @@ export default function AuthGate({
             }
 
             console.log(
-              'Supabase Auth:',
+              'Supabase Auth Event:',
               event
             )
 
-            /*
-             * Vraie déconnexion.
-             */
             if (
               event ===
               'SIGNED_OUT'
@@ -423,10 +387,6 @@ export default function AuthGate({
               return
             }
 
-            /*
-             * Connexion ou
-             * renouvellement de token.
-             */
             if (
               event ===
                 'SIGNED_IN' ||
@@ -451,14 +411,6 @@ export default function AuthGate({
     }
   }, [])
 
-  /*
-   * =====================================================
-   * NAVIGATION / PROTECTION DES ROUTES
-   * =====================================================
-   *
-   * Ici on change seulement de page.
-   * On ne redemande pas la session Supabase.
-   */
   useEffect(() => {
     if (checking) {
       return
@@ -469,9 +421,6 @@ export default function AuthGate({
         pathname
       )
 
-    /*
-     * Pas connecté.
-     */
     if (
       !authenticated ||
       !profile
@@ -487,16 +436,7 @@ export default function AuthGate({
       return
     }
 
-    /*
-     * ==================================
-     * BAR NUKU
-     * ==================================
-     */
     if (barNukuHost) {
-      /*
-       * Un utilisateur déjà connecté
-       * ne reste pas sur /login.
-       */
       if (
         isPublicRoute
       ) {
@@ -508,11 +448,6 @@ export default function AuthGate({
       return
     }
 
-    /*
-     * ==================================
-     * REQUISITION NUKU
-     * ==================================
-     */
     if (
       requisitionHost
     ) {
@@ -530,12 +465,6 @@ export default function AuthGate({
 
       return
     }
-
-    /*
-     * ==================================
-     * NUKUSTOCK
-     * ==================================
-     */
 
     if (
       profile.role ===
@@ -563,11 +492,6 @@ export default function AuthGate({
     router,
   ])
 
-  /*
-   * =====================================================
-   * ÉCRAN DE CHARGEMENT
-   * =====================================================
-   */
   if (checking) {
     return (
       <div
@@ -596,9 +520,6 @@ export default function AuthGate({
       pathname
     )
 
-  /*
-   * Login/Register toujours visibles.
-   */
   if (
     isPublicRoute
   ) {
@@ -609,9 +530,6 @@ export default function AuthGate({
     )
   }
 
-  /*
-   * Route protégée sans session.
-   */
   if (
     !authenticated ||
     !profile
@@ -619,11 +537,6 @@ export default function AuthGate({
     return null
   }
 
-  /*
-   * ==================================
-   * PORTAIL REQUISITION
-   * ==================================
-   */
   if (
     requisitionHost
   ) {
@@ -634,18 +547,6 @@ export default function AuthGate({
     )
   }
 
-  /*
-   * ==================================
-   * BAR NUKU + NUKUSTOCK
-   * ==================================
-   *
-   * On conserve AppShell :
-   *
-   * - menu
-   * - identité utilisateur
-   * - changer utilisateur
-   * - déconnexion
-   */
   return (
     <AppShell>
       {children}

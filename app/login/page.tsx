@@ -1,13 +1,16 @@
 'use client'
 
 import Link from 'next/link'
+
 import {
   FormEvent,
   useEffect,
   useState,
 } from 'react'
 
-import { supabase } from '@/lib/supabase'
+import {
+  supabase,
+} from '@/lib/supabase'
 
 type LoginZone =
   | 'Beverage'
@@ -15,20 +18,32 @@ type LoginZone =
   | 'Matériel & Accessoires'
   | 'All'
 
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>
-  userChoice: Promise<{
-    outcome: 'accepted' | 'dismissed'
-    platform: string
-  }>
-}
+type BeforeInstallPromptEvent =
+  Event & {
+    prompt:
+      () => Promise<void>
+
+    userChoice:
+      Promise<{
+        outcome:
+          | 'accepted'
+          | 'dismissed'
+        platform: string
+      }>
+  }
 
 function currentHost() {
-  if (typeof window === 'undefined') {
+  if (
+    typeof window ===
+    'undefined'
+  ) {
     return ''
   }
 
-  return window.location.hostname.toLowerCase()
+  return window.location.hostname
+    .toLowerCase()
+    .replace(/^www\./, '')
+    .trim()
 }
 
 function isRequisitionHost() {
@@ -53,25 +68,38 @@ function isBarNukuHost() {
 }
 
 export default function LoginPage() {
-  const [email, setEmail] =
-    useState('')
+  const [
+    email,
+    setEmail,
+  ] = useState('')
 
-  const [password, setPassword] =
-    useState('')
+  const [
+    password,
+    setPassword,
+  ] = useState('')
 
-  const [zone, setZone] =
-    useState<LoginZone>('All')
+  const [
+    zone,
+    setZone,
+  ] =
+    useState<LoginZone>(
+      'All'
+    )
 
   const [
     showPassword,
     setShowPassword,
   ] = useState(false)
 
-  const [loading, setLoading] =
-    useState(false)
+  const [
+    loading,
+    setLoading,
+  ] = useState(false)
 
-  const [error, setError] =
-    useState('')
+  const [
+    error,
+    setError,
+  ] = useState('')
 
   const [
     requisitionMode,
@@ -92,9 +120,9 @@ export default function LoginPage() {
     installPrompt,
     setInstallPrompt,
   ] =
-    useState<BeforeInstallPromptEvent | null>(
-      null
-    )
+    useState<
+      BeforeInstallPromptEvent | null
+    >(null)
 
   const [
     appInstalled,
@@ -115,6 +143,17 @@ export default function LoginPage() {
 
     const barPortal =
       isBarNukuHost()
+
+    console.log(
+      'LOGIN HOST',
+      {
+        host:
+          currentHost(),
+        requisition,
+        backOffice,
+        barPortal,
+      }
+    )
 
     setRequisitionMode(
       requisition
@@ -141,35 +180,49 @@ export default function LoginPage() {
         '(display-mode: standalone)'
       ).matches ||
       (
-        window.navigator as Navigator & {
-          standalone?: boolean
-        }
-      ).standalone === true
+        window.navigator as
+          Navigator & {
+            standalone?: boolean
+          }
+      ).standalone ===
+        true
 
     if (standalone) {
-      setAppInstalled(true)
-    }
-
-    const handleBeforeInstallPrompt = (
-      event: Event
-    ) => {
-      event.preventDefault()
-
-      setInstallPrompt(
-        event as BeforeInstallPromptEvent
-      )
-
-      setInstallMessage('')
-    }
-
-    const handleAppInstalled = () => {
-      setAppInstalled(true)
-      setInstallPrompt(null)
-
-      setInstallMessage(
-        'Application installée.'
+      setAppInstalled(
+        true
       )
     }
+
+    const handleBeforeInstallPrompt =
+      (
+        event: Event
+      ) => {
+        event.preventDefault()
+
+        setInstallPrompt(
+          event as
+            BeforeInstallPromptEvent
+        )
+
+        setInstallMessage(
+          ''
+        )
+      }
+
+    const handleAppInstalled =
+      () => {
+        setAppInstalled(
+          true
+        )
+
+        setInstallPrompt(
+          null
+        )
+
+        setInstallMessage(
+          'Application installée.'
+        )
+      }
 
     window.addEventListener(
       'beforeinstallprompt',
@@ -194,195 +247,294 @@ export default function LoginPage() {
     }
   }, [])
 
-  const installApp = async () => {
-    if (!installPrompt) {
-      setInstallMessage(
-        'L’installation automatique n’est pas disponible pour le moment. Utilise le menu du navigateur puis “Installer l’application” ou “Ajouter à l’écran d’accueil”.'
+  const installApp =
+    async () => {
+      if (
+        !installPrompt
+      ) {
+        setInstallMessage(
+          'L’installation automatique n’est pas disponible pour le moment. Utilise le menu du navigateur puis “Installer l’application” ou “Ajouter à l’écran d’accueil”.'
+        )
+
+        return
+      }
+
+      await installPrompt.prompt()
+
+      const choice =
+        await installPrompt.userChoice
+
+      if (
+        choice.outcome ===
+        'accepted'
+      ) {
+        setInstallMessage(
+          'Installation lancée.'
+        )
+      } else {
+        setInstallMessage(
+          'Installation annulée.'
+        )
+      }
+
+      setInstallPrompt(
+        null
       )
-      return
     }
 
-    await installPrompt.prompt()
+  const submit =
+    async (
+      event:
+        FormEvent
+    ) => {
+      event.preventDefault()
 
-    const choice =
-      await installPrompt.userChoice
+      setError('')
 
-    if (
-      choice.outcome ===
-      'accepted'
-    ) {
-      setInstallMessage(
-        'Installation lancée.'
-      )
-    } else {
-      setInstallMessage(
-        'Installation annulée.'
-      )
-    }
+      if (
+        !email.trim() ||
+        !password
+      ) {
+        setError(
+          "Renseigne l'adresse email et le mot de passe."
+        )
 
-    setInstallPrompt(null)
-  }
+        return
+      }
 
-  const submit = async (
-    event: FormEvent
-  ) => {
-    event.preventDefault()
+      setLoading(true)
 
-    setError('')
+      try {
+        const {
+          data,
+          error:
+            signInError,
+        } =
+          await supabase.auth
+            .signInWithPassword(
+              {
+                email:
+                  email
+                    .trim()
+                    .toLowerCase(),
 
-    if (
-      !email.trim() ||
-      !password
-    ) {
-      setError(
-        "Renseigne l'adresse email et le mot de passe."
-      )
-      return
-    }
+                password,
+              }
+            )
 
-    setLoading(true)
+        if (
+          signInError ||
+          !data.session ||
+          !data.user
+        ) {
+          console.error(
+            'LOGIN ERROR',
+            signInError
+          )
 
-    try {
-      const {
-        data,
-        error: signInError,
-      } =
-        await supabase.auth.signInWithPassword(
+          setError(
+            'Email ou mot de passe incorrect.'
+          )
+
+          setLoading(false)
+
+          return
+        }
+
+        console.log(
+          'LOGIN SUCCESS',
           {
             email:
-              email
-                .trim()
-                .toLowerCase(),
-            password,
+              data.user
+                .email,
+
+            host:
+              currentHost(),
+
+            employeeId:
+              data.user
+                .app_metadata
+                ?.employee_id,
+
+            barRole:
+              data.user
+                .app_metadata
+                ?.bar_role,
           }
         )
 
-      if (
-        signInError ||
-        !data.session ||
-        !data.user
-      ) {
-        setError(
-          'Email ou mot de passe incorrect.'
+        /*
+         * IMPORTANT :
+         * on vérifie immédiatement
+         * que la session est bien
+         * stockée sur l'appareil.
+         */
+        const {
+          data:
+            sessionCheck,
+        } =
+          await supabase.auth
+            .getSession()
+
+        if (
+          !sessionCheck
+            .session
+        ) {
+          setError(
+            'La session n’a pas pu être enregistrée sur cet appareil.'
+          )
+
+          setLoading(false)
+
+          return
+        }
+
+        if (
+          requisitionMode
+        ) {
+          window.location.replace(
+            '/requisition'
+          )
+
+          return
+        }
+
+        if (
+          barNukuMode
+        ) {
+          window.location.replace(
+            '/bar'
+          )
+
+          return
+        }
+
+        localStorage.setItem(
+          'nukustock_login_zone',
+          zone
         )
-        setLoading(false)
-        return
-      }
 
-      /*
-       * IMPORTANT :
-       * aucune lecture de profiles ici.
-       *
-       * La connexion Supabase est créée,
-       * puis AuthGate contrôle les droits
-       * sur la page protégée.
-       */
+        const destination =
+          zone ===
+          'Beverage'
+            ? '/inventory?scope=beverage'
 
-      if (requisitionMode) {
+            : zone ===
+              'Food'
+            ? '/inventory?scope=food'
+
+            : zone ===
+              'Matériel & Accessoires'
+            ? '/inventory?scope=equipment'
+
+            : '/'
+
         window.location.replace(
-          '/requisition'
+          destination
         )
-        return
-      }
-
-      /*
-       * BAR NUKU
-       *
-       * On arrive d'abord sur /bar.
-       * On ne force plus /planning-bar
-       * immédiatement après le login.
-       */
-      if (barNukuMode) {
-        window.location.replace(
-          '/bar'
-        )
-        return
-      }
-
-      /*
-       * NUKUSTOCK
-       */
-      localStorage.setItem(
-        'nukustock_login_zone',
-        zone
-      )
-
-      const destination =
-        zone === 'Beverage'
-          ? '/inventory?scope=beverage'
-          : zone === 'Food'
-          ? '/inventory?scope=food'
-          : zone ===
-            'Matériel & Accessoires'
-          ? '/inventory?scope=equipment'
-          : '/'
-
-      window.location.replace(
-        destination
-      )
-    } catch (caughtError) {
-      console.error(
-        'Erreur connexion:',
+      } catch (
         caughtError
-      )
+      ) {
+        console.error(
+          'Erreur connexion:',
+          caughtError
+        )
 
-      setError(
-        'La connexion a rencontré une erreur. Réessaie.'
-      )
+        setError(
+          'La connexion a rencontré une erreur. Réessaie.'
+        )
 
-      setLoading(false)
+        setLoading(false)
+      }
     }
-  }
 
   return (
     <main
       style={{
-        minHeight: '100vh',
-        display: 'grid',
-        placeItems: 'center',
-        padding: 24,
-        background: '#f4f6f9',
+        minHeight:
+          '100vh',
+
+        display:
+          'grid',
+
+        placeItems:
+          'center',
+
+        padding:
+          24,
+
+        background:
+          '#f4f6f9',
       }}
     >
       <section
         style={{
-          width: 'min(500px,100%)',
-          background: '#fff',
+          width:
+            'min(500px,100%)',
+
+          background:
+            '#fff',
+
           border:
             '1px solid #e5e7eb',
-          borderRadius: 22,
-          padding: 28,
+
+          borderRadius:
+            22,
+
+          padding:
+            28,
+
           boxShadow:
             '0 20px 60px rgba(16,24,40,.10)',
         }}
       >
         <div
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 14,
-            marginBottom: 24,
+            display:
+              'flex',
+
+            alignItems:
+              'center',
+
+            gap:
+              14,
+
+            marginBottom:
+              24,
           }}
         >
           <img
             src="/images/nukutepipi.jpg"
             alt="Nukutepipi"
             style={{
-              width: 76,
-              height: 58,
-              objectFit: 'contain',
-              borderRadius: 12,
+              width:
+                76,
+
+              height:
+                58,
+
+              objectFit:
+                'contain',
+
+              borderRadius:
+                12,
             }}
           />
 
           <div>
             <div
               style={{
-                fontSize: 10,
-                color: '#667085',
+                fontSize:
+                  10,
+
+                color:
+                  '#667085',
+
                 letterSpacing:
                   '.12em',
-                fontWeight: 800,
+
+                fontWeight:
+                  800,
               }}
             >
               NUKUTEPIPI
@@ -390,14 +542,19 @@ export default function LoginPage() {
 
             <h1
               style={{
-                margin: '2px 0 0',
-                fontSize: 22,
+                margin:
+                  '2px 0 0',
+
+                fontSize:
+                  22,
               }}
             >
               {requisitionMode
                 ? 'Requisition Nuku'
+
                 : barNukuMode
                 ? 'Bar Nuku'
+
                 : 'NukuStock'}
             </h1>
           </div>
@@ -414,14 +571,19 @@ export default function LoginPage() {
 
         <p
           style={{
-            margin: '6px 0 22px',
-            color: '#667085',
+            margin:
+              '6px 0 22px',
+
+            color:
+              '#667085',
           }}
         >
           {requisitionMode
             ? 'Créer et suivre vos réquisitions'
+
             : barNukuMode
             ? 'Accéder au portail de l’équipe Bar'
+
             : 'Accéder à NukuStock'}
         </p>
 
@@ -429,29 +591,51 @@ export default function LoginPage() {
           nukuStockMode) && (
           <div
             style={{
-              marginBottom: 18,
-              display: 'grid',
-              gap: 8,
+              marginBottom:
+                18,
+
+              display:
+                'grid',
+
+              gap:
+                8,
             }}
           >
             {appInstalled ? (
               <div
                 style={{
-                  minHeight: 46,
-                  padding: '0 14px',
-                  display: 'flex',
+                  minHeight:
+                    46,
+
+                  padding:
+                    '0 14px',
+
+                  display:
+                    'flex',
+
                   alignItems:
                     'center',
+
                   justifyContent:
                     'center',
+
                   border:
                     '1px solid #abefc6',
-                  borderRadius: 12,
+
+                  borderRadius:
+                    12,
+
                   background:
                     '#ecfdf3',
-                  color: '#067647',
-                  fontSize: 13,
-                  fontWeight: 800,
+
+                  color:
+                    '#067647',
+
+                  fontSize:
+                    13,
+
+                  fontWeight:
+                    800,
                 }}
               >
                 ✓ Application installée
@@ -459,21 +643,38 @@ export default function LoginPage() {
             ) : (
               <button
                 type="button"
-                onClick={installApp}
+                onClick={
+                  installApp
+                }
                 style={{
-                  minHeight: 48,
+                  minHeight:
+                    48,
+
                   border:
                     '1px solid #0b1220',
-                  borderRadius: 12,
-                  background: '#fff',
-                  color: '#0b1220',
-                  fontSize: 14,
-                  fontWeight: 900,
-                  cursor: 'pointer',
+
+                  borderRadius:
+                    12,
+
+                  background:
+                    '#fff',
+
+                  color:
+                    '#0b1220',
+
+                  fontSize:
+                    14,
+
+                  fontWeight:
+                    900,
+
+                  cursor:
+                    'pointer',
                 }}
               >
                 {requisitionMode
                   ? 'Télécharger l’app Réquisitions'
+
                   : 'Télécharger l’app NukuStock'}
               </button>
             )}
@@ -481,11 +682,17 @@ export default function LoginPage() {
             {installMessage && (
               <div
                 style={{
-                  color: '#667085',
-                  fontSize: 11,
+                  color:
+                    '#667085',
+
+                  fontSize:
+                    11,
+
                   textAlign:
                     'center',
-                  lineHeight: 1.4,
+
+                  lineHeight:
+                    1.4,
                 }}
               >
                 {installMessage}
@@ -499,14 +706,24 @@ export default function LoginPage() {
             style={{
               padding:
                 '12px 14px',
-              borderRadius: 12,
-              marginBottom: 16,
+
+              borderRadius:
+                12,
+
+              marginBottom:
+                16,
+
               background:
                 '#fff0f0',
+
               border:
                 '1px solid #fecaca',
-              color: '#b42318',
-              fontSize: 13,
+
+              color:
+                '#b42318',
+
+              fontSize:
+                13,
             }}
           >
             {error}
@@ -514,22 +731,37 @@ export default function LoginPage() {
         )}
 
         <form
-          onSubmit={submit}
+          onSubmit={
+            submit
+          }
           style={{
-            display: 'flex',
+            display:
+              'flex',
+
             flexDirection:
               'column',
-            gap: 16,
+
+            gap:
+              16,
           }}
         >
           <label>
             <span
               style={{
-                display: 'block',
-                fontSize: 12,
-                fontWeight: 700,
-                color: '#344054',
-                marginBottom: 7,
+                display:
+                  'block',
+
+                fontSize:
+                  12,
+
+                fontWeight:
+                  700,
+
+                color:
+                  '#344054',
+
+                marginBottom:
+                  7,
               }}
             >
               Adresse email
@@ -537,20 +769,35 @@ export default function LoginPage() {
 
             <input
               type="email"
-              value={email}
-              onChange={(e) =>
+              value={
+                email
+              }
+              onChange={(
+                event
+              ) =>
                 setEmail(
-                  e.target.value
+                  event
+                    .target
+                    .value
                 )
               }
               autoComplete="email"
               style={{
-                width: '100%',
-                minHeight: 46,
+                width:
+                  '100%',
+
+                minHeight:
+                  46,
+
                 border:
                   '1px solid #d0d5dd',
-                borderRadius: 12,
-                padding: '0 12px',
+
+                borderRadius:
+                  12,
+
+                padding:
+                  '0 12px',
+
                 boxSizing:
                   'border-box',
               }}
@@ -560,11 +807,20 @@ export default function LoginPage() {
           <label>
             <span
               style={{
-                display: 'block',
-                fontSize: 12,
-                fontWeight: 700,
-                color: '#344054',
-                marginBottom: 7,
+                display:
+                  'block',
+
+                fontSize:
+                  12,
+
+                fontWeight:
+                  700,
+
+                color:
+                  '#344054',
+
+                marginBottom:
+                  7,
               }}
             >
               Mot de passe
@@ -572,10 +828,14 @@ export default function LoginPage() {
 
             <div
               style={{
-                display: 'grid',
+                display:
+                  'grid',
+
                 gridTemplateColumns:
                   '1fr auto',
-                gap: 8,
+
+                gap:
+                  8,
               }}
             >
               <input
@@ -584,22 +844,38 @@ export default function LoginPage() {
                     ? 'text'
                     : 'password'
                 }
-                value={password}
-                onChange={(e) =>
+                value={
+                  password
+                }
+                onChange={(
+                  event
+                ) =>
                   setPassword(
-                    e.target.value
+                    event
+                      .target
+                      .value
                   )
                 }
                 autoComplete="current-password"
                 style={{
-                  width: '100%',
-                  minWidth: 0,
-                  minHeight: 46,
+                  width:
+                    '100%',
+
+                  minWidth:
+                    0,
+
+                  minHeight:
+                    46,
+
                   border:
                     '1px solid #d0d5dd',
-                  borderRadius: 12,
+
+                  borderRadius:
+                    12,
+
                   padding:
                     '0 12px',
+
                   boxSizing:
                     'border-box',
                 }}
@@ -609,19 +885,30 @@ export default function LoginPage() {
                 type="button"
                 onClick={() =>
                   setShowPassword(
-                    (value) =>
+                    (
+                      value
+                    ) =>
                       !value
                   )
                 }
                 style={{
                   border:
                     '1px solid #d0d5dd',
-                  borderRadius: 12,
+
+                  borderRadius:
+                    12,
+
                   padding:
                     '0 12px',
-                  background: '#fff',
-                  fontWeight: 700,
-                  cursor: 'pointer',
+
+                  background:
+                    '#fff',
+
+                  fontWeight:
+                    700,
+
+                  cursor:
+                    'pointer',
                 }}
               >
                 {showPassword
@@ -638,33 +925,56 @@ export default function LoginPage() {
                   style={{
                     display:
                       'block',
-                    fontSize: 12,
-                    fontWeight: 700,
+
+                    fontSize:
+                      12,
+
+                    fontWeight:
+                      700,
+
                     color:
                       '#344054',
-                    marginBottom: 7,
+
+                    marginBottom:
+                      7,
                   }}
                 >
                   Zone de travail
                 </span>
 
                 <select
-                  value={zone}
-                  onChange={(e) =>
+                  value={
+                    zone
+                  }
+                  onChange={(
+                    event
+                  ) =>
                     setZone(
-                      e.target
-                        .value as LoginZone
+                      event
+                        .target
+                        .value as
+                        LoginZone
                     )
                   }
                   style={{
-                    width: '100%',
-                    minHeight: 46,
+                    width:
+                      '100%',
+
+                    minHeight:
+                      46,
+
                     border:
                       '1px solid #d0d5dd',
-                    borderRadius: 12,
+
+                    borderRadius:
+                      12,
+
                     padding:
                       '0 12px',
-                    background: '#fff',
+
+                    background:
+                      '#fff',
+
                     color:
                       '#101828',
                   }}
@@ -690,18 +1000,33 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={
+              loading
+            }
             style={{
-              border: 0,
-              minHeight: 48,
-              borderRadius: 12,
-              background: '#0b1220',
-              color: '#fff',
-              fontWeight: 800,
+              border:
+                0,
+
+              minHeight:
+                48,
+
+              borderRadius:
+                12,
+
+              background:
+                '#0b1220',
+
+              color:
+                '#fff',
+
+              fontWeight:
+                800,
+
               cursor:
                 loading
                   ? 'wait'
                   : 'pointer',
+
               opacity:
                 loading
                   ? 0.8
@@ -718,18 +1043,29 @@ export default function LoginPage() {
           !barNukuMode && (
             <div
               style={{
-                marginTop: 20,
-                textAlign: 'center',
-                fontSize: 13,
-                color: '#667085',
+                marginTop:
+                  20,
+
+                textAlign:
+                  'center',
+
+                fontSize:
+                  13,
+
+                color:
+                  '#667085',
               }}
             >
               Pas encore de compte ?{' '}
+
               <Link
                 href="/register"
                 style={{
-                  color: '#2563eb',
-                  fontWeight: 800,
+                  color:
+                    '#2563eb',
+
+                  fontWeight:
+                    800,
                 }}
               >
                 Créer un compte

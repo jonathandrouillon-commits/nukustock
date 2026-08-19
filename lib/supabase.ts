@@ -4,10 +4,12 @@ import {
 } from '@supabase/supabase-js'
 
 const supabaseUrl =
-  process.env.NEXT_PUBLIC_SUPABASE_URL
+  process.env
+    .NEXT_PUBLIC_SUPABASE_URL
 
 const supabaseKey =
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+  process.env
+    .NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 
 if (!supabaseUrl) {
   throw new Error(
@@ -23,38 +25,39 @@ if (!supabaseKey) {
 
 const globalForSupabase =
   globalThis as unknown as {
-    nukustockSupabase?: SupabaseClient
+    nukustockSupabase?:
+      SupabaseClient
   }
 
 export const supabase =
-  globalForSupabase.nukustockSupabase ??
+  globalForSupabase
+    .nukustockSupabase ??
   createClient(
     supabaseUrl,
     supabaseKey,
     {
       auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true,
+        persistSession:
+          true,
 
-        /*
-         * LocalStorage :
-         * beaucoup plus fiable pour
-         * téléphone, tablette et PWA.
-         */
+        autoRefreshToken:
+          true,
+
+        detectSessionInUrl:
+          true,
+
         storage:
-          typeof window !== 'undefined'
+          typeof window !==
+          'undefined'
             ? window.localStorage
             : undefined,
 
-        /*
-         * Clé propre à Bar/NukuStock.
-         */
         storageKey:
           'nukustock-auth-session',
       },
     }
   )
 
-globalForSupabase.nukustockSupabase =
+globalForSupabase
+  .nukustockSupabase =
   supabase
