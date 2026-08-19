@@ -552,12 +552,10 @@ export default function ProductSheetsPage() {
                       }
                     >
                       <div className="thumb">
-                        {product.photoUrl ||
-                        product.photo_url ? (
+                        {product.photo ? (
                           <img
                             src={
-                              product.photoUrl ||
-                              product.photo_url
+                              product.photo
                             }
                             alt={
                               product.name
@@ -608,12 +606,10 @@ export default function ProductSheetsPage() {
               <div className="detail">
                 <div className="hero">
                   <div className="heroPhoto">
-                    {selectedProduct.photoUrl ||
-                    selectedProduct.photo_url ? (
+                    {selectedProduct.photo ? (
                       <img
                         src={
-                          selectedProduct.photoUrl ||
-                          selectedProduct.photo_url
+                          selectedProduct.photo
                         }
                         alt={
                           selectedProduct.name
