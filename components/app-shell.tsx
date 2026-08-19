@@ -120,6 +120,7 @@ const navGroups: NavGroup[] = [
     items: [
       { href: '/bar', label: 'Traitement Réquisitions', icon: '☷' },
       { href: '/planning-bar', label: 'Planning', icon: '▦' },
+      { href: '/cocktails-guy', label: 'Cocktails Guy', icon: '◉' },
       { href: '/checklist-setup', label: 'Check List & Set Up', icon: '☑' },
     ],
   },
