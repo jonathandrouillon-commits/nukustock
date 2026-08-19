@@ -4,12 +4,10 @@ import {
 } from '@supabase/supabase-js'
 
 const supabaseUrl =
-  process.env
-    .NEXT_PUBLIC_SUPABASE_URL
+  process.env.NEXT_PUBLIC_SUPABASE_URL
 
 const supabaseKey =
-  process.env
-    .NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 
 if (!supabaseUrl) {
   throw new Error(
@@ -23,56 +21,56 @@ if (!supabaseKey) {
   )
 }
 
-/*
- * Singleton global.
- *
- * Très important :
- * toute l'application utilise exactement
- * le même client Supabase.
- */
+const isBrowser =
+  typeof window !== 'undefined'
+
+const isBarNuku =
+  isBrowser &&
+  window.location.hostname
+    .toLowerCase() ===
+    'barnuku.fenuaprobartender.com'
+
+const authStorage =
+  isBrowser
+    ? isBarNuku
+      ? window.sessionStorage
+      : window.localStorage
+    : undefined
+
 const globalForSupabase =
   globalThis as unknown as {
-    nukustockSupabase?:
-      SupabaseClient
+    nukustockSupabase?: SupabaseClient
   }
 
 export const supabase =
-  globalForSupabase
-    .nukustockSupabase ??
+  globalForSupabase.nukustockSupabase ??
   createClient(
     supabaseUrl,
     supabaseKey,
     {
       auth: {
-        /*
-         * Conserve la connexion
-         * dans le navigateur.
-         */
-        persistSession:
-          true,
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
 
         /*
-         * Renouvelle automatiquement
-         * le token.
+         * BAR NUKU :
+         * sessionStorage = session propre
+         * à chaque onglet.
+         *
+         * NUKUSTOCK :
+         * localStorage classique.
          */
-        autoRefreshToken:
-          true,
-
-        /*
-         * Permet à Supabase de traiter
-         * les informations Auth présentes
-         * dans l'URL lorsque nécessaire.
-         */
-        detectSessionInUrl:
-          true,
+        ...(authStorage
+          ? {
+              storage:
+                authStorage,
+            }
+          : {}),
       },
     }
   )
 
-/*
- * On conserve le singleton aussi
- * en production.
- */
 globalForSupabase
   .nukustockSupabase =
   supabase
