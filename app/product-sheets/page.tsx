@@ -10,6 +10,9 @@ import {
 import { Card, Page } from '@/components/ui'
 import { supabase } from '@/lib/supabase'
 import { useProducts } from '@/lib/store'
+import * as XLSX from 'xlsx'
+import { jsPDF } from 'jspdf'
+import { autoTable } from 'jspdf-autotable'
 
 type ProductSheet = {
   product_id: string
@@ -769,146 +772,288 @@ export default function ProductSheetsPage() {
       )
     }
 
-  const exportSheets =
+  const buildExportRows =
     () => {
-      const exportedSheets =
-        products
-          .map(
-            (product: any) => {
-              const sheet =
-                sheets[
-                  product.id
-                ]
+      return products
+        .map(
+          (product: any) => {
+            const sheet =
+              sheets[
+                product.id
+              ]
 
-              if (!sheet) {
-                return null
-              }
-
-              return {
-                ui_product_id:
-                  product.id,
-
-                db_product_id:
-                  productDbIds[
-                    product.id
-                  ] ||
-                  sheet.product_id,
-
-                internal_reference:
-                  product.internalRef ||
-                  product.internal_reference ||
-                  '',
-
-                name:
-                  product.name ||
-                  '',
-
-                category:
-                  product.category ||
-                  '',
-
-                subcategory:
-                  product.subcategory ||
-                  '',
-
-                description:
-                  sheet.description ||
-                  '',
-
-                history:
-                  sheet.history ||
-                  '',
-
-                production_method:
-                  sheet.production_method ||
-                  '',
-
-                aromatic_profile:
-                  sheet.aromatic_profile ||
-                  '',
-
-                anecdote:
-                  sheet.anecdote ||
-                  '',
-
-                service_notes:
-                  sheet.service_notes ||
-                  '',
-
-                updated_at:
-                  sheet.updated_at ||
-                  null,
-              }
+            if (!sheet) {
+              return null
             }
-          )
-          .filter(Boolean)
 
-      const payload = {
-        app:
-          'NukuStock',
+            return {
+              Référence:
+                product.internalRef ||
+                product.internal_reference ||
+                '',
 
-        module:
-          'bar_product_sheets',
+              Produit:
+                product.name ||
+                '',
 
-        version:
-          1,
+              Catégorie:
+                product.category ||
+                '',
 
-        exported_at:
-          new Date()
-            .toISOString(),
+              'Sous-catégorie':
+                product.subcategory ||
+                '',
 
-        count:
-          exportedSheets.length,
+              Descriptif:
+                sheet.description ||
+                'R.A.S',
 
-        sheets:
-          exportedSheets,
-      }
+              'Profil aromatique':
+                sheet.aromatic_profile ||
+                'R.A.S',
 
-      const blob =
-        new Blob(
-          [
-            JSON.stringify(
-              payload,
-              null,
-              2
-            ),
-          ],
-          {
-            type:
-              'application/json;charset=utf-8',
+              Histoire:
+                sheet.history ||
+                'R.A.S',
+
+              'Méthode de fabrication':
+                sheet.production_method ||
+                'R.A.S',
+
+              Anecdote:
+                sheet.anecdote ||
+                'R.A.S',
+            }
           }
         )
+        .filter(Boolean) as Array<
+          Record<
+            string,
+            string
+          >
+        >
+    }
 
-      const url =
-        URL.createObjectURL(
-          blob
+  const exportSheetsXlsx =
+    () => {
+      const rows =
+        buildExportRows()
+
+      if (!rows.length) {
+        setError(
+          'Aucune fiche produit à exporter.'
+        )
+        return
+      }
+
+      const worksheet =
+        XLSX.utils.json_to_sheet(
+          rows
         )
 
-      const anchor =
-        document.createElement(
-          'a'
-        )
+      worksheet[
+        '!cols'
+      ] = [
+        { wch: 16 },
+        { wch: 42 },
+        { wch: 18 },
+        { wch: 22 },
+        { wch: 65 },
+        { wch: 55 },
+        { wch: 65 },
+        { wch: 65 },
+        { wch: 60 },
+      ]
 
-      anchor.href =
-        url
+      const workbook =
+        XLSX.utils.book_new()
 
-      anchor.download =
+      XLSX.utils.book_append_sheet(
+        workbook,
+        worksheet,
+        'Fiches Produits'
+      )
+
+      XLSX.writeFile(
+        workbook,
         `Bar-Team-Fiches-Produits-${new Date()
           .toISOString()
-          .slice(0, 10)}.json`
-
-      anchor.click()
-
-      URL.revokeObjectURL(
-        url
+          .slice(0, 10)}.xlsx`
       )
 
       setMessage(
-        `${exportedSheets.length} fiche(s) exportée(s).`
+        `${rows.length} fiche(s) exportée(s) en XLSX.`
       )
     }
 
-  const importSheets =
+  const exportSheetsPdf =
+    () => {
+      const rows =
+        buildExportRows()
+
+      if (!rows.length) {
+        setError(
+          'Aucune fiche produit à exporter.'
+        )
+        return
+      }
+
+      const doc =
+        new jsPDF({
+          orientation:
+            'landscape',
+          unit:
+            'mm',
+          format:
+            'a4',
+        })
+
+      doc.setFontSize(16)
+      doc.text(
+        'NUKUTEPIPI — FICHES PRODUITS BAR TEAM',
+        14,
+        14
+      )
+
+      doc.setFontSize(9)
+      doc.text(
+        `Export du ${new Date().toLocaleDateString(
+          'fr-FR'
+        )} — ${rows.length} fiche(s)`,
+        14,
+        20
+      )
+
+      autoTable(doc, {
+        startY: 25,
+
+        head: [[
+          'Réf.',
+          'Produit',
+          'Catégorie',
+          'Descriptif',
+          'Profil aromatique',
+          'Histoire',
+          'Méthode',
+          'Anecdote',
+        ]],
+
+        body:
+          rows.map(
+            (row) => [
+              row['Référence'] ||
+                '',
+              row['Produit'] ||
+                '',
+              [
+                row['Catégorie'],
+                row[
+                  'Sous-catégorie'
+                ],
+              ]
+                .filter(Boolean)
+                .join(' / '),
+              row['Descriptif'] ||
+                'R.A.S',
+              row[
+                'Profil aromatique'
+              ] ||
+                'R.A.S',
+              row['Histoire'] ||
+                'R.A.S',
+              row[
+                'Méthode de fabrication'
+              ] ||
+                'R.A.S',
+              row['Anecdote'] ||
+                'R.A.S',
+            ]
+          ),
+
+        styles: {
+          fontSize: 5.6,
+          cellPadding: 1.5,
+          overflow:
+            'linebreak',
+          valign:
+            'top',
+        },
+
+        headStyles: {
+          fontSize: 6,
+          fontStyle:
+            'bold',
+        },
+
+        columnStyles: {
+          0: {
+            cellWidth: 16,
+          },
+
+          1: {
+            cellWidth: 34,
+          },
+
+          2: {
+            cellWidth: 26,
+          },
+
+          3: {
+            cellWidth: 42,
+          },
+
+          4: {
+            cellWidth: 38,
+          },
+
+          5: {
+            cellWidth: 42,
+          },
+
+          6: {
+            cellWidth: 42,
+          },
+
+          7: {
+            cellWidth: 42,
+          },
+        },
+
+        margin: {
+          left: 8,
+          right: 8,
+          bottom: 10,
+        },
+
+        didDrawPage: (
+          data
+        ) => {
+          const pageNumber =
+            doc.getNumberOfPages()
+
+          doc.setFontSize(7)
+
+          doc.text(
+            `NukuStock / Bar Team — page ${pageNumber}`,
+            14,
+            doc.internal.pageSize.height -
+              5
+          )
+        },
+      })
+
+      doc.save(
+        `Bar-Team-Fiches-Produits-${new Date()
+          .toISOString()
+          .slice(0, 10)}.pdf`
+      )
+
+      setMessage(
+        `${rows.length} fiche(s) exportée(s) en PDF.`
+      )
+    }
+
+  const importSheetsXlsx =
     async (
       event:
         React.ChangeEvent<HTMLInputElement>
@@ -931,28 +1076,49 @@ export default function ProductSheetsPage() {
       setMessage('')
 
       try {
-        const raw =
-          await file.text()
+        const buffer =
+          await file.arrayBuffer()
 
-        const parsed =
-          JSON.parse(
-            raw
+        const workbook =
+          XLSX.read(
+            buffer,
+            {
+              type:
+                'array',
+            }
           )
+
+        const sheetName =
+          workbook.SheetNames[0]
+
+        if (!sheetName) {
+          throw new Error(
+            'Le fichier Excel ne contient aucune feuille.'
+          )
+        }
+
+        const worksheet =
+          workbook.Sheets[
+            sheetName
+          ]
 
         const rows =
-          Array.isArray(
-            parsed
+          XLSX.utils.sheet_to_json<
+            Record<
+              string,
+              unknown
+            >
+          >(
+            worksheet,
+            {
+              defval:
+                '',
+            }
           )
-            ? parsed
-            : Array.isArray(
-                parsed?.sheets
-              )
-            ? parsed.sheets
-            : []
 
         if (!rows.length) {
           throw new Error(
-            'Aucune fiche produit trouvée dans ce fichier.'
+            'Aucune fiche produit trouvée dans le fichier Excel.'
           )
         }
 
@@ -1013,16 +1179,27 @@ export default function ProductSheetsPage() {
         ) {
           const ref =
             String(
-              row.internal_reference ||
-              row.internalRef ||
+              row['Référence'] ||
+              row[
+                'Reference'
+              ] ||
+              row[
+                'reference'
+              ] ||
+              row[
+                'internal_reference'
+              ] ||
               ''
             )
               .trim()
               .toLowerCase()
 
-          const rowName =
+          const productName =
             normalize(
-              row.name
+              row['Produit'] ||
+              row['Nom'] ||
+              row['name'] ||
+              ''
             )
 
           const matchedProduct =
@@ -1034,16 +1211,11 @@ export default function ProductSheetsPage() {
                 : null
             ) ||
             (
-              rowName
+              productName
                 ? productByName.get(
-                    rowName
+                    productName
                   )
                 : null
-            ) ||
-            products.find(
-              (product: any) =>
-                product.id ===
-                row.ui_product_id
             )
 
           if (!matchedProduct) {
@@ -1053,55 +1225,81 @@ export default function ProductSheetsPage() {
           const dbProductId =
             productDbIds[
               matchedProduct.id
-            ] ||
-            row.db_product_id ||
-            row.product_id
+            ]
 
           if (!dbProductId) {
             continue
           }
 
+          const readText = (
+            ...keys: string[]
+          ) => {
+            for (
+              const key
+              of keys
+            ) {
+              const value =
+                row[key]
+
+              if (
+                value !==
+                  undefined &&
+                value !==
+                  null &&
+                String(
+                  value
+                ).trim()
+              ) {
+                return String(
+                  value
+                ).trim()
+              }
+            }
+
+            return 'R.A.S'
+          }
+
           payloads.push({
             product_id:
-              String(
-                dbProductId
-              ),
+              dbProductId,
 
             description:
-              String(
-                row.description ||
-                ''
-              ),
-
-            history:
-              String(
-                row.history ||
-                ''
-              ),
-
-            production_method:
-              String(
-                row.production_method ||
-                ''
+              readText(
+                'Descriptif',
+                'Description',
+                'description'
               ),
 
             aromatic_profile:
-              String(
-                row.aromatic_profile ||
-                ''
+              readText(
+                'Profil aromatique',
+                'Profil Aromatique',
+                'aromatic_profile'
+              ),
+
+            history:
+              readText(
+                'Histoire',
+                'History',
+                'history'
+              ),
+
+            production_method:
+              readText(
+                'Méthode de fabrication',
+                'Methode de fabrication',
+                'Production Method',
+                'production_method'
               ),
 
             anecdote:
-              String(
-                row.anecdote ||
-                ''
+              readText(
+                'Anecdote',
+                'anecdote'
               ),
 
             service_notes:
-              String(
-                row.service_notes ||
-                ''
-              ),
+              '',
 
             updated_at:
               new Date()
@@ -1117,7 +1315,7 @@ export default function ProductSheetsPage() {
           !payloads.length
         ) {
           throw new Error(
-            'Aucune fiche du fichier ne correspond aux produits NukuStock actuels.'
+            'Aucune ligne Excel ne correspond aux références ou noms présents dans NukuStock.'
           )
         }
 
@@ -1171,26 +1369,25 @@ export default function ProductSheetsPage() {
 
             description:
               row.description ||
-              '',
+              'R.A.S',
 
             history:
               row.history ||
-              '',
+              'R.A.S',
 
             production_method:
               row.production_method ||
-              '',
+              'R.A.S',
 
             aromatic_profile:
               row.aromatic_profile ||
-              '',
+              'R.A.S',
 
             anecdote:
               row.anecdote ||
-              '',
+              'R.A.S',
 
             service_notes:
-              row.service_notes ||
               '',
 
             updated_at:
@@ -1203,7 +1400,7 @@ export default function ProductSheetsPage() {
         )
 
         setMessage(
-          `${payloads.length} fiche(s) importée(s) / mise(s) à jour.`
+          `${payloads.length} fiche(s) importée(s) / mise(s) à jour depuis Excel.`
         )
       } catch (
         importFailure
@@ -1212,7 +1409,7 @@ export default function ProductSheetsPage() {
           importFailure instanceof
             Error
             ? importFailure.message
-            : 'Erreur pendant l’import.'
+            : 'Erreur pendant l’import Excel.'
         )
       } finally {
         setImporting(false)
@@ -1229,13 +1426,13 @@ export default function ProductSheetsPage() {
           importInputRef
         }
         type="file"
-        accept=".json,application/json"
+        accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
         style={{
           display:
             'none',
         }}
         onChange={
-          importSheets
+          importSheetsXlsx
         }
       />
 
@@ -1287,8 +1484,8 @@ export default function ProductSheetsPage() {
                   }
                 >
                   {importing
-                    ? 'Import…'
-                    : 'Importer'}
+                    ? 'Import XLS…'
+                    : 'Importer XLS'}
                 </button>
               </>
             )}
@@ -1297,10 +1494,20 @@ export default function ProductSheetsPage() {
               type="button"
               className="toolbarButton"
               onClick={
-                exportSheets
+                exportSheetsXlsx
               }
             >
-              Exporter
+              Exporter XLS
+            </button>
+
+            <button
+              type="button"
+              className="toolbarButton"
+              onClick={
+                exportSheetsPdf
+              }
+            >
+              Exporter PDF
             </button>
           </div>
 
