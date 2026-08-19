@@ -31,6 +31,8 @@ type Cocktail = {
   specialComment: string
   photoDataUrl: string
   sortOrder: number
+  createdBy: string
+  createdByName: string
   createdAt?: string
   updatedAt?: string
 }
@@ -146,6 +148,10 @@ function mapRow(
     sortOrder:
       Number(row.sort_order) ||
       0,
+    createdBy:
+      row.created_by || '',
+    createdByName:
+      row.created_by_name || '',
     createdAt:
       row.created_at,
     updatedAt:
@@ -174,6 +180,8 @@ function emptyCocktail():
     specialComment: '',
     photoDataUrl: '',
     sortOrder: 100,
+    createdBy: '',
+    createdByName: '',
   }
 }
 
@@ -255,6 +263,18 @@ export default function CocktailsGuyPage() {
     useState<BarRole>(null)
 
   const [
+    currentUserId,
+    setCurrentUserId,
+  ] =
+    useState('')
+
+  const [
+    currentUserName,
+    setCurrentUserName,
+  ] =
+    useState('')
+
+  const [
     loading,
     setLoading,
   ] =
@@ -317,10 +337,25 @@ export default function CocktailsGuyPage() {
       null
     )
 
-  const canManage =
+  const isManager =
     role === 'manager_admin' ||
     role ===
       'assistant_manager'
+
+  const canCreate =
+    role === 'manager_admin' ||
+    role === 'assistant_manager' ||
+    role === 'staff'
+
+  const canEditCocktail = (
+    cocktail: Cocktail
+  ) =>
+    isManager ||
+    (
+      Boolean(currentUserId) &&
+      cocktail.createdBy ===
+        currentUserId
+    )
 
   const productOptions =
     useMemo(() => {
@@ -363,15 +398,37 @@ export default function CocktailsGuyPage() {
 
   const loadRole =
     async () => {
-      const { data } =
-        await supabase.auth.getUser()
+      // Lecture locale de la session :
+      // pas de requête Auth supplémentaire à chaque sauvegarde/rendu.
+      const {
+        data: { session },
+      } =
+        await supabase.auth.getSession()
 
       const raw =
         String(
-          data.user
+          session?.user
             ?.app_metadata
             ?.bar_role || ''
         )
+
+      setCurrentUserId(
+        session?.user?.id || ''
+      )
+
+      setCurrentUserName(
+        String(
+          session?.user
+            ?.app_metadata
+            ?.employee_name ||
+          session?.user
+            ?.user_metadata
+            ?.full_name ||
+          session?.user
+            ?.email ||
+          ''
+        )
+      )
 
       setRole(
         raw ===
@@ -488,7 +545,7 @@ export default function CocktailsGuyPage() {
     ])
 
   const openCreate = () => {
-    if (!canManage) {
+    if (!canCreate) {
       return
     }
 
@@ -508,7 +565,11 @@ export default function CocktailsGuyPage() {
   const openEdit = (
     cocktail: Cocktail
   ) => {
-    if (!canManage) {
+    if (
+      !canEditCocktail(
+        cocktail
+      )
+    ) {
       return
     }
 
@@ -703,7 +764,17 @@ export default function CocktailsGuyPage() {
 
   const save =
     async () => {
-      if (!canManage) {
+      if (!canCreate) {
+        return
+      }
+
+      if (
+        form.id &&
+        !canEditCocktail(form)
+      ) {
+        setError(
+          'Tu ne peux modifier que les cocktails que tu as créés.'
+        )
         return
       }
 
@@ -766,6 +837,14 @@ export default function CocktailsGuyPage() {
           new Date().toISOString(),
       }
 
+      const createPayload = {
+        ...payload,
+        created_by:
+          currentUserId,
+        created_by_name:
+          currentUserName,
+      }
+
       const operation =
         form.id
           ? supabase
@@ -781,7 +860,9 @@ export default function CocktailsGuyPage() {
               .from(
                 'bar_cocktails_guy'
               )
-              .insert(payload)
+              .insert(
+                createPayload
+              )
 
       const {
         error: saveError,
@@ -810,7 +891,11 @@ export default function CocktailsGuyPage() {
     async (
       cocktail: Cocktail
     ) => {
-      if (!canManage) {
+      if (
+        !canEditCocktail(
+          cocktail
+        )
+      ) {
         return
       }
 
@@ -856,7 +941,7 @@ export default function CocktailsGuyPage() {
       title="Cocktails Guy"
       subtitle="Fiches techniques de référence · Bar Team"
       action={
-        canManage ? (
+        canCreate ? (
           <button
             type="button"
             className="primaryButton"
@@ -898,7 +983,7 @@ export default function CocktailsGuyPage() {
 
         {role === 'staff' && (
           <div className="info">
-            Lecture seule — modification réservée au Manager et à l&apos;Assistante Manager.
+            Tu peux créer tes propres cocktails. Tu peux modifier ou supprimer uniquement ceux que tu as créés. Les recettes officielles et celles des autres barmans sont en lecture seule.
           </div>
         )}
 
@@ -1050,6 +1135,12 @@ export default function CocktailsGuyPage() {
             )}
 
             <div className="detailBody">
+              {detail.createdByName && (
+                <div className="ownerLine">
+                  Créé par <strong>{detail.createdByName}</strong>
+                </div>
+              )}
+
               <section>
                 <h3>
                   Ingrédients
@@ -1144,7 +1235,9 @@ export default function CocktailsGuyPage() {
               )}
             </div>
 
-            {canManage && (
+            {canEditCocktail(
+              detail
+            ) && (
               <div className="actions">
                 <button
                   type="button"
@@ -1180,7 +1273,7 @@ export default function CocktailsGuyPage() {
       )}
 
       {editorOpen &&
-        canManage && (
+        canCreate && (
           <div className="overlay">
             <div className="editor">
               <div className="head">
@@ -1959,6 +2052,15 @@ export default function CocktailsGuyPage() {
 
         .meta strong {
           font-size:11px;
+        }
+
+        .ownerLine {
+          padding:8px 10px;
+          border:1px solid #eaecf0;
+          border-radius:9px;
+          background:#f9fafb;
+          color:#667085;
+          font-size:10px;
         }
 
         .textBlock {

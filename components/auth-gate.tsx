@@ -285,12 +285,20 @@ export default function AuthGate({
       },
     } =
       supabase.auth.onAuthStateChange(
-        (_event, session) => {
+        (event, session) => {
           if (!active) {
             return
           }
 
-          if (!session) {
+          /*
+           * Ne jamais déconnecter l'utilisateur sur un événement
+           * transitoire de rafraîchissement de session.
+           * Le retour au login n'est déclenché que par une vraie
+           * déconnexion explicite.
+           */
+          if (
+            event === 'SIGNED_OUT'
+          ) {
             setAuthenticated(false)
             setProfile(null)
 
@@ -299,10 +307,20 @@ export default function AuthGate({
                 '/login'
               )
             }
+
+            return
           }
 
-          // Ne pas lancer de requête Supabase
-          // asynchrone directement dans ce callback.
+          if (
+            session?.user &&
+            (
+              event === 'SIGNED_IN' ||
+              event === 'TOKEN_REFRESHED' ||
+              event === 'USER_UPDATED'
+            )
+          ) {
+            setAuthenticated(true)
+          }
         }
       )
 

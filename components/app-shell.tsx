@@ -349,15 +349,20 @@ export function AppShell({
   useEffect(() => {
     let active = true
 
-    const loadBarAccessRole = async () => {
-      const { data } =
-        await supabase.auth.getUser()
-
+    const applyRole = (
+      session:
+        Awaited<
+          ReturnType<
+            typeof supabase.auth.getSession
+          >
+        >['data']['session']
+    ) => {
       if (!active) return
 
       const rawRole =
         String(
-          data.user?.app_metadata
+          session?.user
+            ?.app_metadata
             ?.bar_role || ''
         )
 
@@ -370,14 +375,24 @@ export function AppShell({
       )
     }
 
-    void loadBarAccessRole()
+    const loadLocalSession =
+      async () => {
+        const {
+          data: { session },
+        } =
+          await supabase.auth.getSession()
+
+        applyRole(session)
+      }
+
+    void loadLocalSession()
 
     const { data: authListener } =
       supabase.auth.onAuthStateChange(
-        () => {
-          window.setTimeout(() => {
-            void loadBarAccessRole()
-          }, 0)
+        (_event, session) => {
+          // Utilise directement la session fournie par Supabase.
+          // Aucun getUser() supplémentaire.
+          applyRole(session)
         }
       )
 
