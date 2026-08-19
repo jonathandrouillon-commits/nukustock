@@ -9,6 +9,10 @@ import {
 } from 'react'
 
 import {
+  useRouter,
+} from 'next/navigation'
+
+import {
   supabase,
 } from '@/lib/supabase'
 
@@ -68,6 +72,9 @@ function isBarNukuHost() {
 }
 
 export default function LoginPage() {
+  const router =
+    useRouter()
+
   const [
     email,
     setEmail,
@@ -143,17 +150,6 @@ export default function LoginPage() {
 
     const barPortal =
       isBarNukuHost()
-
-    console.log(
-      'LOGIN HOST',
-      {
-        host:
-          currentHost(),
-        requisition,
-        backOffice,
-        barPortal,
-      }
-    )
 
     setRequisitionMode(
       requisition
@@ -327,11 +323,6 @@ export default function LoginPage() {
           !data.session ||
           !data.user
         ) {
-          console.error(
-            'LOGIN ERROR',
-            signInError
-          )
-
           setError(
             'Email ou mot de passe incorrect.'
           )
@@ -341,44 +332,22 @@ export default function LoginPage() {
           return
         }
 
-        console.log(
-          'LOGIN SUCCESS',
-          {
-            email:
-              data.user
-                .email,
-
-            host:
-              currentHost(),
-
-            employeeId:
-              data.user
-                .app_metadata
-                ?.employee_id,
-
-            barRole:
-              data.user
-                .app_metadata
-                ?.bar_role,
-          }
-        )
-
         /*
-         * IMPORTANT :
-         * on vérifie immédiatement
-         * que la session est bien
-         * stockée sur l'appareil.
+         * Vérification immédiate
+         * de la session stockée.
          */
         const {
           data:
-            sessionCheck,
+            sessionData,
+          error:
+            sessionError,
         } =
           await supabase.auth
             .getSession()
 
         if (
-          !sessionCheck
-            .session
+          sessionError ||
+          !sessionData.session
         ) {
           setError(
             'La session n’a pas pu être enregistrée sur cet appareil.'
@@ -389,26 +358,43 @@ export default function LoginPage() {
           return
         }
 
+        /*
+         * RÉQUISITION
+         */
         if (
           requisitionMode
         ) {
-          window.location.replace(
+          router.replace(
             '/requisition'
           )
 
+          router.refresh()
+
           return
         }
 
+        /*
+         * BAR NUKU
+         *
+         * Pas de window.location.replace().
+         * On garde l'application chargée
+         * et la session Supabase active.
+         */
         if (
           barNukuMode
         ) {
-          window.location.replace(
+          router.replace(
             '/bar'
           )
+
+          router.refresh()
 
           return
         }
 
+        /*
+         * NUKUSTOCK
+         */
         localStorage.setItem(
           'nukustock_login_zone',
           zone
@@ -429,9 +415,11 @@ export default function LoginPage() {
 
             : '/'
 
-        window.location.replace(
+        router.replace(
           destination
         )
+
+        router.refresh()
       } catch (
         caughtError
       ) {
@@ -562,8 +550,11 @@ export default function LoginPage() {
 
         <h2
           style={{
-            margin: 0,
-            fontSize: 28,
+            margin:
+              0,
+
+            fontSize:
+              28,
           }}
         >
           Connexion
