@@ -38,31 +38,11 @@ type NavGroup = {
 const VIEW_MODE_KEY = 'nukustock_view_mode'
 const BAR_NUKU_HOST = 'barnuku.fenuaprobartender.com'
 
-const barNukuNavItems: NavItem[] = [
-  { href: '/bar', label: 'Accueil Bar', icon: '◉' },
-  { href: '/planning-bar', label: 'Planning', icon: '▦' },
-  { href: '/checklist-setup', label: 'Check List & Set Up', icon: '☑' },
-]
-
-const BAR_NUKU_ALLOWED_ROUTES = [
-  '/bar',
-  '/planning-bar',
-  '/checklist-setup',
-  '/login',
-  '/forgot-password',
-  '/update-password',
-]
-
-function isBarNukuPathAllowed(pathname: string) {
-  return BAR_NUKU_ALLOWED_ROUTES.some(
-    (href) => pathname === href || pathname.startsWith(`${href}/`)
-  )
-}
-
 const navItems: NavItem[] = [
   { href: '/', label: 'Dashboard', icon: '⌂' },
   { href: '/scan', label: 'Scan QR', icon: '⌗' },
   { href: '/products', label: 'Produits', icon: '▣' },
+  { href: '/equipment-glassware', label: 'Matériel & Verrerie', icon: '▦' },
   { href: '/product-images', label: 'Photos produits', icon: '▧' },
   { href: '/stocks', label: 'Stocks', icon: '▤' },
   { href: '/stock-entry', label: 'Entrée rapide', icon: '＋' },
@@ -87,6 +67,7 @@ const navGroups: NavGroup[] = [
     icon: '▣',
     items: [
       { href: '/products', label: 'Produits', icon: '▣' },
+      { href: '/equipment-glassware', label: 'Matériel & Verrerie', icon: '▦' },
       { href: '/product-images', label: 'Photos produits', icon: '▧' },
       { href: '/labels', label: 'Étiquettes', icon: '▦' },
     ],
@@ -122,6 +103,32 @@ const navGroups: NavGroup[] = [
     ],
   },
 ]
+
+const barTeamGroup =
+  navGroups.find(
+    (group) => group.label === 'BAR TEAM'
+  )
+
+const barTeamItems =
+  barTeamGroup?.items || []
+
+const BAR_NUKU_ALLOWED_ROUTES = [
+  '/bar',
+  ...barTeamItems.map((item) => item.href),
+  '/login',
+  '/forgot-password',
+  '/update-password',
+]
+
+function isBarNukuPathAllowed(
+  pathname: string
+) {
+  return BAR_NUKU_ALLOWED_ROUTES.some(
+    (href) =>
+      pathname === href ||
+      pathname.startsWith(`${href}/`)
+  )
+}
 
 const mobileQuickLinks = [
   '/',
@@ -621,18 +628,83 @@ export function AppShell({
         <nav className="nskSidebarNav">
           {isBarNuku ? (
             <>
-              {barNukuNavItems.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={isActive(pathname, item.href) ? 'active' : ''}
+              <Link
+                href="/bar"
+                className={
+                  isActive(pathname, '/bar')
+                    ? 'active'
+                    : ''
+                }
+              >
+                <span
+                  className="nskSidebarIcon"
+                  aria-hidden="true"
                 >
-                  <span className="nskSidebarIcon" aria-hidden="true">
-                    {item.icon}
+                  ◉
+                </span>
+                <span>Accueil Bar</span>
+              </Link>
+
+              <div className="nskNavGroup">
+                <button
+                  type="button"
+                  className={`nskNavGroupButton ${
+                    barTeamItems.some((item) =>
+                      isActive(pathname, item.href)
+                    )
+                      ? 'activeGroup'
+                      : ''
+                  }`}
+                  onClick={() =>
+                    toggleGroup('BAR TEAM')
+                  }
+                  aria-expanded={
+                    openGroups['BAR TEAM'] ?? true
+                  }
+                >
+                  <span
+                    className="nskSidebarIcon"
+                    aria-hidden="true"
+                  >
+                    ♟
                   </span>
-                  <span>{item.label}</span>
-                </Link>
-              ))}
+                  <span className="nskNavGroupLabel">
+                    BAR TEAM
+                  </span>
+                  <span
+                    className="nskNavChevron"
+                    aria-hidden="true"
+                  >
+                    {(openGroups['BAR TEAM'] ?? true)
+                      ? '⌄'
+                      : '›'}
+                  </span>
+                </button>
+
+                {(openGroups['BAR TEAM'] ?? true) && (
+                  <div className="nskNavGroupItems">
+                    {barTeamItems.map((item) => (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        className={
+                          isActive(pathname, item.href)
+                            ? 'active'
+                            : ''
+                        }
+                      >
+                        <span
+                          className="nskSidebarIcon"
+                          aria-hidden="true"
+                        >
+                          {item.icon}
+                        </span>
+                        <span>{item.label}</span>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
             </>
           ) : (
             <>
@@ -953,7 +1025,14 @@ export function AppShell({
 
       <nav className={`nskMobileNav ${isBarNuku ? 'nskBarMobileNav' : ''}`}>
         {(isBarNuku
-          ? barNukuNavItems
+          ? [
+              {
+                href: '/bar',
+                label: 'Accueil',
+                icon: '◉',
+              },
+              ...barTeamItems,
+            ]
           : navItems.filter((item) =>
               mobileQuickLinks.includes(item.href)
             )

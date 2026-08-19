@@ -173,19 +173,7 @@ export default function AuthGate({
         })
 
         if (isPublicRoute) {
-          router.replace(
-            '/planning-bar'
-          )
-        } else if (
-          pathname !==
-            '/planning-bar' &&
-          !pathname.startsWith(
-            '/planning-bar/'
-          )
-        ) {
-          router.replace(
-            '/planning-bar'
-          )
+          router.replace('/bar')
         }
 
         setChecking(false)
@@ -356,13 +344,12 @@ export default function AuthGate({
     return null
   }
 
-  if (
-    requisitionHost ||
-    barNukuHost
-  ) {
+  if (requisitionHost) {
     return <>{children}</>
   }
 
+  // BarNuku conserve AppShell :
+  // menu BAR TEAM + barre utilisateur + déconnexion.
   return (
     <AppShell>
       {children}
