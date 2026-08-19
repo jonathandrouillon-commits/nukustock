@@ -62,6 +62,22 @@ export default function ProductSheetsPage() {
       Record<string, ProductSheet>
     >({})
 
+  /*
+   * NukuStock affiche les produits avec legacy_id quand il existe,
+   * alors que bar_product_sheets utilise l'UUID réel de products.id.
+   *
+   * Cette table de correspondance permet de relier les deux.
+   * clé   = id utilisé par l'interface NukuStock
+   * valeur = UUID réel public.products.id
+   */
+  const [
+    productDbIds,
+    setProductDbIds,
+  ] =
+    useState<
+      Record<string, string>
+    >({})
+
   const [category, setCategory] =
     useState('Toutes')
 
@@ -125,25 +141,106 @@ export default function ProductSheetsPage() {
           : null
       )
 
-      const {
-        data,
-        error: loadError,
-      } =
-        await supabase
-          .from(
-            'bar_product_sheets'
-          )
-          .select('*')
+      /*
+       * IMPORTANT :
+       *
+       * useProducts() expose product.id =
+       *   legacy_id || products.id
+       *
+       * tandis que bar_product_sheets.product_id
+       * contient products.id (UUID Supabase).
+       *
+       * On récupère donc les deux tables ensemble et
+       * on convertit chaque UUID Supabase vers l'id
+       * réellement utilisé par l'interface.
+       */
+      const [
+        sheetsResult,
+        productsResult,
+      ] =
+        await Promise.all([
+          supabase
+            .from(
+              'bar_product_sheets'
+            )
+            .select('*'),
+
+          supabase
+            .from(
+              'products'
+            )
+            .select(
+              'id, legacy_id'
+            )
+            .eq(
+              'active',
+              true
+            ),
+        ])
 
       if (!active) return
 
-      if (loadError) {
+      if (
+        sheetsResult.error
+      ) {
         setError(
-          loadError.message
+          sheetsResult.error.message
         )
         setLoading(false)
         return
       }
+
+      if (
+        productsResult.error
+      ) {
+        setError(
+          productsResult.error.message
+        )
+        setLoading(false)
+        return
+      }
+
+      const uiToDb:
+        Record<
+          string,
+          string
+        > = {}
+
+      const dbToUi =
+        new Map<
+          string,
+          string
+        >()
+
+      for (
+        const row
+        of productsResult.data ||
+        []
+      ) {
+        const uiId =
+          String(
+            row.legacy_id ||
+            row.id
+          )
+
+        const dbId =
+          String(
+            row.id
+          )
+
+        uiToDb[
+          uiId
+        ] = dbId
+
+        dbToUi.set(
+          dbId,
+          uiId
+        )
+      }
+
+      setProductDbIds(
+        uiToDb
+      )
 
       const mapped:
         Record<
@@ -151,31 +248,65 @@ export default function ProductSheetsPage() {
           ProductSheet
         > = {}
 
-      for (const row of data || []) {
-        mapped[row.product_id] = {
+      for (
+        const row
+        of sheetsResult.data ||
+        []
+      ) {
+        const uiProductId =
+          dbToUi.get(
+            String(
+              row.product_id
+            )
+          ) ||
+          String(
+            row.product_id
+          )
+
+        mapped[
+          uiProductId
+        ] = {
           product_id:
-            row.product_id,
+            String(
+              row.product_id
+            ),
+
           description:
-            row.description || '',
+            row.description ||
+            '',
+
           history:
-            row.history || '',
+            row.history ||
+            '',
+
           production_method:
             row.production_method ||
             '',
+
           aromatic_profile:
             row.aromatic_profile ||
             '',
+
           anecdote:
-            row.anecdote || '',
+            row.anecdote ||
+            '',
+
           service_notes:
-            row.service_notes || '',
+            row.service_notes ||
+            '',
+
           updated_at:
             row.updated_at,
         }
       }
 
-      setSheets(mapped)
-      setLoading(false)
+      setSheets(
+        mapped
+      )
+
+      setLoading(
+        false
+      )
     }
 
     void load()
@@ -358,6 +489,9 @@ export default function ProductSheetsPage() {
     setDraft(
       selectedSheet || {
         product_id:
+          productDbIds[
+            selectedId
+          ] ||
           selectedId,
         description: '',
         history: '',
@@ -386,8 +520,22 @@ export default function ProductSheetsPage() {
       setError('')
       setMessage('')
 
+      const dbProductId =
+        productDbIds[
+          selectedId
+        ] ||
+        draft.product_id
+
       const payload = {
         ...draft,
+
+        /*
+         * Toujours enregistrer l'UUID réel de public.products.
+         * Jamais le legacy_id affiché par useProducts().
+         */
+        product_id:
+          dbProductId,
+
         updated_at:
           new Date()
             .toISOString(),
@@ -423,7 +571,7 @@ export default function ProductSheetsPage() {
       setSheets(
         (current) => ({
           ...current,
-          [data.product_id]:
+          [selectedId]:
             {
               product_id:
                 data.product_id,
