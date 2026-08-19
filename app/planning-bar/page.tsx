@@ -1642,13 +1642,13 @@ function BarPlanningPage() {
 
     let active = true
 
-    const resolveBarNukuEmployee = async () => {
-      // Lecture locale de la session.
-      // Évite un nouvel appel Auth Supabase à chaque ouverture du planning.
+    const resolveBarNukuEmployeeOnce = async () => {
+      // AuthGate/AppShell gèrent déjà les changements de session.
+      // Le Planning lit seulement la session courante une fois pour
+      // identifier le membre du staff, sans ajouter de listener Auth.
       const {
         data: { session },
-      } =
-        await supabase.auth.getSession()
+      } = await supabase.auth.getSession()
 
       if (!active) return
 
@@ -1661,8 +1661,6 @@ function BarPlanningPage() {
         return
       }
 
-      // Les droits BarNuku sont stockés dans app_metadata.
-      // Ils sont attribués côté serveur/admin, pas par le barman.
       const appMetadata =
         user.app_metadata || {}
 
@@ -1686,7 +1684,7 @@ function BarPlanningPage() {
         ) || null
 
       setBarNukuEmployeeId(
-        matched?.id || null
+        matched?.id || employeeId || null
       )
 
       setBarNukuRole(
@@ -1700,20 +1698,10 @@ function BarPlanningPage() {
       setBarNukuIdentityReady(true)
     }
 
-    void resolveBarNukuEmployee()
-
-    const {
-      data: authListener,
-    } =
-      supabase.auth.onAuthStateChange(
-        () => {
-          void resolveBarNukuEmployee()
-        }
-      )
+    void resolveBarNukuEmployeeOnce()
 
     return () => {
       active = false
-      authListener.subscription.unsubscribe()
     }
   }, [isBarNukuPortal, employees])
 
@@ -1733,32 +1721,21 @@ function BarPlanningPage() {
 
   useEffect(() => {
     try {
-      const e = localStorage.getItem(EMPLOYEES_KEY)
-      const p = localStorage.getItem(PLANNING_KEY)
-      const w = localStorage.getItem(WEEK_KEY)
-      const s = localStorage.getItem(SIGNATURES_KEY)
-      const special = localStorage.getItem(SPECIAL_INFO_KEY)
-      const saved = localStorage.getItem(SAVED_PLANNINGS_KEY)
-      if (e) {
-        const parsed = JSON.parse(e) as Employee[]
-        setEmployees(
-          parsed.map((employee, index) => ({
-            ...employee,
-            role:
-              employee.role ||
-              employeeRole(
-                employee.id,
-                employee.name
-              ),
-            // Force la palette actuelle même si une ancienne couleur
-            // est déjà enregistrée dans le localStorage.
-            color:
-              EMPLOYEE_COLORS[index % EMPLOYEE_COLORS.length],
-          }))
+      const host =
+        window.location.hostname
+          .toLowerCase()
+          .replace(/^www\./, '')
+          .trim()
+
+      const barPortal =
+        host ===
+        'barnuku.fenuaprobartender.com'
+
+      const s =
+        localStorage.getItem(
+          SIGNATURES_KEY
         )
-      }
-      if (p) setPlanning(JSON.parse(p))
-      if (w) setWeekStart(w)
+
       const parsedSignatures: WeeklySignatures =
         s ? JSON.parse(s) : {}
 
@@ -1770,40 +1747,188 @@ function BarPlanningPage() {
         ...parsedSignatures,
       }
 
-      if (Object.keys(allRecoveredSignatures).length) {
-        setWeeklySignatures(allRecoveredSignatures)
+      if (
+        Object.keys(
+          allRecoveredSignatures
+        ).length
+      ) {
+        setWeeklySignatures(
+          allRecoveredSignatures
+        )
       }
-      if (special) setSpecialDayInfo(JSON.parse(special))
 
-      if (saved) {
-        const parsedSaved = JSON.parse(saved) as Array<
-          SavedPlanning | null | undefined
-        >
-
-        const restoredSaved =
-          mergeSignaturesIntoSavedPlannings(
-            Array.isArray(parsedSaved)
-              ? parsedSaved
-              : [],
-            allRecoveredSignatures
+      if (barPortal) {
+        /*
+         * BAR NUKU
+         * =========
+         * Supabase est la source de vérité du planning.
+         *
+         * On ne recharge PAS ici un ancien PLANNING_KEY / WEEK_KEY
+         * provenant du téléphone ou de la tablette.
+         * Sinon un appareil qui a mémorisé la semaine suivante
+         * (ou un planning vide) peut afficher un tableau vide alors
+         * que le planning publié existe bien dans Supabase.
+         */
+        const currentMonday =
+          isoDate(
+            mondayOf(
+              new Date()
+            )
           )
 
+        setWeekStart(
+          currentMonday
+        )
+
+        setEmployees(
+          defaultEmployees.map(
+            (
+              employee,
+              index
+            ) => ({
+              ...employee,
+              role:
+                employee.role ||
+                employeeRole(
+                  employee.id,
+                  employee.name
+                ),
+              color:
+                EMPLOYEE_COLORS[
+                  index %
+                    EMPLOYEE_COLORS.length
+                ],
+            })
+          )
+        )
+
+        setPlanning({})
+        setSpecialDayInfo({})
+
+        /*
+         * Les historiques embarqués restent visibles
+         * pendant les quelques millisecondes nécessaires
+         * au chargement Supabase.
+         */
         setSavedPlannings(
           mergeHistoricalPlannings(
-            restoredSaved
+            HISTORICAL_PLANNINGS
           )
         )
       } else {
-        setSavedPlannings(
-          mergeHistoricalPlannings(
-            mergeSignaturesIntoSavedPlannings(
-              HISTORICAL_PLANNINGS,
-              allRecoveredSignatures
+        /*
+         * NUKUSTOCK / usage back-office :
+         * conservation du comportement local existant.
+         */
+        const e =
+          localStorage.getItem(
+            EMPLOYEES_KEY
+          )
+        const p =
+          localStorage.getItem(
+            PLANNING_KEY
+          )
+        const w =
+          localStorage.getItem(
+            WEEK_KEY
+          )
+        const special =
+          localStorage.getItem(
+            SPECIAL_INFO_KEY
+          )
+        const saved =
+          localStorage.getItem(
+            SAVED_PLANNINGS_KEY
+          )
+
+        if (e) {
+          const parsed =
+            JSON.parse(e) as Employee[]
+
+          setEmployees(
+            parsed.map(
+              (
+                employee,
+                index
+              ) => ({
+                ...employee,
+                role:
+                  employee.role ||
+                  employeeRole(
+                    employee.id,
+                    employee.name
+                  ),
+                color:
+                  EMPLOYEE_COLORS[
+                    index %
+                      EMPLOYEE_COLORS.length
+                  ],
+              })
             )
           )
-        )
+        }
+
+        if (p) {
+          setPlanning(
+            JSON.parse(p)
+          )
+        }
+
+        if (w) {
+          setWeekStart(w)
+        }
+
+        if (special) {
+          setSpecialDayInfo(
+            JSON.parse(
+              special
+            )
+          )
+        }
+
+        if (saved) {
+          const parsedSaved =
+            JSON.parse(saved) as Array<
+              SavedPlanning |
+              null |
+              undefined
+            >
+
+          const restoredSaved =
+            mergeSignaturesIntoSavedPlannings(
+              Array.isArray(
+                parsedSaved
+              )
+                ? parsedSaved
+                : [],
+              allRecoveredSignatures
+            )
+
+          setSavedPlannings(
+            mergeHistoricalPlannings(
+              restoredSaved
+            )
+          )
+        } else {
+          setSavedPlannings(
+            mergeHistoricalPlannings(
+              mergeSignaturesIntoSavedPlannings(
+                HISTORICAL_PLANNINGS,
+                allRecoveredSignatures
+              )
+            )
+          )
+        }
       }
-    } catch {}
+    } catch (
+      storageError
+    ) {
+      console.error(
+        'Initialisation locale Planning Bar :',
+        storageError
+      )
+    }
+
     setLoaded(true)
   }, [])
 
