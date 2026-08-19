@@ -51,7 +51,7 @@ const users = [
   {
     employee_id: 'lola',
     name: 'LOLA',
-    email: 'fenuaprobartender@gmail.com',
+    email: 'lolafabre73@gmail.com',
     password: process.env.BAR_PASSWORD_LOLA,
     bar_role: 'staff',
     access: 'planning_staff',
