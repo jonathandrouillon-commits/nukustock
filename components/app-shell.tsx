@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import { UserMenu } from '@/components/user-menu'
+import { supabase } from '@/lib/supabase'
 import {
   useInventories,
   useOrders,
@@ -34,6 +35,25 @@ type NavGroup = {
   icon: string
   items: NavItem[]
 }
+
+type BarAdjustmentRequest = {
+  id: string
+  week_start: string
+  employee_id: string
+  employee_name: string
+  date_key: string
+  original_day: Record<string, unknown>
+  requested_day: Record<string, unknown>
+  comment: string | null
+  status: string
+  created_at: string
+}
+
+type BarAccessRole =
+  | 'manager_admin'
+  | 'assistant_manager'
+  | 'staff'
+  | null
 
 const VIEW_MODE_KEY = 'nukustock_view_mode'
 const BAR_NUKU_HOST = 'barnuku.fenuaprobartender.com'
@@ -197,6 +217,37 @@ function normalizeSearch(value: unknown) {
     .trim()
 }
 
+
+function formatBarRequestDate(
+  value: string
+) {
+  try {
+    return new Intl.DateTimeFormat(
+      'fr-FR',
+      {
+        weekday: 'short',
+        day: '2-digit',
+        month: 'short',
+      }
+    ).format(
+      new Date(`${value}T12:00:00`)
+    )
+  } catch {
+    return value
+  }
+}
+
+function formatBarRequestTime(
+  value: unknown
+) {
+  const text =
+    typeof value === 'string'
+      ? value
+      : ''
+
+  return text || '—'
+}
+
 export function AppShell({
   children,
 }: {
@@ -207,6 +258,33 @@ export function AppShell({
 
   const [isBarNuku, setIsBarNuku] = useState(false)
   const [siteModeResolved, setSiteModeResolved] = useState(false)
+
+  const [barAccessRole, setBarAccessRole] =
+    useState<BarAccessRole>(null)
+
+  const [
+    adjustmentNotifications,
+    setAdjustmentNotifications,
+  ] = useState<BarAdjustmentRequest[]>([])
+
+  const [
+    notificationOpen,
+    setNotificationOpen,
+  ] = useState(false)
+
+  const [
+    notificationLoading,
+    setNotificationLoading,
+  ] = useState(false)
+
+  const [
+    notificationActionId,
+    setNotificationActionId,
+  ] = useState<string | null>(null)
+
+  const canManageBarRequests =
+    barAccessRole === 'manager_admin' ||
+    barAccessRole === 'assistant_manager'
 
   const { items: products } = useProducts()
   const { items: orders } = useOrders()
@@ -264,6 +342,305 @@ export function AppShell({
     viewMode === 'auto'
       ? resolvedAuto
       : viewMode
+
+
+  useEffect(() => {
+    let active = true
+
+    const loadBarAccessRole = async () => {
+      const { data } =
+        await supabase.auth.getUser()
+
+      if (!active) return
+
+      const rawRole =
+        String(
+          data.user?.app_metadata
+            ?.bar_role || ''
+        )
+
+      setBarAccessRole(
+        rawRole === 'manager_admin' ||
+        rawRole === 'assistant_manager' ||
+        rawRole === 'staff'
+          ? rawRole
+          : null
+      )
+    }
+
+    void loadBarAccessRole()
+
+    const { data: authListener } =
+      supabase.auth.onAuthStateChange(
+        () => {
+          window.setTimeout(() => {
+            void loadBarAccessRole()
+          }, 0)
+        }
+      )
+
+    return () => {
+      active = false
+      authListener.subscription.unsubscribe()
+    }
+  }, [])
+
+  const loadAdjustmentNotifications =
+    async () => {
+      if (!canManageBarRequests) {
+        setAdjustmentNotifications([])
+        return
+      }
+
+      setNotificationLoading(true)
+
+      const { data, error } =
+        await supabase
+          .from(
+            'bar_planning_adjustment_requests'
+          )
+          .select(
+            'id,week_start,employee_id,employee_name,date_key,original_day,requested_day,comment,status,created_at'
+          )
+          .eq('status', 'En attente')
+          .order(
+            'created_at',
+            {
+              ascending: false,
+            }
+          )
+
+      if (error) {
+        console.error(
+          'Notifications planning Bar :',
+          error
+        )
+        setNotificationLoading(false)
+        return
+      }
+
+      setAdjustmentNotifications(
+        (data || []) as BarAdjustmentRequest[]
+      )
+      setNotificationLoading(false)
+    }
+
+  useEffect(() => {
+    if (!canManageBarRequests) {
+      setAdjustmentNotifications([])
+      return
+    }
+
+    void loadAdjustmentNotifications()
+
+    const channel =
+      supabase
+        .channel(
+          'app-shell-bar-adjustments'
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table:
+              'bar_planning_adjustment_requests',
+          },
+          () => {
+            void loadAdjustmentNotifications()
+          }
+        )
+        .subscribe()
+
+    return () => {
+      void supabase.removeChannel(
+        channel
+      )
+    }
+  }, [canManageBarRequests])
+
+  const acceptBarAdjustment =
+    async (
+      request: BarAdjustmentRequest
+    ) => {
+      if (!canManageBarRequests) return
+
+      setNotificationActionId(
+        request.id
+      )
+
+      try {
+        const {
+          data: planningRow,
+          error: planningLoadError,
+        } =
+          await supabase
+            .from('bar_plannings')
+            .select(
+              'planning'
+            )
+            .eq(
+              'week_start',
+              request.week_start
+            )
+            .maybeSingle()
+
+        if (
+          planningLoadError ||
+          !planningRow
+        ) {
+          throw new Error(
+            planningLoadError?.message ||
+            'Planning introuvable.'
+          )
+        }
+
+        const sourcePlanning =
+          (
+            planningRow.planning ||
+            {}
+          ) as Record<
+            string,
+            Record<
+              string,
+              Record<string, unknown>
+            >
+          >
+
+        const now =
+          new Date().toISOString()
+
+        const validatedDay = {
+          ...(request.requested_day ||
+            request.original_day ||
+            {}),
+          validated: true,
+          validatedAt: now,
+        }
+
+        const updatedPlanning = {
+          ...sourcePlanning,
+          [request.employee_id]: {
+            ...(
+              sourcePlanning[
+                request.employee_id
+              ] || {}
+            ),
+            [request.date_key]:
+              validatedDay,
+          },
+        }
+
+        const {
+          error: planningUpdateError,
+        } =
+          await supabase
+            .from('bar_plannings')
+            .update({
+              planning:
+                updatedPlanning,
+              updated_at: now,
+            })
+            .eq(
+              'week_start',
+              request.week_start
+            )
+
+        if (planningUpdateError) {
+          throw planningUpdateError
+        }
+
+        const { data: userData } =
+          await supabase.auth.getUser()
+
+        const {
+          error: requestUpdateError,
+        } =
+          await supabase
+            .from(
+              'bar_planning_adjustment_requests'
+            )
+            .update({
+              status: 'Acceptée',
+              decided_at: now,
+              decided_by:
+                userData.user?.id ||
+                null,
+            })
+            .eq(
+              'id',
+              request.id
+            )
+
+        if (requestUpdateError) {
+          throw requestUpdateError
+        }
+
+        await loadAdjustmentNotifications()
+      } catch (error) {
+        window.alert(
+          error instanceof Error
+            ? error.message
+            : 'Impossible d’accepter la demande.'
+        )
+      } finally {
+        setNotificationActionId(
+          null
+        )
+      }
+    }
+
+  const rejectBarAdjustment =
+    async (
+      request: BarAdjustmentRequest
+    ) => {
+      if (!canManageBarRequests) return
+
+      setNotificationActionId(
+        request.id
+      )
+
+      try {
+        const { data: userData } =
+          await supabase.auth.getUser()
+
+        const now =
+          new Date().toISOString()
+
+        const { error } =
+          await supabase
+            .from(
+              'bar_planning_adjustment_requests'
+            )
+            .update({
+              status: 'Refusée',
+              decided_at: now,
+              decided_by:
+                userData.user?.id ||
+                null,
+            })
+            .eq(
+              'id',
+              request.id
+            )
+
+        if (error) {
+          throw error
+        }
+
+        await loadAdjustmentNotifications()
+      } catch (error) {
+        window.alert(
+          error instanceof Error
+            ? error.message
+            : 'Impossible de refuser la demande.'
+        )
+      } finally {
+        setNotificationActionId(
+          null
+        )
+      }
+    }
 
   const rootClass = useMemo(
     () =>
@@ -1011,6 +1388,196 @@ export function AppShell({
                 </div>
               )}
             </div>
+
+            {canManageBarRequests && (
+              <div className="nskNotificationWrap">
+                <button
+                  type="button"
+                  className="nskNotificationButton"
+                  aria-label="Notifications planning Bar"
+                  title="Demandes de modification d’heures"
+                  onClick={() =>
+                    setNotificationOpen(
+                      (open) => !open
+                    )
+                  }
+                >
+                  <span
+                    aria-hidden="true"
+                    className="nskNotificationBell"
+                  >
+                    ♢
+                  </span>
+
+                  {adjustmentNotifications.length > 0 && (
+                    <strong className="nskNotificationBadge">
+                      {adjustmentNotifications.length > 99
+                        ? '99+'
+                        : adjustmentNotifications.length}
+                    </strong>
+                  )}
+                </button>
+
+                {notificationOpen && (
+                  <div className="nskNotificationPanel">
+                    <div className="nskNotificationHeader">
+                      <div>
+                        <span>
+                          PLANNING BAR
+                        </span>
+                        <strong>
+                          Demandes d&apos;ajustement
+                        </strong>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setNotificationOpen(
+                            false
+                          )
+                        }
+                        aria-label="Fermer"
+                      >
+                        ×
+                      </button>
+                    </div>
+
+                    <div className="nskNotificationBody">
+                      {notificationLoading ? (
+                        <div className="nskNotificationEmpty">
+                          Chargement…
+                        </div>
+                      ) : adjustmentNotifications.length === 0 ? (
+                        <div className="nskNotificationEmpty">
+                          Aucune demande en attente.
+                        </div>
+                      ) : (
+                        adjustmentNotifications.map(
+                          (request) => {
+                            const original =
+                              request.original_day || {}
+                            const requested =
+                              request.requested_day || {}
+
+                            const busy =
+                              notificationActionId ===
+                              request.id
+
+                            return (
+                              <div
+                                key={request.id}
+                                className="nskNotificationCard"
+                              >
+                                <div className="nskNotificationCardHead">
+                                  <div>
+                                    <strong>
+                                      {request.employee_name}
+                                    </strong>
+                                    <span>
+                                      {formatBarRequestDate(
+                                        request.date_key
+                                      )}
+                                    </span>
+                                  </div>
+
+                                  <small>
+                                    En attente
+                                  </small>
+                                </div>
+
+                                <div className="nskNotificationHours">
+                                  <div>
+                                    <span>
+                                      Prévu
+                                    </span>
+                                    <strong>
+                                      {formatBarRequestTime(
+                                        original.start
+                                      )}
+                                      {' → '}
+                                      {formatBarRequestTime(
+                                        original.end
+                                      )}
+                                    </strong>
+                                  </div>
+
+                                  <b>→</b>
+
+                                  <div>
+                                    <span>
+                                      Demandé
+                                    </span>
+                                    <strong>
+                                      {Boolean(
+                                        requested.off
+                                      )
+                                        ? 'OFF'
+                                        : `${formatBarRequestTime(
+                                            requested.start
+                                          )} → ${formatBarRequestTime(
+                                            requested.end
+                                          )}`}
+                                    </strong>
+                                  </div>
+                                </div>
+
+                                {request.comment && (
+                                  <div className="nskNotificationComment">
+                                    {request.comment}
+                                  </div>
+                                )}
+
+                                <div className="nskNotificationActions">
+                                  <button
+                                    type="button"
+                                    className="accept"
+                                    disabled={busy}
+                                    onClick={() =>
+                                      void acceptBarAdjustment(
+                                        request
+                                      )
+                                    }
+                                  >
+                                    {busy
+                                      ? 'Traitement…'
+                                      : 'Accepter'}
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    className="reject"
+                                    disabled={busy}
+                                    onClick={() =>
+                                      void rejectBarAdjustment(
+                                        request
+                                      )
+                                    }
+                                  >
+                                    Refuser
+                                  </button>
+
+                                  <Link
+                                    href={`/planning-bar?week=${request.week_start}`}
+                                    onClick={() =>
+                                      setNotificationOpen(
+                                        false
+                                      )
+                                    }
+                                  >
+                                    Ouvrir planning
+                                  </Link>
+                                </div>
+                              </div>
+                            )
+                          }
+                        )
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <UserMenu />
           </div>
@@ -2073,6 +2640,259 @@ export function AppShell({
           background: #f2f4f7;
         }
 
+
+
+        .nskNotificationWrap {
+          position: relative;
+        }
+
+        .nskNotificationButton {
+          position: relative;
+          width: 42px;
+          height: 42px;
+          border: 1px solid #dfe3e8;
+          border-radius: 12px;
+          display: grid;
+          place-items: center;
+          background: #fff;
+          color: #101828;
+          cursor: pointer;
+        }
+
+        .nskNotificationButton:hover {
+          background: #f8fafc;
+        }
+
+        .nskNotificationBell {
+          font-size: 22px;
+          line-height: 1;
+          transform: rotate(45deg);
+        }
+
+        .nskNotificationBadge {
+          position: absolute;
+          top: -6px;
+          right: -6px;
+          min-width: 19px;
+          height: 19px;
+          padding: 0 5px;
+          border: 2px solid #fff;
+          border-radius: 999px;
+          display: grid;
+          place-items: center;
+          background: #d92d20;
+          color: #fff;
+          font-size: 9px;
+          font-weight: 900;
+          line-height: 1;
+        }
+
+        .nskNotificationPanel {
+          position: absolute;
+          top: calc(100% + 10px);
+          right: 0;
+          z-index: 500;
+          width: min(430px, calc(100vw - 24px));
+          max-height: min(650px, calc(100vh - 90px));
+          overflow: hidden;
+          border: 1px solid #e4e7ec;
+          border-radius: 16px;
+          background: #fff;
+          box-shadow:
+            0 24px 70px rgba(16,24,40,.18);
+        }
+
+        .nskNotificationHeader {
+          min-height: 64px;
+          padding: 12px 14px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          border-bottom: 1px solid #eaecf0;
+          background: #f9fafb;
+        }
+
+        .nskNotificationHeader > div {
+          min-width: 0;
+          display: grid;
+          gap: 2px;
+        }
+
+        .nskNotificationHeader span {
+          color: #667085;
+          font-size: 9px;
+          font-weight: 900;
+          letter-spacing: .08em;
+        }
+
+        .nskNotificationHeader strong {
+          font-size: 14px;
+        }
+
+        .nskNotificationHeader > button {
+          width: 32px;
+          height: 32px;
+          border: 1px solid #d0d5dd;
+          border-radius: 9px;
+          background: #fff;
+          font-size: 19px;
+          cursor: pointer;
+        }
+
+        .nskNotificationBody {
+          max-height: 560px;
+          overflow-y: auto;
+          padding: 10px;
+          display: grid;
+          gap: 9px;
+        }
+
+        .nskNotificationEmpty {
+          padding: 28px 14px;
+          color: #667085;
+          text-align: center;
+          font-size: 12px;
+          font-weight: 700;
+        }
+
+        .nskNotificationCard {
+          padding: 12px;
+          border: 1px solid #e4e7ec;
+          border-radius: 12px;
+          display: grid;
+          gap: 10px;
+          background: #fff;
+        }
+
+        .nskNotificationCardHead {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 10px;
+        }
+
+        .nskNotificationCardHead > div {
+          display: grid;
+          gap: 2px;
+        }
+
+        .nskNotificationCardHead strong {
+          font-size: 13px;
+        }
+
+        .nskNotificationCardHead span {
+          color: #667085;
+          font-size: 10px;
+          font-weight: 700;
+        }
+
+        .nskNotificationCardHead small {
+          padding: 4px 7px;
+          border-radius: 999px;
+          background: #fff4e5;
+          color: #b54708;
+          font-size: 9px;
+          font-weight: 900;
+        }
+
+        .nskNotificationHours {
+          padding: 9px;
+          border-radius: 10px;
+          display: grid;
+          grid-template-columns:
+            minmax(0,1fr) auto minmax(0,1fr);
+          align-items: center;
+          gap: 8px;
+          background: #f8fafc;
+        }
+
+        .nskNotificationHours > div {
+          min-width: 0;
+          display: grid;
+          gap: 2px;
+        }
+
+        .nskNotificationHours span {
+          color: #667085;
+          font-size: 9px;
+          font-weight: 700;
+        }
+
+        .nskNotificationHours strong {
+          overflow: hidden;
+          color: #101828;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          font-size: 11px;
+        }
+
+        .nskNotificationHours > b {
+          color: #98a2b3;
+          font-size: 12px;
+        }
+
+        .nskNotificationComment {
+          padding: 8px 10px;
+          border-left: 3px solid #98a2b3;
+          border-radius: 4px;
+          background: #f9fafb;
+          color: #475467;
+          font-size: 10px;
+          line-height: 1.45;
+        }
+
+        .nskNotificationActions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 7px;
+        }
+
+        .nskNotificationActions button,
+        .nskNotificationActions a {
+          min-height: 32px;
+          padding: 0 10px;
+          border-radius: 8px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          text-decoration: none;
+          font-size: 10px;
+          font-weight: 850;
+          cursor: pointer;
+        }
+
+        .nskNotificationActions button.accept {
+          border: 1px solid #12b76a;
+          background: #ecfdf3;
+          color: #067647;
+        }
+
+        .nskNotificationActions button.reject {
+          border: 1px solid #f04438;
+          background: #fff1f0;
+          color: #b42318;
+        }
+
+        .nskNotificationActions a {
+          border: 1px solid #d0d5dd;
+          background: #fff;
+          color: #344054;
+        }
+
+        .nskNotificationActions button:disabled {
+          opacity: .55;
+          cursor: wait;
+        }
+
+        .view-phone .nskNotificationPanel {
+          position: fixed;
+          top: 68px;
+          left: 10px;
+          right: 10px;
+          width: auto;
+          max-height: calc(100vh - 150px);
+        }
 
         /* Sécurité PC : sur un écran large, le menu latéral ne peut plus
            être masqué par un ancien style global. */
