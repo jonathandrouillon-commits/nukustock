@@ -973,15 +973,19 @@ function BarPlanningPage() {
     )
   const [planningView, setPlanningView] =
     useState<'dashboard' | 'planning' | 'saved'>('dashboard')
-  const [planningSize, setPlanningSize] =
-    useState<'compact' | 'normal' | 'large'>('normal')
+  const [planningZoom, setPlanningZoom] =
+    useState(100)
   const [planningDevice, setPlanningDevice] =
+    useState<'pc' | 'tablet' | 'phone'>('pc')
+  const [shellDisplayMode, setShellDisplayMode] =
     useState<'pc' | 'tablet' | 'phone'>('pc')
   const [currentSavedPlanningId, setCurrentSavedPlanningId] =
     useState<string | null>(null)
   const [exportMenuOpen, setExportMenuOpen] =
     useState(false)
   const [shareMenuOpen, setShareMenuOpen] =
+    useState(false)
+  const [mobileManagerMenuOpen, setMobileManagerMenuOpen] =
     useState(false)
   const [showMonthlyDetails, setShowMonthlyDetails] =
     useState(false)
@@ -1571,6 +1575,66 @@ function BarPlanningPage() {
   }, [])
 
   useEffect(() => {
+    const readShellMode = () => {
+      const shell =
+        document.querySelector(
+          '.nskAppShell'
+        )
+
+      if (!shell) {
+        setShellDisplayMode('pc')
+        return
+      }
+
+      if (
+        shell.classList.contains(
+          'view-phone'
+        )
+      ) {
+        setShellDisplayMode('phone')
+        return
+      }
+
+      if (
+        shell.classList.contains(
+          'view-tablet'
+        )
+      ) {
+        setShellDisplayMode('tablet')
+        return
+      }
+
+      setShellDisplayMode('pc')
+    }
+
+    readShellMode()
+
+    const shell =
+      document.querySelector(
+        '.nskAppShell'
+      )
+
+    if (!shell) return
+
+    const observer =
+      new MutationObserver(
+        readShellMode
+      )
+
+    observer.observe(
+      shell,
+      {
+        attributes: true,
+        attributeFilter: ['class'],
+      }
+    )
+
+    return () => {
+      observer.disconnect()
+    }
+  }, [])
+
+  useEffect(() => {
     if (!isBarNukuPortal) {
       setBarNukuIdentityReady(true)
       return
@@ -1579,12 +1643,16 @@ function BarPlanningPage() {
     let active = true
 
     const resolveBarNukuEmployee = async () => {
-      const { data } =
-        await supabase.auth.getUser()
+      // Lecture locale de la session.
+      // Évite un nouvel appel Auth Supabase à chaque ouverture du planning.
+      const {
+        data: { session },
+      } =
+        await supabase.auth.getSession()
 
       if (!active) return
 
-      const user = data.user
+      const user = session?.user || null
 
       if (!user) {
         setBarNukuEmployeeId(null)
@@ -3396,15 +3464,11 @@ function BarPlanningPage() {
     )
   }
 
-  return (
-    <Page
-      title="Planning Bar"
-      subtitle={
-        supabaseReady
-          ? `Synchronisé StockNuku ↔ BarNuku${isBarNukuPortal ? ` · ${barNukuRole === 'manager_admin' ? 'Manager / Admin' : barNukuRole === 'assistant_manager' ? 'Assistante Manager' : 'Équipe Bar'}` : ''} · sauvegarde auto toutes les 30 s${lastAutoSaveAt ? ` · dernière ${new Date(lastAutoSaveAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}`
-          : "Connexion à la synchronisation…"
-      }
-      action={
+  const moveManagerActionsBelowTitle =
+    barNukuCanManage &&
+    shellDisplayMode === 'phone'
+
+  const topActionsNode = (
         <div className="topActions noPrint">
           {barNukuCanManage && (
           <div className="planningMainButtons">
@@ -3598,8 +3662,271 @@ function BarPlanningPage() {
             )}
           </div>
         </div>
+
+  )
+
+  const mobileManagerActionsNode = (
+    <div className="mobileManagerBar noPrint">
+      <div className="mobileManagerPrimary">
+        <button
+          type="button"
+          className={`mobileManagerTab ${
+            planningView === 'dashboard'
+              ? 'active'
+              : ''
+          }`}
+          onClick={() =>
+            setPlanningView('dashboard')
+          }
+        >
+          Dashboard
+        </button>
+
+        <button
+          type="button"
+          className={`mobileManagerTab ${
+            planningView === 'planning'
+              ? 'active'
+              : ''
+          }`}
+          onClick={() =>
+            setPlanningView('planning')
+          }
+        >
+          Planning
+        </button>
+
+        <button
+          type="button"
+          className={`mobileManagerTab ${
+            planningView === 'saved'
+              ? 'active'
+              : ''
+          }`}
+          onClick={() =>
+            setPlanningView('saved')
+          }
+        >
+          Sauvegardés
+          <span>
+            {uniqueSavedPlannings.length}
+          </span>
+        </button>
+      </div>
+
+      <div className="mobileManagerQuick">
+        <button
+          type="button"
+          className="mobileQuickPrimary"
+          onClick={() =>
+            saveCurrentPlanning()
+          }
+        >
+          Sauvegarder
+        </button>
+
+        <button
+          type="button"
+          className="mobileManageToggle"
+          aria-expanded={
+            mobileManagerMenuOpen
+          }
+          onClick={() =>
+            setMobileManagerMenuOpen(
+              current => !current
+            )
+          }
+        >
+          Gestion
+          <span>
+            {mobileManagerMenuOpen
+              ? '⌃'
+              : '⌄'}
+          </span>
+        </button>
+      </div>
+
+      {mobileManagerMenuOpen && (
+        <div className="mobileManagerPanel">
+          <button
+            type="button"
+            className="mobilePanelButton"
+            onClick={() => {
+              setMobileManagerMenuOpen(false)
+              setPlanningView('planning')
+              createNewPlanning()
+            }}
+          >
+            + Nouveau planning
+          </button>
+
+          <button
+            type="button"
+            className="mobilePanelButton"
+            onClick={() => {
+              setMobileManagerMenuOpen(false)
+              setStaffManagerMode('add')
+            }}
+          >
+            + Ajouter staff
+          </button>
+
+          <button
+            type="button"
+            className="mobilePanelButton"
+            onClick={() => {
+              setMobileManagerMenuOpen(false)
+              setStaffManagerMode('remove')
+            }}
+          >
+            Supprimer staff
+          </button>
+
+          <button
+            type="button"
+            className="mobilePanelButton danger"
+            disabled={
+              !currentSavedPlanning
+            }
+            onClick={() => {
+              setMobileManagerMenuOpen(false)
+              deleteCurrentPlanning()
+            }}
+          >
+            Supprimer planning
+          </button>
+
+          <div className="mobileManagerPanelRow">
+            <button
+              type="button"
+              className="mobilePanelButton"
+              onClick={() => {
+                setShareMenuOpen(false)
+                setExportMenuOpen(
+                  open => !open
+                )
+              }}
+            >
+              Exporter
+            </button>
+
+            <button
+              type="button"
+              className="mobilePanelButton"
+              onClick={() => {
+                setExportMenuOpen(false)
+                setShareMenuOpen(
+                  open => !open
+                )
+              }}
+            >
+              Partager
+            </button>
+          </div>
+
+          {exportMenuOpen && (
+            <div className="mobileSubPanel">
+              <button
+                type="button"
+                onClick={() => {
+                  setExportMenuOpen(false)
+                  exportExcel()
+                }}
+              >
+                Excel
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setExportMenuOpen(false)
+                  exportPdf()
+                }}
+              >
+                PDF
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setExportMenuOpen(false)
+                  void downloadPlanningJpeg()
+                }}
+              >
+                JPEG
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setExportMenuOpen(false)
+                  window.print()
+                }}
+              >
+                Imprimer
+              </button>
+            </div>
+          )}
+
+          {shareMenuOpen && (
+            <div className="mobileSubPanel">
+              <button
+                type="button"
+                onClick={() => {
+                  setShareMenuOpen(false)
+                  shareWhatsApp()
+                }}
+              >
+                WhatsApp
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShareMenuOpen(false)
+                  shareFacebook()
+                }}
+              >
+                Facebook
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShareMenuOpen(false)
+                  void shareNative()
+                }}
+              >
+                Partage système
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+
+
+  return (
+    <Page
+      title="Planning Bar"
+      subtitle={
+        supabaseReady
+          ? `Synchronisé StockNuku ↔ BarNuku${isBarNukuPortal ? ` · ${barNukuRole === 'manager_admin' ? 'Manager / Admin' : barNukuRole === 'assistant_manager' ? 'Assistante Manager' : 'Équipe Bar'}` : ''} · sauvegarde auto toutes les 30 s${lastAutoSaveAt ? ` · dernière ${new Date(lastAutoSaveAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}`
+          : "Connexion à la synchronisation…"
+      }
+      action={
+        moveManagerActionsBelowTitle
+          ? undefined
+          : topActionsNode
       }
     >
+      {moveManagerActionsBelowTitle && (
+        <>
+          {mobileManagerActionsNode}
+        </>
+      )}
+
       {planningView === 'dashboard' && (
         <div className="planningDashboard">
           <div className="dashboardStats">
@@ -4181,47 +4508,53 @@ function BarPlanningPage() {
               <div>
                 <button
                   type="button"
-                  className={`sizeBtn ${
-                    planningSize === 'compact'
-                      ? 'active'
-                      : ''
-                  }`}
+                  className="sizeBtn"
                   onClick={() =>
-                    setPlanningSize('compact')
+                    setPlanningZoom(
+                      current =>
+                        Math.max(
+                          20,
+                          current - 10
+                        )
+                    )
                   }
-                  title="Affichage compact"
+                  disabled={
+                    planningZoom <= 20
+                  }
+                  title="Réduire de 10 %"
                 >
-                  80%
+                  −10
                 </button>
 
                 <button
                   type="button"
-                  className={`sizeBtn ${
-                    planningSize === 'normal'
-                      ? 'active'
-                      : ''
-                  }`}
+                  className="sizeBtn sizeCurrent"
                   onClick={() =>
-                    setPlanningSize('normal')
+                    setPlanningZoom(100)
                   }
-                  title="Taille normale"
+                  title="Revenir à 100 %"
                 >
-                  100%
+                  {planningZoom}%
                 </button>
 
                 <button
                   type="button"
-                  className={`sizeBtn ${
-                    planningSize === 'large'
-                      ? 'active'
-                      : ''
-                  }`}
+                  className="sizeBtn"
                   onClick={() =>
-                    setPlanningSize('large')
+                    setPlanningZoom(
+                      current =>
+                        Math.min(
+                          150,
+                          current + 10
+                        )
+                    )
                   }
-                  title="Affichage agrandi"
+                  disabled={
+                    planningZoom >= 150
+                  }
+                  title="Agrandir de 10 %"
                 >
-                  120%
+                  +10
                 </button>
               </div>
             </div>
@@ -4291,7 +4624,13 @@ function BarPlanningPage() {
       </div>
 
       <Card>
-        <div className={`tableWrap planningSize-${planningSize} planningDevice-${planningDevice}`}>
+        <div
+              className={`tableWrap planningDevice-${planningDevice}`}
+              style={{
+                ['--planning-zoom' as string]:
+                  planningZoom / 100,
+              }}
+            >
           <table>
             <thead>
               <tr>
@@ -5184,6 +5523,159 @@ function BarPlanningPage() {
 
       <style jsx>{`
         .topActions { display:flex; align-items:center; justify-content:flex-end; gap:10px; flex-wrap:wrap; }
+
+        .mobileManagerBar {
+          width:100%;
+          margin:0 0 12px;
+          padding:8px;
+          border:1px solid #e4e7ec;
+          border-radius:14px;
+          background:#fff;
+          box-shadow:0 4px 16px rgba(16,24,40,.06);
+        }
+
+        .mobileManagerPrimary {
+          display:grid;
+          grid-template-columns:repeat(3,minmax(0,1fr));
+          gap:5px;
+        }
+
+        .mobileManagerTab {
+          min-width:0;
+          min-height:34px;
+          padding:0 7px;
+          border:1px solid #d0d5dd;
+          border-radius:9px;
+          background:#fff;
+          color:#344054;
+          font-size:9px;
+          font-weight:900;
+          line-height:1.1;
+          cursor:pointer;
+        }
+
+        .mobileManagerTab.active {
+          border-color:#101828;
+          background:#101828;
+          color:#fff;
+        }
+
+        .mobileManagerTab span {
+          display:inline-grid;
+          min-width:16px;
+          height:16px;
+          margin-left:4px;
+          padding:0 4px;
+          place-items:center;
+          border-radius:999px;
+          background:#eef2f6;
+          color:#344054;
+          font-size:8px;
+        }
+
+        .mobileManagerTab.active span {
+          background:rgba(255,255,255,.18);
+          color:#fff;
+        }
+
+        .mobileManagerQuick {
+          display:grid;
+          grid-template-columns:1fr 1fr;
+          gap:6px;
+          margin-top:6px;
+        }
+
+        .mobileQuickPrimary,
+        .mobileManageToggle {
+          min-height:38px;
+          border-radius:9px;
+          font-size:10px;
+          font-weight:900;
+          cursor:pointer;
+        }
+
+        .mobileQuickPrimary {
+          border:1px solid #101828;
+          background:#101828;
+          color:#fff;
+        }
+
+        .mobileManageToggle {
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          gap:8px;
+          border:1px solid #d0d5dd;
+          background:#f8fafc;
+          color:#344054;
+        }
+
+        .mobileManagerPanel {
+          display:grid;
+          gap:6px;
+          margin-top:7px;
+          padding-top:7px;
+          border-top:1px solid #eaecf0;
+        }
+
+        .mobilePanelButton {
+          min-height:36px;
+          padding:0 10px;
+          border:1px solid #d0d5dd;
+          border-radius:9px;
+          background:#fff;
+          color:#344054;
+          text-align:left;
+          font-size:9px;
+          font-weight:850;
+          cursor:pointer;
+        }
+
+        .mobilePanelButton.danger {
+          border-color:#fda29b;
+          color:#b42318;
+          background:#fff8f7;
+        }
+
+        .mobilePanelButton:disabled {
+          opacity:.4;
+          cursor:not-allowed;
+        }
+
+        .mobileManagerPanelRow {
+          display:grid;
+          grid-template-columns:1fr 1fr;
+          gap:6px;
+        }
+
+        .mobileSubPanel {
+          display:grid;
+          grid-template-columns:repeat(2,minmax(0,1fr));
+          gap:5px;
+          padding:6px;
+          border:1px solid #e4e7ec;
+          border-radius:9px;
+          background:#f9fafb;
+        }
+
+        .mobileSubPanel button {
+          min-height:32px;
+          border:1px solid #d0d5dd;
+          border-radius:7px;
+          background:#fff;
+          color:#344054;
+          font-size:9px;
+          font-weight:800;
+          cursor:pointer;
+        }
+
+        .managerPhoneActions {
+          width:100%;
+          margin:0 0 12px;
+        }
+        .managerPhoneActions .topActions {
+          width:100%;
+        }
         .planningMainButtons { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
         .planningMainButtons .btn { min-height:40px; }
         .planningMainButtons .btn:disabled { opacity:.45; cursor:not-allowed; }
@@ -5428,6 +5920,15 @@ function BarPlanningPage() {
           background:#101828;
           color:#fff;
         }
+        .sizeCurrent {
+          min-width:62px;
+          background:#101828;
+          color:#fff;
+        }
+        .sizeBtn:disabled {
+          opacity:.35;
+          cursor:not-allowed;
+        }
         .barNukuReadOnlyNote {
           width:100%;
           margin-top:8px;
@@ -5450,6 +5951,24 @@ function BarPlanningPage() {
           --date-font:13px;
           --weekday-font:10px;
         }
+        .tableWrap > table {
+          zoom: var(--planning-zoom);
+        }
+
+        @supports not (zoom: 1) {
+          .tableWrap > table {
+            transform:
+              scale(var(--planning-zoom));
+            transform-origin:
+              top left;
+            width:
+              calc(
+                100% /
+                var(--planning-zoom)
+              );
+          }
+        }
+
         table {
           width:100%;
           border-collapse:collapse;
@@ -5480,25 +5999,6 @@ function BarPlanningPage() {
           text-transform:capitalize;
         }
 
-        .planningSize-compact {
-          --employee-width:102px;
-          --day-width:112px;
-          --day-height:84px;
-          --cell-pad:4px;
-          --time-font:10px;
-          --date-font:11px;
-          --weekday-font:9px;
-        }
-
-        .planningSize-large {
-          --employee-width:145px;
-          --day-width:164px;
-          --day-height:132px;
-          --cell-pad:9px;
-          --time-font:13px;
-          --date-font:16px;
-          --weekday-font:12px;
-        }
 
         .planningDevice-pc {
           max-width:none;
@@ -5531,12 +6031,8 @@ function BarPlanningPage() {
         .specialInfoRow th { background:#f8fafc; padding:5px; vertical-align:top; }
         .specialInfoLabel { font-size:10px; font-weight:900; color:#475467; text-align:left; }
         .specialInfoInput { width:100%; min-height:48px; resize:vertical; border:1px solid #d0d5dd; border-radius:7px; background:#fff; padding:5px; font-size:9px; line-height:1.25; }
-        .planningSize-compact .specialInfoInput { min-height:34px; padding:4px; font-size:8px; }
-        .planningSize-large .specialInfoInput { min-height:64px; padding:7px; font-size:11px; }
         .employeeIdentity { display:flex; flex-direction:column; align-items:flex-start; }
         .employeeIdentity strong { font-size:14px; line-height:1.05; }
-        .planningSize-compact .employeeIdentity strong { font-size:12px; }
-        .planningSize-large .employeeIdentity strong { font-size:16px; }
         .employeeRole { display:block; margin-top:3px; font-size:9px; color:#667085; font-weight:700; line-height:1.15; }
         .signatureEmployeeIdentity { display:flex; flex-direction:column; }
         .signatureEmployeeIdentity small { margin-top:2px; font-size:9px; color:#667085; font-weight:600; }
@@ -5565,11 +6061,7 @@ function BarPlanningPage() {
         }
         .quickToggle input { margin:0; }
         .quickToggle.disabledToggle { opacity:.45; }
-        .planningSize-compact .quickToggle { font-size:8px; gap:2px; }
-        .planningSize-large .quickToggle { font-size:10px; }
         .offText { display:grid; place-items:center; min-height:42px; font-size:16px; font-weight:900; font-style:italic; }
-        .planningSize-compact .offText { min-height:30px; font-size:14px; }
-        .planningSize-large .offText { min-height:66px; font-size:20px; }
         .times { display:grid; grid-template-columns:1fr auto 1fr; gap:4px; align-items:center; }
         .times select { width:100%; min-width:0; border:1px solid #d0d5dd; border-radius:6px; padding:4px 3px; font-size:var(--time-font); background:#fff; }
         .secondShift { margin-top:4px; }
@@ -5608,10 +6100,6 @@ function BarPlanningPage() {
           font-style:italic;
           white-space:nowrap;
         }
-        .planningSize-compact .worked { font-size:10px; }
-        .planningSize-large .worked { font-size:15px; }
-        .planningSize-large .breakRow { font-size:10px; }
-        .planningSize-large .breakRow select { width:44px; font-size:10px; }
         .totalHead { min-width:90px; }
         .totalCell { min-width:90px; text-align:center; vertical-align:middle; font-size:18px; font-weight:900; background:#c9f0cf; }
         .totalCell.over { background:#ffc7ce; color:#b42318; }
@@ -5619,20 +6107,7 @@ function BarPlanningPage() {
 
         .validatedCell { box-shadow: inset 0 0 0 2px #86efac; }
         .dayValidation { margin-top:5px; display:flex; justify-content:center; align-items:center; gap:4px; flex-wrap:wrap; }
-        .planningSize-compact .dayValidation { margin-top:3px; }
         .validateBtn { border:0; border-radius:7px; background:#166534; color:#fff; padding:5px 8px; font-size:9px; font-weight:900; cursor:pointer; }
-        .planningSize-compact .validateBtn {
-          padding:3px 5px;
-          font-size:8px;
-        }
-        .planningSize-compact .validatedBadge {
-          padding:3px 5px;
-          font-size:8px;
-        }
-        .planningSize-compact .adjustmentRequestButton {
-          padding:4px 5px;
-          font-size:8px;
-        }
         .validatedBadge { padding:4px 7px; border-radius:999px; background:#dcfce7; color:#166534; font-size:9px; font-weight:900; }
         .unlockBtn { border:0; background:transparent; color:#475467; font-size:9px; font-weight:800; cursor:pointer; text-decoration:underline; }
         .signatureSection h2 { margin:0; font-size:18px; }
@@ -5656,38 +6131,582 @@ function BarPlanningPage() {
         .savedPlanningSignatures small { color:#667085; font-size:10px; font-weight:700; }
         .signedPlanningBadge { display:inline-flex; align-items:center; min-height:24px; padding:0 8px; border-radius:999px; background:#dcfae6; color:#067647; font-size:10px; font-weight:900; }
 
+
+        :global(.view-phone) .managerPhoneActions {
+          width:100%;
+          margin:0 0 10px;
+          padding:8px;
+          border:1px solid #e4e7ec;
+          border-radius:12px;
+          background:#fff;
+        }
+
+        :global(.view-phone) .managerPhoneActions .topActions {
+          display:grid !important;
+          grid-template-columns:1fr !important;
+          gap:7px !important;
+          width:100% !important;
+        }
+
+        :global(.view-phone) .managerPhoneActions .planningMainButtons {
+          display:grid !important;
+          grid-template-columns:1fr 1fr !important;
+          gap:6px !important;
+          width:100% !important;
+        }
+
+        :global(.view-phone) .managerPhoneActions .planningMainButtons .btn {
+          width:100% !important;
+          min-width:0 !important;
+          min-height:36px !important;
+          padding:0 6px !important;
+          font-size:9px !important;
+          line-height:1.1 !important;
+          white-space:normal !important;
+        }
+
+        :global(.view-phone) .managerPhoneActions .planningMainButtons .btn.primary {
+          grid-column:1 / -1 !important;
+        }
+
+        :global(.view-phone) .managerPhoneActions .topActionGroup {
+          display:grid !important;
+          grid-template-columns:1fr 1fr !important;
+          gap:6px !important;
+          width:100% !important;
+        }
+
+        :global(.view-phone) .managerPhoneActions .topActionGroup > .btn,
+        :global(.view-phone) .managerPhoneActions .topActionGroup > .actionDropdown,
+        :global(.view-phone) .managerPhoneActions .topActionGroup > .actionDropdown > .btn {
+          width:100% !important;
+          min-width:0 !important;
+        }
+
+        :global(.view-phone) .managerPhoneActions .topActionGroup .btn {
+          min-height:34px !important;
+          padding:0 5px !important;
+          font-size:9px !important;
+        }
+
+        /* Mode Téléphone choisi dans la barre NukuStock / BarNuku.
+           Ces règles s'appliquent même lorsque le navigateur est large. */
+        :global(.view-phone) :global(.page) {
+          padding-left:12px !important;
+          padding-right:12px !important;
+        }
+
+        :global(.view-phone) :global(.pageHead) {
+          display:block !important;
+          margin-bottom:12px !important;
+        }
+
+        :global(.view-phone) :global(.pageHeadText) {
+          width:100% !important;
+          margin-bottom:10px !important;
+        }
+
+        :global(.view-phone) :global(.pageHeadText h1) {
+          margin:0 0 4px !important;
+          font-size:25px !important;
+          line-height:1.05 !important;
+        }
+
+        :global(.view-phone) :global(.pageHeadText p) {
+          max-width:none !important;
+          margin:0 !important;
+          font-size:11px !important;
+          line-height:1.3 !important;
+        }
+
+        :global(.view-phone) :global(.pageAction) {
+          width:100% !important;
+          max-width:none !important;
+        }
+
+        :global(.view-phone) .topActions {
+          width:100%;
+          display:grid;
+          gap:7px;
+        }
+
+        :global(.view-phone) .planningMainButtons {
+          width:100%;
+          display:grid;
+          grid-template-columns:repeat(2,minmax(0,1fr));
+          gap:6px;
+        }
+
+        :global(.view-phone) .planningMainButtons .btn {
+          width:100%;
+          min-height:36px;
+          padding:0 6px;
+          border-radius:9px;
+          font-size:9px;
+          line-height:1.1;
+          white-space:normal;
+        }
+
+        :global(.view-phone) .planningMainButtons .btn.primary {
+          grid-column:1 / -1;
+        }
+
+        :global(.view-phone) .topActionGroup {
+          width:100%;
+          display:grid;
+          grid-template-columns:repeat(2,minmax(0,1fr));
+          gap:6px;
+        }
+
+        :global(.view-phone) .topActionGroup > .btn,
+        :global(.view-phone) .topActionGroup > .actionDropdown,
+        :global(.view-phone) .topActionGroup > .actionDropdown > .btn {
+          width:100%;
+        }
+
+        :global(.view-phone) .topActionGroup .btn {
+          min-height:34px;
+          padding:0 6px;
+          font-size:9px;
+        }
+
+        :global(.view-phone) .toolbar {
+          display:grid;
+          gap:10px;
+        }
+
+        :global(.view-phone) .weekControls {
+          min-width:0;
+          width:100%;
+        }
+
+        :global(.view-phone) .weekControlRow {
+          width:100%;
+          display:grid;
+          grid-template-columns:42px minmax(0,1fr) 42px;
+          gap:6px;
+        }
+
+        :global(.view-phone) .weekControlRow > :nth-child(1) {
+          grid-column:1;
+        }
+
+        :global(.view-phone) .weekControlRow > :nth-child(2) {
+          grid-column:2;
+        }
+
+        :global(.view-phone) .weekControlRow > :nth-child(3) {
+          grid-column:3;
+        }
+
+        :global(.view-phone) .weekControlRow > :nth-child(n+4) {
+          grid-column:1 / -1;
+        }
+
+        :global(.view-phone) .weekControlRow input,
+        :global(.view-phone) .weekControlRow .btn {
+          width:100%;
+          min-width:0;
+          min-height:36px;
+        }
+
+        :global(.view-phone) .planningDisplayControls {
+          width:100%;
+          display:grid;
+          gap:8px;
+        }
+
+        :global(.view-phone) .planningSizeControls,
+        :global(.view-phone) .planningDeviceControls {
+          width:100%;
+          align-items:stretch;
+        }
+
+        :global(.view-phone) .planningSizeControls > div,
+        :global(.view-phone) .planningDeviceControls > div {
+          width:100%;
+          display:grid;
+          grid-template-columns:repeat(3,minmax(0,1fr));
+        }
+
+        :global(.view-phone) .sizeBtn,
+        :global(.view-phone) .deviceBtn {
+          width:100%;
+          min-width:0;
+          height:34px;
+          padding:0 4px;
+          font-size:9px;
+        }
+
+        :global(.view-phone) .dashboardStats {
+          grid-template-columns:repeat(2,minmax(0,1fr));
+          gap:8px;
+        }
+
+        :global(.view-phone) .weeklyDashboardCard,
+        :global(.view-phone) .savedPlanningCard {
+          grid-template-columns:1fr;
+        }
+
+        :global(.view-phone) .staffWeekHead,
+        :global(.view-phone) .monthCumulativeHead {
+          align-items:flex-start;
+          flex-direction:column;
+        }
+
+        /* Mode tablette simulé depuis la barre supérieure */
+        :global(.view-tablet) :global(.pageHead) {
+          align-items:flex-start !important;
+          gap:14px !important;
+        }
+
+        :global(.view-tablet) :global(.pageAction) {
+          max-width:520px !important;
+        }
+
+        :global(.view-tablet) .planningMainButtons {
+          display:grid;
+          grid-template-columns:repeat(3,minmax(0,1fr));
+          gap:7px;
+        }
+
+        :global(.view-tablet) .topActionGroup {
+          display:flex;
+          flex-wrap:wrap;
+          gap:7px;
+        }
+
         @media (max-width: 760px) {
-          .topActions, .topNavGroup, .topActionGroup { width:100%; }
-          .topNavGroup { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); }
-          .topNavGroup .btn { padding:0 6px; font-size:10px; }
-          .topActionGroup { justify-content:flex-end; }
-          .weekControls { min-width:0; width:100%; }
-          .weekControlRow { width:100%; }
+          :global(.page) {
+            padding-left:12px !important;
+            padding-right:12px !important;
+          }
+
+          :global(.pageHead) {
+            display:block !important;
+            margin-bottom:12px !important;
+          }
+
+          :global(.pageHeadText) {
+            width:100% !important;
+            margin-bottom:10px !important;
+          }
+
+          :global(.pageHeadText h1) {
+            margin:0 0 4px !important;
+            font-size:26px !important;
+            line-height:1.08 !important;
+          }
+
+          :global(.pageHeadText p) {
+            max-width:none !important;
+            margin:0 !important;
+            font-size:12px !important;
+            line-height:1.35 !important;
+          }
+
+          :global(.pageAction) {
+            width:100% !important;
+            max-width:none !important;
+          }
+
+          .topActions {
+            width:100%;
+            display:grid;
+            gap:7px;
+          }
+
+          .planningMainButtons {
+            width:100%;
+            display:grid;
+            grid-template-columns:
+              repeat(2,minmax(0,1fr));
+            gap:6px;
+          }
+
+          .planningMainButtons .btn {
+            width:100%;
+            min-height:36px;
+            padding:0 7px;
+            border-radius:9px;
+            font-size:10px;
+            line-height:1.1;
+            white-space:normal;
+          }
+
+          .topActionGroup {
+            width:100%;
+            display:grid;
+            grid-template-columns:
+              repeat(2,minmax(0,1fr));
+            gap:6px;
+          }
+
+          .topActionGroup > .btn,
+          .topActionGroup > .actionDropdown,
+          .topActionGroup > .actionDropdown > .btn {
+            width:100%;
+          }
+
+          .topActionGroup .btn {
+            min-height:36px;
+            padding:0 7px;
+            font-size:10px;
+          }
+
+          .actionDropdownMenu {
+            left:0;
+            right:auto;
+            min-width:175px;
+          }
+
+          .actionDropdownMenu.right {
+            left:auto;
+            right:0;
+          }
+
+          .toolbar {
+            display:grid;
+            gap:10px;
+          }
+
+          .weekControls {
+            min-width:0;
+            width:100%;
+          }
+
+          .weekControlRow {
+            width:100%;
+            display:grid;
+            grid-template-columns:
+              repeat(6,minmax(0,1fr));
+            gap:6px;
+          }
+
+          .weekControlRow > :nth-child(1) {
+            grid-column:span 1;
+          }
+
+          .weekControlRow > :nth-child(2) {
+            grid-column:span 4;
+          }
+
+          .weekControlRow > :nth-child(3) {
+            grid-column:span 1;
+          }
+
+          .weekControlRow > :nth-child(n+4) {
+            grid-column:span 3;
+          }
+
+          .weekControlRow input {
+            width:100%;
+            min-width:0;
+            min-height:38px;
+          }
+
+          .weekControlRow .btn {
+            width:100%;
+            min-height:38px;
+            padding:0 6px;
+            font-size:10px;
+            line-height:1.15;
+            white-space:normal;
+          }
+
           .planningDisplayControls {
             width:100%;
-            align-items:flex-start;
+            display:grid;
+            grid-template-columns:1fr;
+            gap:8px;
           }
+
           .planningSizeControls,
           .planningDeviceControls {
-            align-items:flex-start;
+            width:100%;
+            align-items:stretch;
           }
+
           .planningSizeControls > div,
           .planningDeviceControls > div {
-            max-width:100%;
-            overflow-x:auto;
+            width:100%;
+            display:grid;
+            grid-template-columns:
+              repeat(3,minmax(0,1fr));
+            overflow:hidden;
           }
-          .weekControlRow input { flex:1; min-width:150px; }
-          .dashboardStats { grid-template-columns:repeat(2,minmax(0,1fr)); }
-          .monthlyCompactHead { align-items:flex-start; }
-          .staffWeekHead, .monthCumulativeHead { align-items:flex-start; flex-direction:column; }
-          .monthlyHeadActions { width:100%; justify-content:space-between; }
-          .weeklyDashboardCard { grid-template-columns:1fr; }
-          .weeklyTotal { align-items:flex-start; }
-          .dashboardStatus { justify-self:start; }
-          .savedPlanningCard { grid-template-columns:1fr; }
-          .savedPlanningActions { justify-content:flex-start; }
-          .addEmployee, .addEmployee > div { width:100%; }
-          .addEmployee input { min-width:0; flex:1; }
+
+          .sizeBtn,
+          .deviceBtn {
+            width:100%;
+            min-width:0;
+            height:34px;
+            padding:0 5px;
+            font-size:9px;
+          }
+
+          .planningDevice-phone,
+          .planningDevice-tablet,
+          .planningDevice-pc {
+            max-width:100%;
+            margin:0;
+          }
+
+          .tableWrap {
+            border-radius:10px;
+            -webkit-overflow-scrolling:touch;
+            scrollbar-width:thin;
+          }
+
+          .planningDevice-phone table {
+            min-width:900px;
+          }
+
+          .planningDevice-tablet table {
+            min-width:1040px;
+          }
+
+          .dashboardStats {
+            grid-template-columns:
+              repeat(2,minmax(0,1fr));
+          }
+
+          .dashStat {
+            min-width:0;
+          }
+
+          .dashStat strong {
+            font-size:20px;
+          }
+
+          .monthlyCompactHead {
+            align-items:flex-start;
+          }
+
+          .staffWeekHead,
+          .monthCumulativeHead {
+            align-items:flex-start;
+            flex-direction:column;
+          }
+
+          .monthlyHeadActions {
+            width:100%;
+            justify-content:space-between;
+          }
+
+          .weeklyDashboardCard {
+            grid-template-columns:1fr;
+          }
+
+          .weeklyTotal {
+            align-items:flex-start;
+          }
+
+          .dashboardStatus {
+            justify-self:start;
+          }
+
+          .savedPlanningCard {
+            grid-template-columns:1fr;
+          }
+
+          .savedPlanningActions {
+            justify-content:flex-start;
+          }
+
+          .addEmployee,
+          .addEmployee > div {
+            width:100%;
+          }
+
+          .addEmployee input {
+            min-width:0;
+            flex:1;
+          }
+        }
+
+
+        /* Téléphone tourné horizontalement : adaptation automatique */
+        @media (orientation: landscape) and (max-height: 600px) {
+          .mobileManagerBar {
+            max-width:760px;
+            margin-left:auto;
+            margin-right:auto;
+          }
+
+          .mobileManagerPrimary {
+            grid-template-columns:repeat(3,minmax(0,1fr));
+          }
+
+          .mobileManagerQuick {
+            grid-template-columns:2fr 1fr;
+          }
+
+          :global(.view-phone) :global(.page),
+          :global(.page) {
+            padding-left:8px !important;
+            padding-right:8px !important;
+          }
+
+          :global(.view-phone) .managerPhoneActions,
+          .managerPhoneActions {
+            padding:6px;
+            margin-bottom:8px;
+          }
+
+          :global(.view-phone) .managerPhoneActions .planningMainButtons,
+          .managerPhoneActions .planningMainButtons {
+            grid-template-columns:
+              repeat(3,minmax(0,1fr)) !important;
+          }
+
+          :global(.view-phone) .managerPhoneActions .planningMainButtons .btn.primary,
+          .managerPhoneActions .planningMainButtons .btn.primary {
+            grid-column:auto !important;
+          }
+
+          :global(.view-phone) .managerPhoneActions .topActionGroup,
+          .managerPhoneActions .topActionGroup {
+            grid-template-columns:
+              repeat(4,minmax(0,1fr)) !important;
+          }
+
+          .planningDisplayControls {
+            grid-template-columns:1fr 1fr;
+          }
+
+          .planningDevice-phone {
+            max-width:100%;
+          }
+
+          .planningDevice-phone table {
+            min-width:960px;
+          }
+        }
+
+        @media (max-width: 420px) {
+          :global(.pageHeadText h1) {
+            font-size:24px !important;
+          }
+
+          .planningMainButtons,
+          .topActionGroup {
+            grid-template-columns:1fr 1fr;
+          }
+
+          .planningMainButtons .btn,
+          .topActionGroup .btn {
+            min-height:34px;
+            font-size:9px;
+          }
+
+          .weekControlRow > :nth-child(n+4) {
+            grid-column:1 / -1;
+          }
+
+          .planningDevice-phone table {
+            min-width:840px;
+          }
         }
         @media print {
           @page { size:A4 landscape; margin:7mm; }
