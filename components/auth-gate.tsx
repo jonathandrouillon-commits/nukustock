@@ -12,7 +12,7 @@ import {
 } from 'next/navigation'
 
 import { supabase } from '@/lib/supabase'
-import AppShell from '@/components/app-shell'
+import { AppShell } from '@/components/app-shell'
 
 const PUBLIC_ROUTES = [
   '/login',
@@ -40,6 +40,17 @@ function isRequisitionHost() {
   )
 }
 
+function isBarNukuHost() {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  return (
+    window.location.hostname ===
+    'barnuku.fenuaprobartender.com'
+  )
+}
+
 export default function AuthGate({
   children,
 }: AuthGateProps) {
@@ -58,6 +69,9 @@ export default function AuthGate({
   const [requisitionHost, setRequisitionHost] =
     useState(false)
 
+  const [barNukuHost, setBarNukuHost] =
+    useState(false)
+
   const isPublicRoute =
     PUBLIC_ROUTES.includes(pathname)
 
@@ -67,61 +81,74 @@ export default function AuthGate({
     const requisitionDomain =
       isRequisitionHost()
 
+    const barNukuDomain =
+      isBarNukuHost()
+
     setRequisitionHost(
       requisitionDomain
     )
 
-    const resolveSession =
-      async () => {
-        setChecking(true)
+    setBarNukuHost(
+      barNukuDomain
+    )
 
-        const {
-          data: {
-            session,
-          },
-        } =
-          await supabase.auth.getSession()
+    const resolveUser = async () => {
+      setChecking(true)
 
-        if (!active) {
-          return
+      const {
+        data: {
+          session,
+        },
+        error: sessionError,
+      } =
+        await supabase.auth.getSession()
+
+      if (!active) {
+        return
+      }
+
+      if (
+        sessionError ||
+        !session?.user
+      ) {
+        setAuthenticated(false)
+        setProfile(null)
+        setChecking(false)
+
+        if (!isPublicRoute) {
+          router.replace('/login')
         }
 
-        if (!session?.user) {
-          setAuthenticated(false)
-          setProfile(null)
-          setChecking(false)
+        return
+      }
 
-          if (!isPublicRoute) {
-            router.replace(
-              '/login'
-            )
-          }
+      // BARNUKU :
+      // Les comptes équipe sont identifiés par app_metadata.
+      // Ils n'ont pas besoin d'une ligne dans public.profiles.
+      if (barNukuDomain) {
+        const employeeId =
+          String(
+            session.user.app_metadata
+              ?.employee_id || ''
+          ).trim()
 
-          return
-        }
+        const barRole =
+          String(
+            session.user.app_metadata
+              ?.bar_role || ''
+          ).trim()
 
-        const {
-          data: profileData,
-          error: profileError,
-        } = await supabase
-          .from('profiles')
-          .select(
-            'id, role, active'
-          )
-          .eq(
-            'id',
-            session.user.id
-          )
-          .maybeSingle()
-
-        if (!active) {
-          return
-        }
+        const allowedRoles = [
+          'manager_admin',
+          'assistant_manager',
+          'staff',
+        ]
 
         if (
-          profileError ||
-          !profileData ||
-          profileData.active === false
+          !employeeId ||
+          !allowedRoles.includes(
+            barRole
+          )
         ) {
           setAuthenticated(false)
           setProfile(null)
@@ -131,88 +158,138 @@ export default function AuthGate({
             scope: 'local',
           })
 
-          router.replace(
-            '/login'
-          )
-
+          router.replace('/login')
           return
         }
-
-        const nextProfile =
-          profileData as Profile
 
         setAuthenticated(true)
-        setProfile(nextProfile)
 
-        /*
-         * PORTAIL REQUISITION NUKU
-         * Aucun menu back-office.
-         */
-        if (requisitionDomain) {
-          const allowed =
-            nextProfile.role ===
-              'requisitionnaire' ||
-            nextProfile.role ===
-              'admin'
+        // Profil synthétique uniquement pour satisfaire
+        // le rendu AuthGate côté BarNuku.
+        setProfile({
+          id: session.user.id,
+          role: barRole,
+          active: true,
+        })
 
-          if (!allowed) {
-            await supabase.auth.signOut({
-              scope: 'local',
-            })
-
-            setAuthenticated(false)
-            setProfile(null)
-            setChecking(false)
-
-            router.replace(
-              '/login'
-            )
-
-            return
-          }
-
-          if (isPublicRoute) {
-            router.replace(
-              '/requisition'
-            )
-          } else if (
-            pathname !==
-              '/requisition' &&
-            !pathname.startsWith(
-              '/requisition/'
-            )
-          ) {
-            router.replace(
-              '/requisition'
-            )
-          }
-
-          setChecking(false)
-          return
+        if (isPublicRoute) {
+          router.replace(
+            '/planning-bar'
+          )
+        } else if (
+          pathname !==
+            '/planning-bar' &&
+          !pathname.startsWith(
+            '/planning-bar/'
+          )
+        ) {
+          router.replace(
+            '/planning-bar'
+          )
         }
 
-        /*
-         * BACK-OFFICE NUKUSTOCK
-         * Les requisitionnaires n'y ont pas accès.
-         */
-        if (
+        setChecking(false)
+        return
+      }
+
+      const {
+        data: profileData,
+        error: profileError,
+      } = await supabase
+        .from('profiles')
+        .select(
+          'id, role, active'
+        )
+        .eq(
+          'id',
+          session.user.id
+        )
+        .maybeSingle()
+
+      if (!active) {
+        return
+      }
+
+      if (
+        profileError ||
+        !profileData ||
+        profileData.active === false
+      ) {
+        setAuthenticated(false)
+        setProfile(null)
+        setChecking(false)
+
+        await supabase.auth.signOut({
+          scope: 'local',
+        })
+
+        router.replace('/login')
+        return
+      }
+
+      const nextProfile =
+        profileData as Profile
+
+      setAuthenticated(true)
+      setProfile(nextProfile)
+
+      if (requisitionDomain) {
+        const allowed =
           nextProfile.role ===
-          'requisitionnaire'
-        ) {
-          window.location.replace(
-            'https://requisitionnuku.fenuaprobartender.com/requisition'
-          )
+            'requisitionnaire' ||
+          nextProfile.role ===
+            'admin'
+
+        if (!allowed) {
+          await supabase.auth.signOut({
+            scope: 'local',
+          })
+
+          setAuthenticated(false)
+          setProfile(null)
+          setChecking(false)
+          router.replace('/login')
           return
         }
 
         if (isPublicRoute) {
-          router.replace('/')
+          router.replace(
+            '/requisition'
+          )
+        } else if (
+          pathname !==
+            '/requisition' &&
+          !pathname.startsWith(
+            '/requisition/'
+          )
+        ) {
+          router.replace(
+            '/requisition'
+          )
         }
 
         setChecking(false)
+        return
       }
 
-    void resolveSession()
+      if (
+        nextProfile.role ===
+        'requisitionnaire'
+      ) {
+        window.location.replace(
+          'https://requisitionnuku.fenuaprobartender.com/requisition'
+        )
+        return
+      }
+
+      if (isPublicRoute) {
+        router.replace('/')
+      }
+
+      setChecking(false)
+    }
+
+    void resolveUser()
 
     const {
       data: {
@@ -235,6 +312,9 @@ export default function AuthGate({
               )
             }
           }
+
+          // Ne pas lancer de requête Supabase
+          // asynchrone directement dans ce callback.
         }
       )
 
@@ -254,10 +334,8 @@ export default function AuthGate({
         style={{
           minHeight: '100vh',
           display: 'grid',
-          placeItems:
-            'center',
-          background:
-            '#f4f6f9',
+          placeItems: 'center',
+          background: '#f4f6f9',
           color: '#667085',
           fontWeight: 700,
         }}
@@ -267,10 +345,6 @@ export default function AuthGate({
     )
   }
 
-  /*
-   * LOGIN / REGISTER
-   * Aucun AppShell autour.
-   */
   if (isPublicRoute) {
     return <>{children}</>
   }
@@ -282,18 +356,13 @@ export default function AuthGate({
     return null
   }
 
-  /*
-   * PORTAIL REQUISITION
-   * Interface dédiée sans menu NukuStock.
-   */
-  if (requisitionHost) {
+  if (
+    requisitionHost ||
+    barNukuHost
+  ) {
     return <>{children}</>
   }
 
-  /*
-   * BACK-OFFICE NUKUSTOCK
-   * AppShell remet toute la barre de menu.
-   */
   return (
     <AppShell>
       {children}

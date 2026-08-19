@@ -46,6 +46,13 @@ function isNukuStockHost() {
   )
 }
 
+function isBarNukuHost() {
+  return (
+    currentHost() ===
+    'barnuku.fenuaprobartender.com'
+  )
+}
+
 export default function LoginPage() {
   const [email, setEmail] =
     useState('')
@@ -78,6 +85,11 @@ export default function LoginPage() {
   ] = useState(false)
 
   const [
+    barNukuMode,
+    setBarNukuMode,
+  ] = useState(false)
+
+  const [
     installPrompt,
     setInstallPrompt,
   ] = useState<BeforeInstallPromptEvent | null>(null)
@@ -99,16 +111,23 @@ export default function LoginPage() {
     const backOffice =
       isNukuStockHost()
 
+    const barPortal =
+      isBarNukuHost()
+
     setRequisitionMode(
       requisition
     )
     setNukuStockMode(
       backOffice
     )
+    setBarNukuMode(
+      barPortal
+    )
 
     if (
       !requisition &&
-      !backOffice
+      !backOffice &&
+      !barPortal
     ) {
       return
     }
@@ -251,6 +270,13 @@ export default function LoginPage() {
         return
       }
 
+      if (barNukuMode) {
+        window.location.replace(
+          '/planning-bar'
+        )
+        return
+      }
+
       localStorage.setItem(
         'nukustock_login_zone',
         zone
@@ -346,6 +372,8 @@ export default function LoginPage() {
             >
               {requisitionMode
                 ? 'Requisition Nuku'
+                : barNukuMode
+                ? 'Bar Nuku'
                 : 'NukuStock'}
             </h1>
           </div>
@@ -369,6 +397,8 @@ export default function LoginPage() {
         >
           {requisitionMode
             ? 'Créer et suivre vos réquisitions'
+            : barNukuMode
+            ? 'Accéder au portail de l’équipe Bar'
             : 'Accéder à NukuStock'}
         </p>
 
@@ -578,7 +608,7 @@ export default function LoginPage() {
             </div>
           </label>
 
-          {!requisitionMode && (
+          {!requisitionMode && !barNukuMode && (
             <label>
               <span
                 style={{
@@ -658,7 +688,7 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {!requisitionMode && (
+        {!requisitionMode && !barNukuMode && (
           <div
             style={{
               marginTop: 20,

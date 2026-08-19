@@ -989,6 +989,13 @@ function BarPlanningPage() {
     useState<string | null>(null)
   const [barNukuIdentityReady, setBarNukuIdentityReady] =
     useState(false)
+  const [barNukuRole, setBarNukuRole] =
+    useState<
+      'manager_admin' |
+      'assistant_manager' |
+      'staff' |
+      null
+    >(null)
   const [barNukuShowOnlyMine, setBarNukuShowOnlyMine] =
     useState(false)
   const [newPlanningModalOpen, setNewPlanningModalOpen] =
@@ -1299,7 +1306,7 @@ function BarPlanningPage() {
     dateKey: string
   ) => {
     if (
-      isBarNukuPortal &&
+      barNukuReadOnly &&
       employeeId !== barNukuEmployeeId
     ) return
     const current =
@@ -1568,65 +1575,89 @@ function BarPlanningPage() {
     let active = true
 
     const resolveBarNukuEmployee = async () => {
-      const { data } = await supabase.auth.getUser()
+      const { data } =
+        await supabase.auth.getUser()
+
       if (!active) return
 
       const user = data.user
+
       if (!user) {
         setBarNukuEmployeeId(null)
+        setBarNukuRole(null)
         setBarNukuIdentityReady(true)
         return
       }
 
-      const metadata = user.user_metadata || {}
-      const candidates = [
-        metadata.employee_id,
-        metadata.employeeId,
-        metadata.name,
-        metadata.full_name,
-        metadata.display_name,
-        user.email?.split('@')[0],
-      ]
-        .filter(Boolean)
-        .map(value =>
-          String(value)
-            .toLowerCase()
-            .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '')
-            .replace(/[^a-z0-9]/g, '')
+      // Les droits BarNuku sont stockés dans app_metadata.
+      // Ils sont attribués côté serveur/admin, pas par le barman.
+      const appMetadata =
+        user.app_metadata || {}
+
+      const employeeId =
+        String(
+          appMetadata.employee_id || ''
+        )
+          .trim()
+          .toLowerCase()
+
+      const role =
+        String(
+          appMetadata.bar_role || 'staff'
         )
 
-      const matched = employees.find(employee => {
-        const id = employee.id
-          .toLowerCase()
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .replace(/[^a-z0-9]/g, '')
+      const matched =
+        employees.find(
+          employee =>
+            employee.id.toLowerCase() ===
+            employeeId
+        ) || null
 
-        const name = employee.name
-          .toLowerCase()
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .replace(/[^a-z0-9]/g, '')
+      setBarNukuEmployeeId(
+        matched?.id || null
+      )
 
-        return candidates.some(candidate =>
-          candidate === id ||
-          candidate === name ||
-          candidate.startsWith(id) ||
-          candidate.startsWith(name)
-        )
-      })
+      setBarNukuRole(
+        role === 'manager_admin' ||
+        role === 'assistant_manager' ||
+        role === 'staff'
+          ? role
+          : 'staff'
+      )
 
-      setBarNukuEmployeeId(matched?.id || null)
       setBarNukuIdentityReady(true)
     }
 
     void resolveBarNukuEmployee()
 
+    const {
+      data: authListener,
+    } =
+      supabase.auth.onAuthStateChange(
+        () => {
+          void resolveBarNukuEmployee()
+        }
+      )
+
     return () => {
       active = false
+      authListener.subscription.unsubscribe()
     }
   }, [isBarNukuPortal, employees])
+
+  const barNukuCanManage =
+    !isBarNukuPortal ||
+    barNukuRole === 'manager_admin' ||
+    barNukuRole === 'assistant_manager'
+
+  const barNukuReadOnly =
+    isBarNukuPortal &&
+    !barNukuCanManage
+
+  const barNukuIsAdmin =
+    isBarNukuPortal &&
+    barNukuRole === 'manager_admin'
+
 
   useEffect(() => {
     try {
@@ -2032,7 +2063,7 @@ function BarPlanningPage() {
     if (
       !loaded ||
       !supabaseReady ||
-      isBarNukuPortal
+      barNukuReadOnly
     ) {
       return
     }
@@ -2098,7 +2129,7 @@ function BarPlanningPage() {
   }, [
     loaded,
     supabaseReady,
-    isBarNukuPortal,
+    barNukuReadOnly,
     weekStart,
     employees,
     planning,
@@ -2124,7 +2155,7 @@ function BarPlanningPage() {
     patch: Partial<DayPlanning>,
     force = false
   ) => {
-    if (isBarNukuPortal && !force) return
+    if (barNukuReadOnly && !force) return
     const currentDay = getDay(employeeId, dateKey)
 
     if (currentDay.validated && !force) return
@@ -2146,7 +2177,7 @@ function BarPlanningPage() {
     dateKey: string
   ) => {
     if (
-      isBarNukuPortal &&
+      barNukuReadOnly &&
       employeeId !== barNukuEmployeeId
     ) return
     const current = getDay(employeeId, dateKey)
@@ -2179,7 +2210,7 @@ function BarPlanningPage() {
     employeeId: string
   ) => {
     if (
-      isBarNukuPortal &&
+      barNukuReadOnly &&
       employeeId !== barNukuEmployeeId
     ) return
     const employee =
@@ -2288,7 +2319,7 @@ function BarPlanningPage() {
     employeeId: string,
     dateKey: string
   ) => {
-    if (isBarNukuPortal) return
+    if (barNukuReadOnly) return
     updateDay(
       employeeId,
       dateKey,
@@ -2347,7 +2378,7 @@ function BarPlanningPage() {
     // - ne sauvegarde jamais la semaine courante en naviguant
     // - ne vide jamais le planning si la semaine cible n'existe pas
     // - charge uniquement une semaine réellement présente dans Supabase
-    if (isBarNukuPortal) {
+    if (barNukuReadOnly) {
       const {
         data: remoteRow,
         error: remoteError,
@@ -2552,13 +2583,13 @@ function BarPlanningPage() {
       isoDate(d),
       {
         saveCurrent:
-          !isBarNukuPortal,
+          !barNukuReadOnly,
       }
     )
   }
 
   const createNewPlanning = () => {
-    if (isBarNukuPortal) return
+    if (barNukuReadOnly) return
 
     setNewPlanningDate(weekStart)
     setNewPlanningModalOpen(true)
@@ -2695,7 +2726,7 @@ function BarPlanningPage() {
     signatureDataUrl: string
   ) => {
     if (
-      isBarNukuPortal &&
+      barNukuReadOnly &&
       employeeId !== barNukuEmployeeId
     ) return
     const key = signatureKeyFor(employeeId)
@@ -2729,7 +2760,7 @@ function BarPlanningPage() {
   }
 
   const clearWeeklySignature = (employeeId: string) => {
-    if (isBarNukuPortal) return
+    if (barNukuReadOnly) return
     const key = signatureKeyFor(employeeId)
     const next = { ...weeklySignatures }
     delete next[key]
@@ -3366,12 +3397,12 @@ function BarPlanningPage() {
       title="Planning Bar"
       subtitle={
         supabaseReady
-          ? `Synchronisé StockNuku ↔ BarNuku · sauvegarde auto toutes les 30 s${lastAutoSaveAt ? ` · dernière ${new Date(lastAutoSaveAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}`
+          ? `Synchronisé StockNuku ↔ BarNuku${isBarNukuPortal ? ` · ${barNukuRole === 'manager_admin' ? 'Manager / Admin' : barNukuRole === 'assistant_manager' ? 'Assistante Manager' : 'Équipe Bar'}` : ''} · sauvegarde auto toutes les 30 s${lastAutoSaveAt ? ` · dernière ${new Date(lastAutoSaveAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}`
           : "Connexion à la synchronisation…"
       }
       action={
         <div className="topActions noPrint">
-          {!isBarNukuPortal && (
+          {barNukuCanManage && (
           <div className="planningMainButtons">
             <button
               type="button"
@@ -3456,7 +3487,7 @@ function BarPlanningPage() {
               Sauvegardés ({uniqueSavedPlannings.length})
             </button>
 
-            {!isBarNukuPortal && (
+            {barNukuCanManage && (
             <>
             <div className="actionDropdown">
               <button
@@ -4101,7 +4132,7 @@ function BarPlanningPage() {
                 Cette semaine
               </button>
 
-              {!isBarNukuPortal && (
+              {barNukuCanManage && (
                 <>
                   <button
                     type="button"
@@ -4121,7 +4152,7 @@ function BarPlanningPage() {
                 </>
               )}
 
-              {isBarNukuPortal &&
+              {barNukuReadOnly &&
                 barNukuEmployeeId && (
                   <button
                     type="button"
@@ -4140,7 +4171,7 @@ function BarPlanningPage() {
             </div>
           </div>
 
-          {isBarNukuPortal && (
+          {barNukuReadOnly && (
             <div className="barNukuReadOnlyNote">
               Planning global en lecture seule · tu peux valider tes journées,
               demander un ajustement et signer ta semaine.
@@ -4184,7 +4215,7 @@ function BarPlanningPage() {
                       <textarea
                         className="specialInfoInput"
                         value={specialDayInfo[key] || ''}
-                        readOnly={isBarNukuPortal}
+                        readOnly={barNukuReadOnly}
                         onChange={event =>
                           setSpecialDayInfo(current => ({
                             ...current,
@@ -4203,7 +4234,7 @@ function BarPlanningPage() {
             </thead>
 
             <tbody>
-              {(isBarNukuPortal &&
+              {(barNukuReadOnly &&
                 barNukuShowOnlyMine
                 ? employees.filter(employee =>
                     employee.id === barNukuEmployeeId
@@ -4258,7 +4289,7 @@ function BarPlanningPage() {
                         </small>
                       </div>
 
-                      {!isBarNukuPortal && (
+                      {!barNukuReadOnly && (
                         <button
                           type="button"
                           className="validateWeekBtn noPrint"
@@ -4328,7 +4359,7 @@ function BarPlanningPage() {
                             <input
                               type="checkbox"
                               checked={d.off}
-                              disabled={d.validated || isBarNukuPortal}
+                              disabled={d.validated || barNukuReadOnly}
                               onChange={e =>
                                 updateDay(employee.id, key, {
                                   off: e.target.checked,
@@ -4367,7 +4398,7 @@ function BarPlanningPage() {
                                     )}
                                   </>
                                 ) : (
-                                  (!isBarNukuPortal ||
+                                  (!barNukuReadOnly ||
                                     employee.id === barNukuEmployeeId) ? (
                                     <button
                                       type="button"
@@ -4381,7 +4412,7 @@ function BarPlanningPage() {
                                   ) : null
                                 )}
                               </div>
-                              {isBarNukuPortal &&
+                              {barNukuReadOnly &&
                                 employee.id === barNukuEmployeeId && (
                                   <button
                                     type="button"
@@ -4400,7 +4431,7 @@ function BarPlanningPage() {
                                 <input
                                   type="checkbox"
                                   checked={d.split}
-                                  disabled={d.validated || isBarNukuPortal}
+                                  disabled={d.validated || barNukuReadOnly}
                                   onChange={e =>
                                     updateDay(employee.id, key, {
                                       split: e.target.checked,
@@ -4419,7 +4450,7 @@ function BarPlanningPage() {
                               <div className="times">
                                 <select
                                   value={d.start}
-                                  disabled={d.validated || isBarNukuPortal}
+                                  disabled={d.validated || barNukuReadOnly}
                                   onChange={e =>
                                     updateDay(employee.id, key, {
                                       start: e.target.value,
@@ -4438,7 +4469,7 @@ function BarPlanningPage() {
 
                                 <select
                                   value={d.end}
-                                  disabled={d.validated || isBarNukuPortal}
+                                  disabled={d.validated || barNukuReadOnly}
                                   onChange={e =>
                                     updateDay(employee.id, key, {
                                       end: e.target.value,
@@ -4458,7 +4489,7 @@ function BarPlanningPage() {
                                 <div className="times secondShift">
                                   <select
                                     value={d.start2}
-                                    disabled={d.validated || isBarNukuPortal}
+                                    disabled={d.validated || barNukuReadOnly}
                                     onChange={e =>
                                       updateDay(employee.id, key, {
                                         start2: e.target.value,
@@ -4477,7 +4508,7 @@ function BarPlanningPage() {
 
                                   <select
                                     value={d.end2}
-                                    disabled={d.validated || isBarNukuPortal}
+                                    disabled={d.validated || barNukuReadOnly}
                                     onChange={e =>
                                       updateDay(employee.id, key, {
                                         end2: e.target.value,
@@ -4502,7 +4533,7 @@ function BarPlanningPage() {
                                 </span>
                                 <select
                                   value={d.breakMinutes}
-                                  disabled={d.validated || isBarNukuPortal}
+                                  disabled={d.validated || barNukuReadOnly}
                                   onChange={e =>
                                     updateDay(employee.id, key, {
                                       breakMinutes: Number(e.target.value),
@@ -4542,7 +4573,7 @@ function BarPlanningPage() {
                                     )}
                                   </>
                                 ) : (
-                                  (!isBarNukuPortal ||
+                                  (!barNukuReadOnly ||
                                     employee.id === barNukuEmployeeId) ? (
                                     <button
                                       type="button"
@@ -4556,7 +4587,7 @@ function BarPlanningPage() {
                                   ) : null
                                 )}
                               </div>
-                              {isBarNukuPortal &&
+                              {barNukuReadOnly &&
                                 employee.id === barNukuEmployeeId && (
                                   <button
                                     type="button"
@@ -4597,7 +4628,7 @@ function BarPlanningPage() {
           </div>
 
           <div className="signatureGrid">
-            {(isBarNukuPortal
+            {(barNukuReadOnly
               ? employees.filter(employee =>
                   employee.id === barNukuEmployeeId
                 )
@@ -4639,7 +4670,7 @@ function BarPlanningPage() {
                         Signé le{' '}
                         {new Date(signature.signedAt).toLocaleString('fr-FR')}
                       </div>
-                      {!isBarNukuPortal && (
+                      {!barNukuReadOnly && (
                         <button
                           type="button"
                           className="unlockBtn noPrint"
@@ -4699,7 +4730,7 @@ function BarPlanningPage() {
         </>
       )}
 
-      {newPlanningModalOpen && !isBarNukuPortal && (
+      {newPlanningModalOpen && barNukuCanManage && (
         <div className="staffManagerBackdrop noPrint">
           <div className="staffManagerModal newPlanningModal">
             <div className="staffManagerHeader">
