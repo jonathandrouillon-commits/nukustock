@@ -6,9 +6,15 @@ const supabaseUrl =
 const serviceRoleKey =
   process.env.SUPABASE_SERVICE_ROLE_KEY
 
-if (!supabaseUrl || !serviceRoleKey) {
+if (!supabaseUrl) {
   throw new Error(
-    'NEXT_PUBLIC_SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY manquant dans .env.local'
+    'NEXT_PUBLIC_SUPABASE_URL manquant dans .env.local'
+  )
+}
+
+if (!serviceRoleKey) {
+  throw new Error(
+    'SUPABASE_SERVICE_ROLE_KEY manquant dans .env.local'
   )
 }
 
@@ -24,17 +30,30 @@ const supabase = createClient(
   }
 )
 
+/*
+==================================================
+COMPTES BARNUKU
+==================================================
+*/
+
 const users = [
   {
     employee_id: 'emma',
     name: 'EMMA',
     first_name: 'Emma',
     role_label: 'Assistante Manager',
-    email: 'emma.chadebech@outlook.fr',
+
+    email:
+      'emma.chadebech@outlook.fr',
+
     password:
       process.env.BAR_PASSWORD_EMMA,
-    bar_role: 'assistant_manager',
-    bar_access: 'all',
+
+    bar_role:
+      'assistant_manager',
+
+    bar_access:
+      'all',
   },
 
   {
@@ -42,11 +61,18 @@ const users = [
     name: 'JON',
     first_name: 'Jonathan',
     role_label: 'Manager',
-    email: 'jonathan.drouillon@gmail.com',
+
+    email:
+      'jonathan.drouillon@gmail.com',
+
     password:
       process.env.BAR_PASSWORD_JON,
-    bar_role: 'manager_admin',
-    bar_access: 'all',
+
+    bar_role:
+      'manager_admin',
+
+    bar_access:
+      'all',
   },
 
   {
@@ -54,11 +80,18 @@ const users = [
     name: 'MARIE',
     first_name: 'Marie',
     role_label: 'Barmaid',
-    email: 'ntsaimarie@gmail.com',
+
+    email:
+      'ntsaimarie@gmail.com',
+
     password:
       process.env.BAR_PASSWORD_MARIE,
-    bar_role: 'staff',
-    bar_access: 'bar_team',
+
+    bar_role:
+      'staff',
+
+    bar_access:
+      'bar_team',
   },
 
   {
@@ -67,18 +100,28 @@ const users = [
     first_name: 'Lola',
     role_label: 'Barmaid',
 
-    // Nouvelle adresse
-    email: 'lolafabre73@gmail.com',
+    /*
+     * NOUVELLE ADRESSE LOLA
+     */
+    email:
+      'lolafabre73@gmail.com',
 
-    // Ancienne adresse recherchée
-    // pour conserver le même compte
+    /*
+     * ANCIENNE ADRESSE LOLA
+     * utilisée uniquement pour
+     * retrouver son ancien compte.
+     */
     old_email:
       'fenuaprobartender@gmail.com',
 
     password:
       process.env.BAR_PASSWORD_LOLA,
-    bar_role: 'staff',
-    bar_access: 'bar_team',
+
+    bar_role:
+      'staff',
+
+    bar_access:
+      'bar_team',
   },
 
   {
@@ -86,11 +129,18 @@ const users = [
     name: 'JEREMY',
     first_name: 'Jeremy',
     role_label: 'Barman',
-    email: 'antoinejeremy@live.fr',
+
+    email:
+      'antoinejeremy@live.fr',
+
     password:
       process.env.BAR_PASSWORD_JEREMY,
-    bar_role: 'staff',
-    bar_access: 'bar_team',
+
+    bar_role:
+      'staff',
+
+    bar_access:
+      'bar_team',
   },
 
   {
@@ -98,26 +148,45 @@ const users = [
     name: 'BRANDON',
     first_name: 'Brandon',
     role_label: 'Barman',
-    email: 'barlabtahiti@gmail.com',
+
+    email:
+      'barlabtahiti@gmail.com',
+
     password:
       process.env.BAR_PASSWORD_BRANDON,
-    bar_role: 'staff',
-    bar_access: 'bar_team',
+
+    bar_role:
+      'staff',
+
+    bar_access:
+      'bar_team',
   },
 ]
+
+/*
+==================================================
+VÉRIFICATION DES MOTS DE PASSE
+==================================================
+*/
 
 for (const item of users) {
   if (!item.password) {
     throw new Error(
-      `Mot de passe manquant dans .env.local pour ${item.name}`
+      `Mot de passe manquant pour ${item.name}`
     )
   }
 }
 
+/*
+==================================================
+RÉCUPÉRATION DES UTILISATEURS SUPABASE
+==================================================
+*/
+
 console.log('')
-console.log(
-  '=== COMPTES BARNUKU ==='
-)
+console.log('====================================')
+console.log('MISE À JOUR DES COMPTES BARNUKU')
+console.log('====================================')
 console.log('')
 
 const {
@@ -133,48 +202,82 @@ if (listError) {
   throw listError
 }
 
+const existingUsers =
+  listData.users
+
+/*
+==================================================
+CRÉATION / MISE À JOUR
+==================================================
+*/
+
 for (const item of users) {
   console.log(
     `Traitement de ${item.name}...`
   )
 
   /*
-   * Recherche d'abord avec
-   * l'adresse actuelle.
+   * Recherche avec l'adresse
+   * actuellement souhaitée.
    */
+
   let existing =
-    listData.users.find(
-      user =>
-        user.email?.toLowerCase() ===
+    existingUsers.find(
+      (user) =>
+        user.email
+          ?.toLowerCase() ===
         item.email.toLowerCase()
     )
 
   /*
-   * Pour Lola, si la nouvelle
-   * adresse n'existe pas encore,
-   * on recherche l'ancienne.
+   * Cas spécial LOLA :
+   *
+   * Si la nouvelle adresse
+   * n'existe pas encore,
+   * recherche de son ancien compte.
    */
+
   if (
     !existing &&
     item.old_email
   ) {
     existing =
-      listData.users.find(
-        user =>
+      existingUsers.find(
+        (user) =>
           user.email
             ?.toLowerCase() ===
           item.old_email
             .toLowerCase()
       )
+
+    if (existing) {
+      console.log(
+        `Ancien compte trouvé : ${existing.email}`
+      )
+
+      console.log(
+        `Nouvelle adresse : ${item.email}`
+      )
+    }
   }
 
+  /*
+   * Métadonnées communes
+   */
+
   const userMetadata = {
-    full_name: item.name,
+    full_name:
+      item.name,
+
     first_name:
       item.first_name,
+
     employee_id:
       item.employee_id,
-    department: 'Bar',
+
+    department:
+      'Bar',
+
     role:
       item.role_label,
   }
@@ -194,9 +297,13 @@ for (const item of users) {
   }
 
   /*
-   * COMPTE EXISTANT
+   * UTILISATEUR EXISTANT
    */
+
   if (existing) {
+    const oldAddress =
+      existing.email || ''
+
     const {
       data: updated,
       error: updateError,
@@ -216,27 +323,31 @@ for (const item of users) {
 
             user_metadata: {
               ...(
-                existing
-                  .user_metadata ||
+                existing.user_metadata ||
                 {}
               ),
+
               ...userMetadata,
             },
 
             app_metadata: {
               ...(
-                existing
-                  .app_metadata ||
+                existing.app_metadata ||
                 {}
               ),
+
               ...appMetadata,
             },
           }
         )
 
     if (updateError) {
+      console.error('')
       console.error(
-        `ERREUR ${item.name} :`,
+        `ERREUR ${item.name}`
+      )
+
+      console.error(
         updateError.message
       )
 
@@ -248,16 +359,37 @@ for (const item of users) {
       `MIS À JOUR : ${item.name}`
     )
 
+    if (
+      oldAddress.toLowerCase() !==
+      item.email.toLowerCase()
+    ) {
+      console.log(
+        `ANCIEN EMAIL : ${oldAddress}`
+      )
+
+      console.log(
+        `NOUVEL EMAIL : ${updated.user.email}`
+      )
+    } else {
+      console.log(
+        `EMAIL : ${updated.user.email}`
+      )
+    }
+
     console.log(
-      `Email : ${updated.user.email}`
+      `EMPLOYEE ID : ${item.employee_id}`
     )
 
     console.log(
-      `Employee ID : ${item.employee_id}`
+      `RÔLE : ${item.bar_role}`
     )
 
     console.log(
-      `Rôle : ${item.bar_role}`
+      `ACCÈS : ${item.bar_access}`
+    )
+
+    console.log(
+      'EMAIL CONFIRMÉ : OUI'
     )
 
     console.log('')
@@ -266,8 +398,10 @@ for (const item of users) {
   }
 
   /*
-   * NOUVEAU COMPTE
+   * UTILISATEUR INEXISTANT :
+   * création du compte.
    */
+
   const {
     data: created,
     error: createError,
@@ -291,8 +425,12 @@ for (const item of users) {
       })
 
   if (createError) {
+    console.error('')
     console.error(
-      `ERREUR ${item.name} :`,
+      `ERREUR ${item.name}`
+    )
+
+    console.error(
       createError.message
     )
 
@@ -305,20 +443,28 @@ for (const item of users) {
   )
 
   console.log(
-    `Email : ${created.user.email}`
+    `EMAIL : ${created.user.email}`
   )
 
   console.log(
-    `Employee ID : ${item.employee_id}`
+    `EMPLOYEE ID : ${item.employee_id}`
   )
 
   console.log(
-    `Rôle : ${item.bar_role}`
+    `RÔLE : ${item.bar_role}`
+  )
+
+  console.log(
+    `ACCÈS : ${item.bar_access}`
+  )
+
+  console.log(
+    'EMAIL CONFIRMÉ : OUI'
   )
 
   console.log('')
 }
 
-console.log(
-  '=== TERMINÉ ==='
-)
+console.log('====================================')
+console.log('TERMINÉ')
+console.log('====================================')
