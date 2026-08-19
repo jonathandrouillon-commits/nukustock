@@ -1,1166 +1,2495 @@
-import { createClient } from '@supabase/supabase-js'
+'use client'
 
-const url =
-  process.env.NEXT_PUBLIC_SUPABASE_URL
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 
-const serviceRole =
-  process.env.SUPABASE_SERVICE_ROLE_KEY
+import { Card, Page } from '@/components/ui'
+import { supabase } from '@/lib/supabase'
+import { useProducts } from '@/lib/store'
 
-if (!url || !serviceRole) {
-  throw new Error(
-    'NEXT_PUBLIC_SUPABASE_URL et SUPABASE_SERVICE_ROLE_KEY sont requis dans .env.local'
+type ProductSheet = {
+  product_id: string
+  description: string
+  history: string
+  production_method: string
+  aromatic_profile: string
+  anecdote: string
+  service_notes: string
+  updated_at?: string
+}
+
+type BarRole =
+  | 'manager_admin'
+  | 'assistant_manager'
+  | 'staff'
+  | null
+
+type ViewMode =
+  | 'auto'
+  | 'phone'
+  | 'tablet'
+  | 'pc'
+
+function normalize(
+  value: unknown
+) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(
+      /[\u0300-\u036f]/g,
+      ''
+    )
+    .toLowerCase()
+    .trim()
+}
+
+function categoryOf(
+  product: any
+) {
+  return (
+    product.subcategory ||
+    product.category ||
+    'Divers'
   )
 }
 
-const admin = createClient(
-  url,
-  serviceRole,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-      detectSessionInUrl: false,
-    },
-  }
-)
+export default function ProductSheetsPage() {
+  const { items: products } =
+    useProducts()
 
-const RAS = 'R.A.S'
+  const [role, setRole] =
+    useState<BarRole>(null)
 
-function normalize(value) {
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[’']/g, '')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-}
+  const [sheets, setSheets] =
+    useState<
+      Record<string, ProductSheet>
+    >({})
 
-function cleanName(name) {
-  return String(name || '')
-    .replace(
-      /\s*-\s*(Bouteille|Canette|Boite|Magnum Bouteille|Magnum|Jeroboam)\s+.*$/i,
-      ''
+  /*
+   * NukuStock affiche les produits avec legacy_id quand il existe,
+   * alors que bar_product_sheets utilise l'UUID réel de products.id.
+   *
+   * Cette table de correspondance permet de relier les deux.
+   * clé   = id utilisé par l'interface NukuStock
+   * valeur = UUID réel public.products.id
+   */
+  const [
+    productDbIds,
+    setProductDbIds,
+  ] =
+    useState<
+      Record<string, string>
+    >({})
+
+  const [category, setCategory] =
+    useState('Toutes')
+
+  const [search, setSearch] =
+    useState('')
+
+  const [selectedId, setSelectedId] =
+    useState('')
+
+  const [editing, setEditing] =
+    useState(false)
+
+  const [draft, setDraft] =
+    useState<ProductSheet | null>(
+      null
     )
-    .replace(/\s+/g, ' ')
-    .trim()
-}
 
-function exactSheet(product) {
-  const name =
-    cleanName(product.name)
-
-  const n =
-    normalize(name)
-
-  const rules = [
-    {
-      keys: [
-        'grey goose',
-      ],
-      value: {
-        description:
-          'Vodka française premium élaborée à partir de blé tendre d’hiver de Picardie et d’eau de source naturelle.',
-
-        aromatic_profile:
-          'Profil doux et net, texture soyeuse, notes céréalières fines et légère fraîcheur.',
-
-        history:
-          'Grey Goose a été créée en 1997 par Sidney Frank avec le maître distillateur François Thibault.',
-
-        production_method:
-          'Blé tendre d’hiver français moulu, transformé, fermenté puis distillé avant assemblage avec de l’eau de source.',
-
-        anecdote:
-          'Grey Goose met en avant une production française utilisant notamment du blé tendre d’hiver et de l’eau de source.',
-      },
-    },
-
-    {
-      keys: [
-        'ketel one',
-      ],
-      value: {
-        description:
-          'Vodka néerlandaise premium de la famille Nolet, connue pour son profil net et légèrement poivré.',
-
-        aromatic_profile:
-          'Agrumes fins, céréales, poivre blanc et finale propre.',
-
-        history:
-          'Ketel One est produite par la famille Nolet à Schiedam, aux Pays-Bas, une famille de distillateurs active depuis le XVIIe siècle.',
-
-        production_method:
-          'Vodka de blé combinant distillation moderne et utilisation d’alambics en cuivre pour une partie de la production.',
-
-        anecdote:
-          'Le nom Ketel One fait référence à l’alambic historique Distilleerketel No. 1 de la famille Nolet.',
-      },
-    },
-
-    {
-      keys: [
-        'belvedere',
-      ],
-      value: {
-        description:
-          'Vodka polonaise premium élaborée à partir de seigle.',
-
-        aromatic_profile:
-          'Seigle, poivre blanc, vanille légère et texture crémeuse.',
-
-        history:
-          'Belvedere est une vodka polonaise produite dans la tradition des vodkas de seigle.',
-
-        production_method:
-          'Distillation de seigle puis assemblage avec de l’eau avant mise en bouteille.',
-
-        anecdote:
-          'Son nom fait référence au palais du Belvédère de Varsovie, représenté sur la bouteille.',
-      },
-    },
-
-    {
-      keys: [
-        'hendricks',
-        'hendrick s',
-      ],
-      value: {
-        description:
-          'Gin écossais premium reconnu pour l’association du genièvre, du concombre et de la rose.',
-
-        aromatic_profile:
-          'Genièvre délicat, concombre frais, rose, agrumes et épices douces.',
-
-        history:
-          'Hendrick’s est apparu à la fin des années 1990 et a participé au renouveau mondial du gin premium.',
-
-        production_method:
-          'Distillation utilisant deux types d’alambics, puis assemblage et ajout d’essences de concombre et de rose.',
-
-        anecdote:
-          'Le service avec une tranche de concombre est devenu une signature emblématique de Hendrick’s.',
-      },
-    },
-
-    {
-      keys: [
-        'ki no bi',
-        'kinobi',
-      ],
-      value: {
-        description:
-          'Gin japonais produit à Kyoto et construit autour de botaniques japonaises.',
-
-        aromatic_profile:
-          'Yuzu, genièvre, agrumes, thé et épices japonaises.',
-
-        history:
-          'KI NO BI est produit à Kyoto et fait partie des références du gin japonais contemporain.',
-
-        production_method:
-          'Différents groupes de botaniques sont distillés séparément puis assemblés.',
-
-        anecdote:
-          'KI NO BI signifie « la beauté des saisons ».',
-      },
-    },
-
-    {
-      keys: [
-        'barr hill',
-      ],
-      value: {
-        description:
-          'Gin américain du Vermont associant genièvre et miel brut.',
-
-        aromatic_profile:
-          'Genièvre, fleurs, miel, herbes et texture ronde.',
-
-        history:
-          'Barr Hill est produit dans le Vermont avec une identité fortement liée à l’apiculture.',
-
-        production_method:
-          'Gin distillé autour du genièvre puis fini avec du miel brut.',
-
-        anecdote:
-          'Le miel est une véritable signature aromatique du gin Barr Hill.',
-      },
-    },
-
-    {
-      keys: [
-        'bacardi',
-      ],
-      value: {
-        description:
-          'Rhum de tradition cubaine produit par la maison Bacardí.',
-
-        aromatic_profile:
-          'Canne, vanille, fruits, agrumes et notes boisées variables selon la référence.',
-
-        history:
-          'Bacardí a été fondée à Santiago de Cuba en 1862 par Don Facundo Bacardí Massó.',
-
-        production_method:
-          'Rhum élaboré à partir de mélasse fermentée puis distillée. Le vieillissement et la filtration varient selon la référence.',
-
-        anecdote:
-          'Bacardí est historiquement associé à plusieurs grands cocktails cubains, notamment le Daiquiri et le Cuba Libre.',
-      },
-    },
-
-    {
-      keys: [
-        'havana club',
-      ],
-      value: {
-        description:
-          'Rhum cubain de tradition espagnole, étroitement associé aux grands cocktails de La Havane.',
-
-        aromatic_profile:
-          'Canne, vanille légère, fruits, agrumes et notes boisées variables selon l’âge.',
-
-        history:
-          'Havana Club est une marque historique du rhum cubain.',
-
-        production_method:
-          'Mélasse fermentée et distillée, puis vieillissement et assemblage selon l’expression.',
-
-        anecdote:
-          'Mojito, Daiquiri et Cuba Libre sont trois cocktails emblématiques du rhum cubain.',
-      },
-    },
-
-    {
-      keys: [
-        'diplomatico',
-      ],
-      value: {
-        description:
-          'Rhum vénézuélien connu pour son style riche et rond.',
-
-        aromatic_profile:
-          'Caramel, orange confite, vanille, cacao, fruits secs et épices.',
-
-        history:
-          'Diplomático est produit au Venezuela et fait partie des marques de rhum vénézuélien les plus connues internationalement.',
-
-        production_method:
-          'Assemblage de rhums issus de différents procédés de distillation puis vieillissement en fûts selon la référence.',
-
-        anecdote:
-          'Son profil généralement rond et gourmand en fait une référence populaire pour la dégustation.',
-      },
-    },
-
-    {
-      keys: [
-        'clement xo',
-        'clément xo',
-      ],
-      value: {
-        description:
-          'Rhum agricole vieux de Martinique élaboré à partir de pur jus de canne.',
-
-        aromatic_profile:
-          'Canne, fruits secs, épices, cacao, orange, vanille et bois.',
-
-        history:
-          'La maison Clément fait partie des noms historiques du rhum agricole martiniquais.',
-
-        production_method:
-          'Jus frais de canne fermenté, distillé puis vieilli longuement en fûts avant assemblage.',
-
-        anecdote:
-          'Le rhum agricole utilise directement le jus frais de canne contrairement aux rhums élaborés à partir de mélasse.',
-      },
-    },
-
-    {
-      keys: [
-        'manao',
-        'mana o',
-      ],
-      value: {
-        description:
-          'Rhum polynésien de pur jus de canne mettant en avant la canne locale.',
-
-        aromatic_profile:
-          'Canne fraîche, notes végétales, agrumes, fleurs et poivre.',
-
-        history:
-          'Mana’o participe au développement du rhum de pur jus de canne en Polynésie française.',
-
-        production_method:
-          'Jus frais de canne fermenté puis distillé.',
-
-        anecdote:
-          'Mana’o possède une identité directement liée au terroir polynésien.',
-      },
-    },
-
-    {
-      keys: [
-        'patron anejo',
-        'patrón añejo',
-      ],
-      value: {
-        description:
-          'Tequila Añejo premium élaborée à partir d’agave bleu Weber puis vieillie en fûts.',
-
-        aromatic_profile:
-          'Agave cuit, vanille, caramel, chêne, poivre et fruits secs.',
-
-        history:
-          'Patrón a été fondée en 1989 et a participé à l’essor international de la tequila premium.',
-
-        production_method:
-          'Agaves bleus Weber cuits, broyés, fermentés et distillés puis vieillis en fûts.',
-
-        anecdote:
-          'Patrón utilise notamment une tahona en pierre pour une partie de sa production.',
-      },
-    },
-
-    {
-      keys: [
-        'patron reposado',
-        'patrón reposado',
-        'roca patron reposado',
-      ],
-      value: {
-        description:
-          'Tequila Reposado premium élaborée à partir d’agave bleu Weber et reposée en fûts.',
-
-        aromatic_profile:
-          'Agave cuit, agrumes, vanille, miel léger, poivre et chêne.',
-
-        history:
-          'Patrón a été fondée en 1989 et a contribué au développement du segment premium de la tequila.',
-
-        production_method:
-          'Agaves bleus Weber cuits, broyés, fermentés et distillés puis reposés en fûts.',
-
-        anecdote:
-          'Reposado signifie « reposée » et désigne une tequila ayant passé une période réglementée en contenant de bois.',
-      },
-    },
-
-    {
-      keys: [
-        'roca patron silver',
-      ],
-      value: {
-        description:
-          'Tequila Silver premium centrée sur l’expression de l’agave bleu Weber.',
-
-        aromatic_profile:
-          'Agave cuit, agrumes, poivre, herbes et minéralité.',
-
-        history:
-          'Roca Patrón a été conçue pour mettre particulièrement en avant le broyage traditionnel à la tahona.',
-
-        production_method:
-          'Agaves cuits, broyés à la tahona, fermentés puis distillés.',
-
-        anecdote:
-          'Une tahona est une lourde roue de pierre traditionnellement utilisée pour écraser l’agave cuit.',
-      },
-    },
-
-    {
-      keys: [
-        'del maguey',
-      ],
-      value: {
-        description:
-          'Mezcal mexicain artisanal dont le caractère dépend de la cuvée et du village de production.',
-
-        aromatic_profile:
-          'Agave rôti, fumée, herbes, agrumes, terre et minéralité.',
-
-        history:
-          'Del Maguey a contribué à faire connaître internationalement les mezcals artisanaux de villages.',
-
-        production_method:
-          'Agaves cuits traditionnellement, puis broyés, fermentés et distillés. La méthode précise dépend de la cuvée.',
-
-        anecdote:
-          'Le mezcal couvre une grande diversité d’agaves, de villages et de méthodes de production.',
-      },
-    },
-
-    {
-      keys: [
-        'don q',
-      ],
-      value: {
-        description:
-          'Rhum portoricain produit par la famille Serrallés.',
-
-        aromatic_profile:
-          'Vanille, caramel, fruits, épices et notes boisées variables selon l’expression.',
-
-        history:
-          'Don Q est une maison historique de Porto Rico liée à la famille Serrallés.',
-
-        production_method:
-          'Rhum de mélasse distillé, puis éventuellement vieilli et assemblé selon la référence.',
-
-        anecdote:
-          'Le nom Don Q fait référence à Don Quichotte.',
-      },
-    },
-
-    {
-      keys: [
-        'lagavulin 16',
-      ],
-      value: {
-        description:
-          'Single malt Scotch whisky d’Islay âgé de 16 ans, connu pour son caractère tourbé et maritime.',
-
-        aromatic_profile:
-          'Tourbe, fumée, iode, fruits secs, bois, épices et longue finale maritime.',
-
-        history:
-          'Lagavulin est une distillerie historique de la côte sud de l’île d’Islay en Écosse.',
-
-        production_method:
-          'Whisky de malt distillé en alambics puis vieilli au minimum 16 ans pour cette expression.',
-
-        anecdote:
-          'Islay est particulièrement célèbre pour ses whiskies tourbés et maritimes.',
-      },
-    },
-
-    {
-      keys: [
-        'glenmorangie',
-      ],
-      value: {
-        description:
-          'Single malt Scotch whisky des Highlands au style généralement floral et fruité.',
-
-        aromatic_profile:
-          'Agrumes, fruits, fleurs, vanille, miel et épices légères.',
-
-        history:
-          'Glenmorangie est une distillerie des Highlands écossais.',
-
-        production_method:
-          'Single malt distillé dans de hauts alambics en cuivre puis élevé en fûts.',
-
-        anecdote:
-          'Glenmorangie est particulièrement connue pour la grande hauteur de ses alambics.',
-      },
-    },
-
-    {
-      keys: [
-        'nikka from the barrel',
-      ],
-      value: {
-        description:
-          'Whisky japonais d’assemblage au caractère intense et concentré.',
-
-        aromatic_profile:
-          'Fruits mûrs, épices, caramel, orange, bois et finale chaleureuse.',
-
-        history:
-          'Nikka a été fondée par Masataka Taketsuru, figure majeure de l’histoire du whisky japonais.',
-
-        production_method:
-          'Assemblage de whiskies de malt et de grain puis mariage avant embouteillage.',
-
-        anecdote:
-          'Sa petite bouteille carrée est devenue l’une de ses signatures visuelles.',
-      },
-    },
-
-    {
-      keys: [
-        'buffalo trace',
-      ],
-      value: {
-        description:
-          'Bourbon américain du Kentucky au style équilibré et gourmand.',
-
-        aromatic_profile:
-          'Vanille, caramel, céréales, épices, chêne et fruits mûrs.',
-
-        history:
-          'Buffalo Trace est produit à Frankfort dans le Kentucky, sur un site historique de production de whiskey.',
-
-        production_method:
-          'Whiskey contenant une majorité de maïs, distillé puis vieilli en fûts de chêne neufs carbonisés.',
-
-        anecdote:
-          'Pour être appelé bourbon, un whiskey américain doit notamment contenir au moins 51 % de maïs.',
-      },
-    },
-
-    {
-      keys: [
-        'jack daniels',
-        'jack daniel s',
-      ],
-      value: {
-        description:
-          'Tennessee whiskey américain connu pour son profil souple, vanillé et boisé.',
-
-        aromatic_profile:
-          'Caramel, vanille, banane, céréales, chêne et épices douces.',
-
-        history:
-          'Jack Daniel’s est produit à Lynchburg dans le Tennessee.',
-
-        production_method:
-          'Whiskey filtré sur charbon de bois d’érable avant vieillissement en fûts de chêne neufs carbonisés.',
-
-        anecdote:
-          'Cette filtration sur charbon est associée au Lincoln County Process.',
-      },
-    },
-
-    {
-      keys: [
-        'cointreau',
-      ],
-      value: {
-        description:
-          'Liqueur française d’orange, claire et intense.',
-
-        aromatic_profile:
-          'Orange fraîche, zestes, fleurs blanches et épices légères.',
-
-        history:
-          'Cointreau est née à Angers au XIXe siècle.',
-
-        production_method:
-          'Distillation d’écorces d’oranges douces et amères puis assemblage.',
-
-        anecdote:
-          'Cointreau est un ingrédient majeur de cocktails comme la Margarita, le Sidecar et le Cosmopolitan.',
-      },
-    },
-
-    {
-      keys: [
-        'grand marnier',
-      ],
-      value: {
-        description:
-          'Liqueur française d’orange associant agrumes et cognac.',
-
-        aromatic_profile:
-          'Orange confite, zestes, vanille, caramel, bois et épices.',
-
-        history:
-          'Grand Marnier est une liqueur française historique créée à la fin du XIXe siècle.',
-
-        production_method:
-          'Assemblage d’essence d’orange amère avec du cognac puis maturation.',
-
-        anecdote:
-          'Sa base de cognac lui donne un profil différent d’un triple sec classique.',
-      },
-    },
-
-    {
-      keys: [
-        'kahlua',
-        'kahlúa',
-      ],
-      value: {
-        description:
-          'Liqueur de café mexicaine douce et gourmande.',
-
-        aromatic_profile:
-          'Café torréfié, caramel, vanille et cacao.',
-
-        history:
-          'Kahlúa est originaire du Mexique et s’est imposée comme l’une des liqueurs de café les plus connues.',
-
-        production_method:
-          'Liqueur élaborée autour du café, du sucre et d’une base alcoolisée.',
-
-        anecdote:
-          'Kahlúa est notamment utilisée dans le White Russian et le Black Russian.',
-      },
-    },
-
-    {
-      keys: [
-        'baileys',
-        'bailey',
-      ],
-      value: {
-        description:
-          'Liqueur irlandaise crémeuse associant crème et whiskey irlandais.',
-
-        aromatic_profile:
-          'Crème, cacao, vanille, caramel et whiskey doux.',
-
-        history:
-          'Baileys Original Irish Cream a été lancé dans les années 1970.',
-
-        production_method:
-          'Assemblage de crème, spiritueux irlandais, sucre et arômes.',
-
-        anecdote:
-          'Les ingrédients très acides peuvent faire cailler une liqueur contenant de la crème.',
-      },
-    },
-
-    {
-      keys: [
-        'campari',
-      ],
-      value: {
-        description:
-          'Amer italien rouge, intense et complexe, emblématique de l’aperitivo.',
-
-        aromatic_profile:
-          'Orange amère, herbes, racines, épices et amertume persistante.',
-
-        history:
-          'Campari est né en Italie au XIXe siècle.',
-
-        production_method:
-          'La recette exacte et l’assemblage des ingrédients aromatiques sont confidentiels.',
-
-        anecdote:
-          'Le Negroni et l’Americano comptent parmi les cocktails les plus célèbres utilisant Campari.',
-      },
-    },
-
-    {
-      keys: [
-        'st germain',
-        'saint germain',
-      ],
-      value: {
-        description:
-          'Liqueur florale élaborée à partir de fleurs de sureau.',
-
-        aromatic_profile:
-          'Fleur de sureau, poire, agrumes, fruits blancs et notes miellées.',
-
-        history:
-          'St-Germain a contribué à populariser la fleur de sureau dans le cocktail contemporain.',
-
-        production_method:
-          'Liqueur élaborée à partir de fleurs de sureau et d’une base alcoolisée sucrée.',
-
-        anecdote:
-          'Une petite quantité suffit généralement pour apporter une signature florale très reconnaissable.',
-      },
-    },
-
-    {
-      keys: [
-        'fernet branca',
-      ],
-      value: {
-        description:
-          'Fernet italien très amer, herbacé et mentholé.',
-
-        aromatic_profile:
-          'Herbes amères, menthe, réglisse, racines et épices.',
-
-        history:
-          'Fernet-Branca est une référence historique de la famille des fernet italiens.',
-
-        production_method:
-          'Assemblage de plantes, racines et épices puis maturation.',
-
-        anecdote:
-          'En Argentine, le Fernet accompagné de cola est particulièrement populaire.',
-      },
-    },
-
-    {
-      keys: [
-        'veuve clicquot grande dame',
-        'grande dame',
-      ],
-      value: {
-        description:
-          'Cuvée prestige de la maison Veuve Clicquot.',
-
-        aromatic_profile:
-          'Agrumes, fruits blancs, brioche, noisette, fleurs et épices.',
-
-        history:
-          'La Grande Dame rend hommage à Madame Clicquot.',
-
-        production_method:
-          'Méthode traditionnelle champenoise avec seconde fermentation en bouteille et élevage sur lies.',
-
-        anecdote:
-          'Le nom La Grande Dame fait directement référence à Madame Clicquot.',
-      },
-    },
-
-    {
-      keys: [
-        'veuve clicquot',
-      ],
-      value: {
-        description:
-          'Champagne de la maison Veuve Clicquot.',
-
-        aromatic_profile:
-          'Fruits, agrumes, brioche et notes toastées, avec des variations selon la cuvée.',
-
-        history:
-          'La maison Veuve Clicquot est profondément liée à Madame Clicquot, figure majeure de l’histoire du Champagne au XIXe siècle.',
-
-        production_method:
-          'Méthode traditionnelle champenoise avec seconde fermentation en bouteille et élevage sur lies.',
-
-        anecdote:
-          'Madame Clicquot est historiquement associée au développement de techniques de remuage du Champagne.',
-      },
-    },
-
-    {
-      keys: [
-        'hinano',
-      ],
-      value: {
-        description:
-          'Bière emblématique de Tahiti.',
-
-        aromatic_profile:
-          'Céréales, malt, fraîcheur et amertume modérée selon la référence.',
-
-        history:
-          'Hinano est une marque fortement associée à Tahiti et à la Polynésie française.',
-
-        production_method:
-          'Brassage, fermentation puis conditionnement. Les ingrédients et procédés précis dépendent de la référence.',
-
-        anecdote:
-          'Le nom et l’identité visuelle Hinano sont devenus particulièrement reconnaissables en Polynésie française.',
-      },
-    },
-
-    {
-      keys: [
-        'chablis',
-      ],
-      value: {
-        description:
-          'Vin blanc de Bourgogne élaboré à partir de Chardonnay.',
-
-        aromatic_profile:
-          'Agrumes, pomme, fleurs blanches, fruits à chair blanche et notes minérales.',
-
-        history:
-          'Chablis se situe dans le nord de la Bourgogne et est célèbre pour ses vins blancs.',
-
-        production_method:
-          'Vinification du Chardonnay. L’utilisation de cuves ou de fûts dépend du producteur et de la cuvée.',
-
-        anecdote:
-          'Les vins de l’appellation Chablis sont élaborés à partir de Chardonnay.',
-      },
-    },
-
-    {
-      keys: [
-        'chassagne montrachet',
-        'chassagne-montrachet',
-      ],
-      value: {
-        description:
-          'Vin de Bourgogne issu de l’appellation Chassagne-Montrachet.',
-
-        aromatic_profile:
-          'Pour les blancs : agrumes, fruits blancs, fleurs, noisette et minéralité. Le profil dépend du domaine et du millésime.',
-
-        history:
-          'Chassagne-Montrachet est une appellation prestigieuse de la Côte de Beaune.',
-
-        production_method:
-          'La méthode dépend du producteur, du cépage et de la cuvée.',
-
-        anecdote:
-          'Chassagne-Montrachet produit aussi bien des vins blancs que des vins rouges.',
-      },
-    },
-
-    {
-      keys: [
-        'gevrey chambertin',
-        'gevrey-chambertin',
-      ],
-      value: {
-        description:
-          'Vin rouge de Bourgogne issu principalement de Pinot Noir.',
-
-        aromatic_profile:
-          'Cerise, framboise, cassis, épices et sous-bois selon l’âge et le producteur.',
-
-        history:
-          'Gevrey-Chambertin est l’un des villages les plus célèbres de la Côte de Nuits.',
-
-        production_method:
-          'Vinification du Pinot Noir puis élevage selon les choix du domaine.',
-
-        anecdote:
-          'Gevrey-Chambertin compte plusieurs grands crus parmi les plus prestigieux de Bourgogne.',
-      },
-    },
-
-    {
-      keys: [
-        'pommard',
-      ],
-      value: {
-        description:
-          'Vin rouge de Bourgogne issu de Pinot Noir.',
-
-        aromatic_profile:
-          'Cerise noire, mûre, prune, épices, terre et sous-bois selon le domaine et le millésime.',
-
-        history:
-          'Pommard est une appellation historique de la Côte de Beaune.',
-
-        production_method:
-          'Vinification du Pinot Noir puis élevage selon les choix du producteur.',
-
-        anecdote:
-          'Pommard est réputé pour des Pinot Noir souvent structurés.',
-      },
-    },
-
-    {
-      keys: [
-        'cote rotie',
-        'côte rôtie',
-        'côte-rôtie',
-      ],
-      value: {
-        description:
-          'Vin rouge du Rhône septentrional dominé par la Syrah.',
-
-        aromatic_profile:
-          'Mûre, cassis, violette, poivre noir, olive et épices.',
-
-        history:
-          'Côte-Rôtie est une appellation historique du Rhône septentrional.',
-
-        production_method:
-          'Vinification principalement de Syrah. Une proportion de Viognier peut être utilisée dans le cadre de l’appellation.',
-
-        anecdote:
-          'Côte-Rôtie signifie littéralement « côte rôtie ».',
-      },
-    },
-
-    {
-      keys: [
-        'barolo',
-      ],
-      value: {
-        description:
-          'Vin rouge du Piémont italien élaboré à partir de Nebbiolo.',
-
-        aromatic_profile:
-          'Rose, cerise, fruits rouges, réglisse, épices et sous-bois.',
-
-        history:
-          'Barolo est l’une des appellations les plus prestigieuses d’Italie.',
-
-        production_method:
-          'Vinification du Nebbiolo puis élevage réglementé avant commercialisation.',
-
-        anecdote:
-          'Le Nebbiolo peut conserver une couleur relativement claire tout en développant une structure tannique importante.',
-      },
-    },
-
-    {
-      keys: [
-        'solaia',
-      ],
-      value: {
-        description:
-          'Grand vin rouge toscan produit par Antinori.',
-
-        aromatic_profile:
-          'Cassis, cerise noire, cacao, tabac, épices et notes boisées.',
-
-        history:
-          'Solaia fait partie des grands vins modernes de Toscane.',
-
-        production_method:
-          'Assemblage de cépages rouges vinifiés puis élevés avant assemblage final selon le millésime.',
-
-        anecdote:
-          'Solaia est devenu l’un des vins emblématiques de la famille Antinori.',
-      },
-    },
-
-    {
-      keys: [
-        'ornellaia',
-        'serre nuove',
-      ],
-      value: {
-        description:
-          'Vin rouge de Bolgheri en Toscane élaboré dans un style inspiré des assemblages bordelais.',
-
-        aromatic_profile:
-          'Cassis, mûre, prune, épices, tabac et herbes méditerranéennes.',
-
-        history:
-          'Bolgheri s’est imposé comme l’une des grandes régions des vins modernes italiens.',
-
-        production_method:
-          'Vinification de plusieurs cépages puis assemblage et élevage selon la cuvée.',
-
-        anecdote:
-          'Bolgheri est notamment célèbre pour l’utilisation de cépages comme Cabernet Sauvignon, Merlot et Cabernet Franc.',
-      },
-    },
-  ]
-
-  for (const rule of rules) {
-    const matches =
-      rule.keys.some(
-        (key) =>
-          n.includes(
-            normalize(key)
-          )
+  const [loading, setLoading] =
+    useState(true)
+
+  const [saving, setSaving] =
+    useState(false)
+
+  const [error, setError] =
+    useState('')
+
+  const [message, setMessage] =
+    useState('')
+
+
+  const importInputRef =
+    useRef<HTMLInputElement>(
+      null
+    )
+
+  const [
+    viewMode,
+    setViewMode,
+  ] =
+    useState<ViewMode>(
+      'auto'
+    )
+
+  const [
+    importing,
+    setImporting,
+  ] =
+    useState(false)
+
+  const [
+    deleting,
+    setDeleting,
+  ] =
+    useState(false)
+
+  useEffect(() => {
+    try {
+      const saved =
+        localStorage.getItem(
+          'bar_product_sheets_view_mode'
+        ) as ViewMode | null
+
+      if (
+        saved === 'auto' ||
+        saved === 'phone' ||
+        saved === 'tablet' ||
+        saved === 'pc'
+      ) {
+        setViewMode(
+          saved
+        )
+      }
+    } catch {
+      // Rien : affichage auto par défaut.
+    }
+  }, [])
+
+  const changeViewMode = (
+    nextMode: ViewMode
+  ) => {
+    setViewMode(
+      nextMode
+    )
+
+    try {
+      localStorage.setItem(
+        'bar_product_sheets_view_mode',
+        nextMode
       )
-
-    if (matches) {
-      return rule.value
+    } catch {
+      // Rien : le choix reste actif pour la session courante.
     }
   }
 
-  return null
-}
+  const canManage =
+    role === 'manager_admin' ||
+    role ===
+      'assistant_manager'
 
-/*
- * IMPORTANT :
- *
- * Si nous n'avons pas une fiche spécifique suffisamment
- * fiable pour une référence, on NE FABRIQUE PAS
- * d'information.
- *
- * On écrit simplement R.A.S.
- */
-function fallbackSheet() {
-  return {
-    description: RAS,
-    aromatic_profile: RAS,
-    history: RAS,
-    production_method: RAS,
-    anecdote: RAS,
-  }
-}
+  useEffect(() => {
+    let active = true
 
-function buildSheet(product) {
-  return (
-    exactSheet(product) ||
-    fallbackSheet()
-  )
-}
+    const load = async () => {
+      const {
+        data: { session },
+      } =
+        await supabase.auth
+          .getSession()
 
-console.log('')
-console.log(
-  '========================================'
-)
-console.log(
-  'REMISE À PLAT FICHES PRODUITS BAR TEAM'
-)
-console.log(
-  '========================================'
-)
-console.log('')
+      if (!active) return
 
-const {
-  data: products,
-  error: productError,
-} =
-  await admin
-    .from('products')
-    .select(
-      `
-      id,
-      internal_reference,
-      name,
-      category,
-      subcategory,
-      brand,
-      active
-      `
-    )
-    .eq(
-      'active',
-      true
-    )
-    .order('name')
+      const rawRole =
+        String(
+          session?.user
+            ?.app_metadata
+            ?.bar_role || ''
+        )
 
-if (productError) {
-  throw productError
-}
-
-console.log(
-  `Produits actifs trouvés : ${
-    products?.length || 0
-  }`
-)
-
-console.log('')
-
-let updated = 0
-let precise = 0
-let ras = 0
-let errors = 0
-
-for (
-  const product
-  of products || []
-) {
-  const exact =
-    exactSheet(product)
-
-  const generated =
-    exact ||
-    fallbackSheet()
-
-  const payload = {
-    product_id:
-      product.id,
-
-    description:
-      generated.description ||
-      RAS,
-
-    aromatic_profile:
-      generated.aromatic_profile ||
-      RAS,
-
-    history:
-      generated.history ||
-      RAS,
-
-    production_method:
-      generated.production_method ||
-      RAS,
-
-    anecdote:
-      generated.anecdote ||
-      RAS,
-
-    /*
-     * Ancien champ volontairement vidé.
-     *
-     * La nouvelle fiche ne doit contenir que :
-     *
-     * - Descriptif
-     * - Profil aromatique
-     * - Histoire
-     * - Méthode de fabrication
-     * - Anecdote
-     */
-    service_notes: '',
-
-    updated_at:
-      new Date()
-        .toISOString(),
-  }
-
-  const {
-    error,
-  } =
-    await admin
-      .from(
-        'bar_product_sheets'
+      setRole(
+        rawRole ===
+            'manager_admin' ||
+          rawRole ===
+            'assistant_manager' ||
+          rawRole === 'staff'
+          ? rawRole
+          : null
       )
-      .upsert(
-        payload,
-        {
-          onConflict:
+
+      /*
+       * IMPORTANT :
+       *
+       * useProducts() expose product.id =
+       *   legacy_id || products.id
+       *
+       * tandis que bar_product_sheets.product_id
+       * contient products.id (UUID Supabase).
+       *
+       * On récupère donc les deux tables ensemble et
+       * on convertit chaque UUID Supabase vers l'id
+       * réellement utilisé par l'interface.
+       */
+      const [
+        sheetsResult,
+        productsResult,
+      ] =
+        await Promise.all([
+          supabase
+            .from(
+              'bar_product_sheets'
+            )
+            .select('*'),
+
+          supabase
+            .from(
+              'products'
+            )
+            .select(
+              'id, legacy_id'
+            )
+            .eq(
+              'active',
+              true
+            ),
+        ])
+
+      if (!active) return
+
+      if (
+        sheetsResult.error
+      ) {
+        setError(
+          sheetsResult.error.message
+        )
+        setLoading(false)
+        return
+      }
+
+      if (
+        productsResult.error
+      ) {
+        setError(
+          productsResult.error.message
+        )
+        setLoading(false)
+        return
+      }
+
+      const uiToDb:
+        Record<
+          string,
+          string
+        > = {}
+
+      const dbToUi =
+        new Map<
+          string,
+          string
+        >()
+
+      for (
+        const row
+        of productsResult.data ||
+        []
+      ) {
+        const uiId =
+          String(
+            row.legacy_id ||
+            row.id
+          )
+
+        const dbId =
+          String(
+            row.id
+          )
+
+        uiToDb[
+          uiId
+        ] = dbId
+
+        dbToUi.set(
+          dbId,
+          uiId
+        )
+      }
+
+      setProductDbIds(
+        uiToDb
+      )
+
+      const mapped:
+        Record<
+          string,
+          ProductSheet
+        > = {}
+
+      for (
+        const row
+        of sheetsResult.data ||
+        []
+      ) {
+        const uiProductId =
+          dbToUi.get(
+            String(
+              row.product_id
+            )
+          ) ||
+          String(
+            row.product_id
+          )
+
+        mapped[
+          uiProductId
+        ] = {
+          product_id:
+            String(
+              row.product_id
+            ),
+
+          description:
+            row.description ||
+            '',
+
+          history:
+            row.history ||
+            '',
+
+          production_method:
+            row.production_method ||
+            '',
+
+          aromatic_profile:
+            row.aromatic_profile ||
+            '',
+
+          anecdote:
+            row.anecdote ||
+            '',
+
+          service_notes:
+            row.service_notes ||
+            '',
+
+          updated_at:
+            row.updated_at,
+        }
+      }
+
+      setSheets(
+        mapped
+      )
+
+      setLoading(
+        false
+      )
+    }
+
+    void load()
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const beverageProducts =
+    useMemo(() => {
+      return products
+        .filter((product: any) => {
+          const text =
+            normalize(
+              [
+                product.category,
+                product.subcategory,
+                product.zone,
+              ].join(' ')
+            )
+
+          return (
+            text.includes(
+              'alcool'
+            ) ||
+            text.includes('gin') ||
+            text.includes(
+              'vodka'
+            ) ||
+            text.includes(
+              'rhum'
+            ) ||
+            text.includes(
+              'whisky'
+            ) ||
+            text.includes(
+              'tequila'
+            ) ||
+            text.includes(
+              'mezcal'
+            ) ||
+            text.includes(
+              'cognac'
+            ) ||
+            text.includes(
+              'armagnac'
+            ) ||
+            text.includes(
+              'liqueur'
+            ) ||
+            text.includes(
+              'biere'
+            ) ||
+            text.includes(
+              'vin'
+            ) ||
+            text.includes(
+              'champagne'
+            )
+          )
+        })
+        .sort((a: any, b: any) =>
+          String(a.name).localeCompare(
+            String(b.name),
+            'fr',
+            {
+              sensitivity:
+                'base',
+            }
+          )
+        )
+    }, [products])
+
+  const categories =
+    useMemo(() => {
+      return [
+        'Toutes',
+        ...Array.from(
+          new Set(
+            beverageProducts
+              .map(
+                (product: any) =>
+                  categoryOf(
+                    product
+                  )
+              )
+              .filter(Boolean)
+          )
+        ).sort((a, b) =>
+          String(a).localeCompare(
+            String(b),
+            'fr',
+            {
+              sensitivity:
+                'base',
+            }
+          )
+        ),
+      ]
+    }, [beverageProducts])
+
+  const visibleProducts =
+    useMemo(() => {
+      const q =
+        normalize(search)
+
+      return beverageProducts.filter(
+        (product: any) => {
+          const matchesCategory =
+            category ===
+              'Toutes' ||
+            categoryOf(
+              product
+            ) === category
+
+          if (
+            !matchesCategory
+          ) {
+            return false
+          }
+
+          if (!q) {
+            return true
+          }
+
+          return normalize(
+            [
+              product.name,
+              product.brand,
+              product.category,
+              product.subcategory,
+            ].join(' ')
+          ).includes(q)
+        }
+      )
+    }, [
+      beverageProducts,
+      category,
+      search,
+    ])
+
+  const selectedProduct =
+    useMemo(() => {
+      return products.find(
+        (product: any) =>
+          product.id ===
+          selectedId
+      )
+    }, [
+      products,
+      selectedId,
+    ])
+
+  const selectedSheet =
+    selectedId
+      ? sheets[selectedId]
+      : undefined
+
+  const openProduct = (
+    productId: string
+  ) => {
+    setSelectedId(
+      productId
+    )
+    setEditing(false)
+    setDraft(null)
+    setError('')
+    setMessage('')
+  }
+
+  const startEdit = () => {
+    if (
+      !canManage ||
+      !selectedId
+    ) {
+      return
+    }
+
+    setDraft(
+      selectedSheet || {
+        product_id:
+          productDbIds[
+            selectedId
+          ] ||
+          selectedId,
+        description: '',
+        history: '',
+        production_method:
+          '',
+        aromatic_profile:
+          '',
+        anecdote: '',
+        service_notes: '',
+      }
+    )
+
+    setEditing(true)
+  }
+
+  const saveSheet =
+    async () => {
+      if (
+        !canManage ||
+        !draft
+      ) {
+        return
+      }
+
+      setSaving(true)
+      setError('')
+      setMessage('')
+
+      const dbProductId =
+        productDbIds[
+          selectedId
+        ] ||
+        draft.product_id
+
+      const payload = {
+        ...draft,
+
+        /*
+         * Toujours enregistrer l'UUID réel de public.products.
+         * Jamais le legacy_id affiché par useProducts().
+         */
+        product_id:
+          dbProductId,
+
+        updated_at:
+          new Date()
+            .toISOString(),
+      }
+
+      const {
+        data,
+        error: saveError,
+      } =
+        await supabase
+          .from(
+            'bar_product_sheets'
+          )
+          .upsert(
+            payload,
+            {
+              onConflict:
+                'product_id',
+            }
+          )
+          .select()
+          .single()
+
+      setSaving(false)
+
+      if (saveError) {
+        setError(
+          saveError.message
+        )
+        return
+      }
+
+      setSheets(
+        (current) => ({
+          ...current,
+          [selectedId]:
+            {
+              product_id:
+                data.product_id,
+              description:
+                data.description ||
+                '',
+              history:
+                data.history || '',
+              production_method:
+                data.production_method ||
+                '',
+              aromatic_profile:
+                data.aromatic_profile ||
+                '',
+              anecdote:
+                data.anecdote || '',
+              service_notes:
+                data.service_notes ||
+                '',
+              updated_at:
+                data.updated_at,
+            },
+        })
+      )
+
+      setEditing(false)
+      setDraft(null)
+      setMessage(
+        'Fiche produit enregistrée.'
+      )
+    }
+
+  const deleteSelectedSheet =
+    async () => {
+      if (
+        !canManage ||
+        !selectedId ||
+        deleting
+      ) {
+        return
+      }
+
+      const selectedProduct =
+        products.find(
+          (product: any) =>
+            product.id ===
+            selectedId
+        )
+
+      const productName =
+        selectedProduct?.name ||
+        'ce produit'
+
+      const confirmed =
+        window.confirm(
+          `Supprimer la fiche de "${productName}" ?\n\nLe produit restera dans NukuStock. Seule sa fiche Bar Team sera supprimée.`
+        )
+
+      if (!confirmed) {
+        return
+      }
+
+      const dbProductId =
+        productDbIds[
+          selectedId
+        ] ||
+        sheets[selectedId]
+          ?.product_id
+
+      if (!dbProductId) {
+        setError(
+          'Identifiant Supabase du produit introuvable.'
+        )
+        return
+      }
+
+      setDeleting(true)
+      setError('')
+      setMessage('')
+
+      const {
+        error:
+          deleteError,
+      } =
+        await supabase
+          .from(
+            'bar_product_sheets'
+          )
+          .delete()
+          .eq(
             'product_id',
+            dbProductId
+          )
+
+      setDeleting(false)
+
+      if (deleteError) {
+        setError(
+          deleteError.message
+        )
+        return
+      }
+
+      setSheets(
+        (current) => {
+          const next = {
+            ...current,
+          }
+
+          delete next[
+            selectedId
+          ]
+
+          return next
         }
       )
 
-  if (error) {
-    errors += 1
+      setEditing(false)
+      setDraft(null)
 
-    console.error(
-      `ERREUR : ${product.name} — ${error.message}`
-    )
+      setMessage(
+        `Fiche "${productName}" supprimée.`
+      )
+    }
 
-    continue
-  }
+  const exportSheets =
+    () => {
+      const exportedSheets =
+        products
+          .map(
+            (product: any) => {
+              const sheet =
+                sheets[
+                  product.id
+                ]
 
-  updated += 1
+              if (!sheet) {
+                return null
+              }
 
-  if (exact) {
-    precise += 1
+              return {
+                ui_product_id:
+                  product.id,
 
-    console.log(
-      `MIS À JOUR [INFO] : ${product.name}`
-    )
-  } else {
-    ras += 1
+                db_product_id:
+                  productDbIds[
+                    product.id
+                  ] ||
+                  sheet.product_id,
 
-    console.log(
-      `MIS À JOUR [R.A.S] : ${product.name}`
-    )
-  }
+                internal_reference:
+                  product.internalRef ||
+                  product.internal_reference ||
+                  '',
+
+                name:
+                  product.name ||
+                  '',
+
+                category:
+                  product.category ||
+                  '',
+
+                subcategory:
+                  product.subcategory ||
+                  '',
+
+                description:
+                  sheet.description ||
+                  '',
+
+                history:
+                  sheet.history ||
+                  '',
+
+                production_method:
+                  sheet.production_method ||
+                  '',
+
+                aromatic_profile:
+                  sheet.aromatic_profile ||
+                  '',
+
+                anecdote:
+                  sheet.anecdote ||
+                  '',
+
+                service_notes:
+                  sheet.service_notes ||
+                  '',
+
+                updated_at:
+                  sheet.updated_at ||
+                  null,
+              }
+            }
+          )
+          .filter(Boolean)
+
+      const payload = {
+        app:
+          'NukuStock',
+
+        module:
+          'bar_product_sheets',
+
+        version:
+          1,
+
+        exported_at:
+          new Date()
+            .toISOString(),
+
+        count:
+          exportedSheets.length,
+
+        sheets:
+          exportedSheets,
+      }
+
+      const blob =
+        new Blob(
+          [
+            JSON.stringify(
+              payload,
+              null,
+              2
+            ),
+          ],
+          {
+            type:
+              'application/json;charset=utf-8',
+          }
+        )
+
+      const url =
+        URL.createObjectURL(
+          blob
+        )
+
+      const anchor =
+        document.createElement(
+          'a'
+        )
+
+      anchor.href =
+        url
+
+      anchor.download =
+        `Bar-Team-Fiches-Produits-${new Date()
+          .toISOString()
+          .slice(0, 10)}.json`
+
+      anchor.click()
+
+      URL.revokeObjectURL(
+        url
+      )
+
+      setMessage(
+        `${exportedSheets.length} fiche(s) exportée(s).`
+      )
+    }
+
+  const importSheets =
+    async (
+      event:
+        React.ChangeEvent<HTMLInputElement>
+    ) => {
+      const file =
+        event.target.files?.[0]
+
+      event.target.value =
+        ''
+
+      if (
+        !file ||
+        !canManage
+      ) {
+        return
+      }
+
+      setImporting(true)
+      setError('')
+      setMessage('')
+
+      try {
+        const raw =
+          await file.text()
+
+        const parsed =
+          JSON.parse(
+            raw
+          )
+
+        const rows =
+          Array.isArray(
+            parsed
+          )
+            ? parsed
+            : Array.isArray(
+                parsed?.sheets
+              )
+            ? parsed.sheets
+            : []
+
+        if (!rows.length) {
+          throw new Error(
+            'Aucune fiche produit trouvée dans ce fichier.'
+          )
+        }
+
+        const productByRef =
+          new Map<
+            string,
+            any
+          >()
+
+        const productByName =
+          new Map<
+            string,
+            any
+          >()
+
+        for (
+          const product
+          of products as any[]
+        ) {
+          const ref =
+            String(
+              product.internalRef ||
+              product.internal_reference ||
+              ''
+            )
+              .trim()
+              .toLowerCase()
+
+          if (ref) {
+            productByRef.set(
+              ref,
+              product
+            )
+          }
+
+          const name =
+            normalize(
+              product.name
+            )
+
+          if (name) {
+            productByName.set(
+              name,
+              product
+            )
+          }
+        }
+
+        const payloads:
+          ProductSheet[] = []
+
+        const uiIds:
+          string[] = []
+
+        for (
+          const row
+          of rows
+        ) {
+          const ref =
+            String(
+              row.internal_reference ||
+              row.internalRef ||
+              ''
+            )
+              .trim()
+              .toLowerCase()
+
+          const rowName =
+            normalize(
+              row.name
+            )
+
+          const matchedProduct =
+            (
+              ref
+                ? productByRef.get(
+                    ref
+                  )
+                : null
+            ) ||
+            (
+              rowName
+                ? productByName.get(
+                    rowName
+                  )
+                : null
+            ) ||
+            products.find(
+              (product: any) =>
+                product.id ===
+                row.ui_product_id
+            )
+
+          if (!matchedProduct) {
+            continue
+          }
+
+          const dbProductId =
+            productDbIds[
+              matchedProduct.id
+            ] ||
+            row.db_product_id ||
+            row.product_id
+
+          if (!dbProductId) {
+            continue
+          }
+
+          payloads.push({
+            product_id:
+              String(
+                dbProductId
+              ),
+
+            description:
+              String(
+                row.description ||
+                ''
+              ),
+
+            history:
+              String(
+                row.history ||
+                ''
+              ),
+
+            production_method:
+              String(
+                row.production_method ||
+                ''
+              ),
+
+            aromatic_profile:
+              String(
+                row.aromatic_profile ||
+                ''
+              ),
+
+            anecdote:
+              String(
+                row.anecdote ||
+                ''
+              ),
+
+            service_notes:
+              String(
+                row.service_notes ||
+                ''
+              ),
+
+            updated_at:
+              new Date()
+                .toISOString(),
+          })
+
+          uiIds.push(
+            matchedProduct.id
+          )
+        }
+
+        if (
+          !payloads.length
+        ) {
+          throw new Error(
+            'Aucune fiche du fichier ne correspond aux produits NukuStock actuels.'
+          )
+        }
+
+        const {
+          data,
+          error:
+            importError,
+        } =
+          await supabase
+            .from(
+              'bar_product_sheets'
+            )
+            .upsert(
+              payloads,
+              {
+                onConflict:
+                  'product_id',
+              }
+            )
+            .select()
+
+        if (importError) {
+          throw importError
+        }
+
+        const nextSheets = {
+          ...sheets,
+        }
+
+        for (
+          let index = 0;
+          index <
+          (data || []).length;
+          index += 1
+        ) {
+          const row =
+            data![index]
+
+          const uiId =
+            uiIds[index]
+
+          if (!uiId) {
+            continue
+          }
+
+          nextSheets[
+            uiId
+          ] = {
+            product_id:
+              row.product_id,
+
+            description:
+              row.description ||
+              '',
+
+            history:
+              row.history ||
+              '',
+
+            production_method:
+              row.production_method ||
+              '',
+
+            aromatic_profile:
+              row.aromatic_profile ||
+              '',
+
+            anecdote:
+              row.anecdote ||
+              '',
+
+            service_notes:
+              row.service_notes ||
+              '',
+
+            updated_at:
+              row.updated_at,
+          }
+        }
+
+        setSheets(
+          nextSheets
+        )
+
+        setMessage(
+          `${payloads.length} fiche(s) importée(s) / mise(s) à jour.`
+        )
+      } catch (
+        importFailure
+      ) {
+        setError(
+          importFailure instanceof
+            Error
+            ? importFailure.message
+            : 'Erreur pendant l’import.'
+        )
+      } finally {
+        setImporting(false)
+      }
+    }
+
+  return (
+    <Page
+      title="Fiches Produits"
+      subtitle="Base de connaissances Bar Team · produits classés par catégorie"
+    >
+      <input
+        ref={
+          importInputRef
+        }
+        type="file"
+        accept=".json,application/json"
+        style={{
+          display:
+            'none',
+        }}
+        onChange={
+          importSheets
+        }
+      />
+
+      <div
+        className={`sheetPage sheetView-${viewMode}`}
+      >
+        <div className="sheetToolbar">
+          <div className="sheetActions">
+            {canManage && (
+              <>
+                <button
+                  type="button"
+                  className="toolbarButton primary"
+                  disabled={
+                    !selectedId
+                  }
+                  onClick={
+                    startEdit
+                  }
+                >
+                  Modifier
+                </button>
+
+                <button
+                  type="button"
+                  className="toolbarButton danger"
+                  disabled={
+                    !selectedId ||
+                    deleting
+                  }
+                  onClick={() =>
+                    void deleteSelectedSheet()
+                  }
+                >
+                  {deleting
+                    ? 'Suppression…'
+                    : 'Supprimer'}
+                </button>
+
+                <button
+                  type="button"
+                  className="toolbarButton"
+                  disabled={
+                    importing
+                  }
+                  onClick={() =>
+                    importInputRef.current
+                      ?.click()
+                  }
+                >
+                  {importing
+                    ? 'Import…'
+                    : 'Importer'}
+                </button>
+              </>
+            )}
+
+            <button
+              type="button"
+              className="toolbarButton"
+              onClick={
+                exportSheets
+              }
+            >
+              Exporter
+            </button>
+          </div>
+
+          <div className="sheetDisplayControl">
+            <span>
+              Affichage
+            </span>
+
+            <div>
+              <button
+                type="button"
+                className={
+                  viewMode ===
+                  'auto'
+                    ? 'active'
+                    : ''
+                }
+                onClick={() =>
+                  changeViewMode(
+                    'auto'
+                  )
+                }
+              >
+                Auto
+              </button>
+
+              <button
+                type="button"
+                className={
+                  viewMode ===
+                  'phone'
+                    ? 'active'
+                    : ''
+                }
+                onClick={() =>
+                  changeViewMode(
+                    'phone'
+                  )
+                }
+              >
+                Téléphone
+              </button>
+
+              <button
+                type="button"
+                className={
+                  viewMode ===
+                  'tablet'
+                    ? 'active'
+                    : ''
+                }
+                onClick={() =>
+                  changeViewMode(
+                    'tablet'
+                  )
+                }
+              >
+                Tablette
+              </button>
+
+              <button
+                type="button"
+                className={
+                  viewMode ===
+                  'pc'
+                    ? 'active'
+                    : ''
+                }
+                onClick={() =>
+                  changeViewMode(
+                    'pc'
+                  )
+                }
+              >
+                PC
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="filters">
+          <select
+            value={category}
+            onChange={(event) =>
+              setCategory(
+                event.target.value
+              )
+            }
+          >
+            {categories.map(
+              (item) => (
+                <option
+                  key={item}
+                  value={item}
+                >
+                  {item}
+                </option>
+              )
+            )}
+          </select>
+
+          <input
+            type="search"
+            value={search}
+            placeholder="Rechercher un produit..."
+            onChange={(event) =>
+              setSearch(
+                event.target.value
+              )
+            }
+          />
+        </div>
+
+        {message && (
+          <div className="notice good">
+            {message}
+          </div>
+        )}
+
+        {error && (
+          <div className="notice error">
+            {error}
+          </div>
+        )}
+
+        <div className="layout">
+          <Card>
+            <div className="productList">
+              <div className="listHead">
+                <strong>
+                  {category}
+                </strong>
+
+                <span>
+                  {
+                    visibleProducts.length
+                  }{' '}
+                  produit
+                  {visibleProducts.length >
+                  1
+                    ? 's'
+                    : ''}
+                </span>
+              </div>
+
+              {loading ? (
+                <div className="empty">
+                  Chargement…
+                </div>
+              ) : (
+                visibleProducts.map(
+                  (product: any) => (
+                    <button
+                      key={
+                        product.id
+                      }
+                      type="button"
+                      className={
+                        selectedId ===
+                        product.id
+                          ? 'productButton active'
+                          : 'productButton'
+                      }
+                      onClick={() =>
+                        openProduct(
+                          product.id
+                        )
+                      }
+                    >
+                      <div className="thumb">
+                        {product.photo ? (
+                          <img
+                            src={
+                              product.photo
+                            }
+                            alt={
+                              product.name
+                            }
+                          />
+                        ) : (
+                          <span>
+                            ▣
+                          </span>
+                        )}
+                      </div>
+
+                      <div>
+                        <strong>
+                          {
+                            product.name
+                          }
+                        </strong>
+
+                        <span>
+                          {product.brand ||
+                            categoryOf(
+                              product
+                            )}
+                        </span>
+                      </div>
+
+                      {sheets[
+                        product.id
+                      ] && (
+                        <small>
+                          ✓
+                        </small>
+                      )}
+                    </button>
+                  )
+                )
+              )}
+            </div>
+          </Card>
+
+          <Card>
+            {!selectedProduct ? (
+              <div className="empty detailEmpty">
+                Sélectionne un produit pour afficher sa fiche.
+              </div>
+            ) : (
+              <div className="detail">
+                <div className="hero">
+                  <div className="heroPhoto">
+                    {selectedProduct.photo ? (
+                      <img
+                        src={
+                          selectedProduct.photo
+                        }
+                        alt={
+                          selectedProduct.name
+                        }
+                      />
+                    ) : (
+                      <span>
+                        ▣
+                      </span>
+                    )}
+                  </div>
+
+                  <div>
+                    <span className="eyebrow">
+                      {categoryOf(
+                        selectedProduct
+                      )}
+                    </span>
+
+                    <h2>
+                      {
+                        selectedProduct.name
+                      }
+                    </h2>
+
+                    {selectedProduct.brand && (
+                      <p>
+                        {
+                          selectedProduct.brand
+                        }
+                      </p>
+                    )}
+                  </div>
+
+                  {canManage && (
+                    <button
+                      type="button"
+                      className="editButton"
+                      onClick={
+                        startEdit
+                      }
+                    >
+                      Modifier
+                    </button>
+                  )}
+                </div>
+
+                {!editing ? (
+                  <div className="sections productInfoGrid">
+                    <SheetSection
+                      title="Descriptif"
+                      value={
+                        selectedSheet
+                          ?.description
+                      }
+                    />
+
+                    <SheetSection
+                      title="Profil aromatique"
+                      value={
+                        selectedSheet
+                          ?.aromatic_profile
+                      }
+                    />
+
+                    <SheetSection
+                      title="Histoire"
+                      value={
+                        selectedSheet
+                          ?.history
+                      }
+                    />
+
+                    <SheetSection
+                      title="Méthode de fabrication"
+                      value={
+                        selectedSheet
+                          ?.production_method
+                      }
+                    />
+
+                    <SheetSection
+                      title="Anecdote"
+                      value={
+                        selectedSheet
+                          ?.anecdote
+                      }
+                    />
+
+                    <SheetSection
+                      title="Notes Bar Team"
+                      value={
+                        selectedSheet
+                          ?.service_notes
+                      }
+                    />
+
+                    {!selectedSheet && (
+                      <div className="emptySheet">
+                        Cette fiche n&apos;est pas encore renseignée.
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="editor editorGrid">
+                    <EditorField
+                      label="Descriptif"
+                      fieldClass="wide"
+                      value={
+                        draft
+                          ?.description ||
+                        ''
+                      }
+                      onChange={(
+                        value
+                      ) =>
+                        setDraft(
+                          (current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  description:
+                                    value,
+                                }
+                              : current
+                        )
+                      }
+                    />
+
+                    <EditorField
+                      label="Profil aromatique"
+                      value={
+                        draft
+                          ?.aromatic_profile ||
+                        ''
+                      }
+                      onChange={(
+                        value
+                      ) =>
+                        setDraft(
+                          (current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  aromatic_profile:
+                                    value,
+                                }
+                              : current
+                        )
+                      }
+                    />
+
+                    <EditorField
+                      label="Histoire"
+                      fieldClass="wide"
+                      value={
+                        draft
+                          ?.history ||
+                        ''
+                      }
+                      onChange={(
+                        value
+                      ) =>
+                        setDraft(
+                          (current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  history:
+                                    value,
+                                }
+                              : current
+                        )
+                      }
+                    />
+
+                    <EditorField
+                      label="Méthode de fabrication"
+                      value={
+                        draft
+                          ?.production_method ||
+                        ''
+                      }
+                      onChange={(
+                        value
+                      ) =>
+                        setDraft(
+                          (current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  production_method:
+                                    value,
+                                }
+                              : current
+                        )
+                      }
+                    />
+
+                    <EditorField
+                      label="Anecdote"
+                      value={
+                        draft
+                          ?.anecdote ||
+                        ''
+                      }
+                      onChange={(
+                        value
+                      ) =>
+                        setDraft(
+                          (current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  anecdote:
+                                    value,
+                                }
+                              : current
+                        )
+                      }
+                    />
+
+                    <EditorField
+                      label="Notes Bar Team"
+                      value={
+                        draft
+                          ?.service_notes ||
+                        ''
+                      }
+                      onChange={(
+                        value
+                      ) =>
+                        setDraft(
+                          (current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  service_notes:
+                                    value,
+                                }
+                              : current
+                        )
+                      }
+                    />
+
+                    <div className="editorActions">
+                      <button
+                        type="button"
+                        disabled={
+                          saving
+                        }
+                        onClick={() => {
+                          setEditing(
+                            false
+                          )
+                          setDraft(
+                            null
+                          )
+                        }}
+                      >
+                        Annuler
+                      </button>
+
+                      <button
+                        type="button"
+                        className="primary"
+                        disabled={
+                          saving
+                        }
+                        onClick={() =>
+                          void saveSheet()
+                        }
+                      >
+                        {saving
+                          ? 'Enregistrement…'
+                          : 'Enregistrer'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </Card>
+        </div>
+      </div>
+
+      <style jsx>{`
+        .sheetPage {
+          display:grid;
+          gap:12px;
+        }
+
+        .sheetToolbar {
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:12px;
+          flex-wrap:wrap;
+          padding:10px 12px;
+          border:1px solid #e5e7eb;
+          border-radius:14px;
+          background:#fff;
+        }
+
+        .sheetActions {
+          display:flex;
+          align-items:center;
+          gap:8px;
+          flex-wrap:wrap;
+        }
+
+        .toolbarButton {
+          min-height:38px;
+          padding:0 13px;
+          border:1px solid #d0d5dd;
+          border-radius:10px;
+          background:#fff;
+          color:#344054;
+          font-size:12px;
+          font-weight:800;
+          cursor:pointer;
+        }
+
+        .toolbarButton:hover:not(:disabled) {
+          background:#f9fafb;
+        }
+
+        .toolbarButton:disabled {
+          opacity:.45;
+          cursor:not-allowed;
+        }
+
+        .toolbarButton.primary {
+          background:#101828;
+          color:#fff;
+          border-color:#101828;
+        }
+
+        .toolbarButton.danger {
+          color:#b42318;
+          border-color:#fecdca;
+          background:#fff5f5;
+        }
+
+        .sheetDisplayControl {
+          display:flex;
+          align-items:center;
+          gap:8px;
+          flex-wrap:wrap;
+        }
+
+        .sheetDisplayControl > span {
+          font-size:10px;
+          font-weight:900;
+          text-transform:uppercase;
+          letter-spacing:.08em;
+          color:#667085;
+        }
+
+        .sheetDisplayControl > div {
+          display:flex;
+          align-items:center;
+          padding:3px;
+          gap:3px;
+          background:#f2f4f7;
+          border-radius:10px;
+        }
+
+        .sheetDisplayControl button {
+          min-height:30px;
+          padding:0 9px;
+          border:0;
+          border-radius:8px;
+          background:transparent;
+          color:#667085;
+          font-size:10px;
+          font-weight:800;
+          cursor:pointer;
+        }
+
+        .sheetDisplayControl button.active {
+          background:#fff;
+          color:#101828;
+          box-shadow:0 1px 3px rgba(16,24,40,.12);
+        }
+
+        .sheetView-phone {
+          width:min(430px,100%);
+          margin:0 auto;
+        }
+
+        .sheetView-tablet {
+          width:min(860px,100%);
+          margin:0 auto;
+        }
+
+        .sheetView-pc {
+          width:100%;
+        }
+
+        .sheetView-phone .filters,
+        .sheetView-phone .layout {
+          grid-template-columns:1fr;
+        }
+
+        .sheetView-phone .sheetToolbar {
+          align-items:stretch;
+        }
+
+        .sheetView-phone .sheetActions,
+        .sheetView-phone .sheetDisplayControl {
+          width:100%;
+        }
+
+        .sheetView-phone .sheetDisplayControl {
+          justify-content:space-between;
+        }
+
+        .sheetView-phone .sheetDisplayControl > div {
+          width:100%;
+          overflow-x:auto;
+        }
+
+        .sheetView-phone .sheetDisplayControl button {
+          flex:1 0 auto;
+        }
+
+        .sheetView-phone .hero {
+          grid-template-columns:72px minmax(0,1fr);
+        }
+
+        .sheetView-phone .hero .editButton {
+          grid-column:1 / -1;
+          width:100%;
+        }
+
+        .sheetView-tablet .layout {
+          grid-template-columns:minmax(240px,.8fr) minmax(0,1.4fr);
+        }
+
+
+        .filters {
+          display:grid;
+          grid-template-columns:240px 1fr;
+          gap:10px;
+        }
+
+        .filters select,
+        .filters input {
+          min-height:42px;
+          border:1px solid #d0d5dd;
+          border-radius:10px;
+          background:#fff;
+          padding:0 12px;
+        }
+
+        .layout {
+          display:grid;
+          grid-template-columns:
+            minmax(280px,320px)
+            minmax(0,1fr);
+          gap:16px;
+          align-items:start;
+        }
+
+        .productList {
+          max-height:72vh;
+          overflow:auto;
+          display:grid;
+          scrollbar-width:thin;
+          scrollbar-color:#d0d5dd transparent;
+        }
+
+        .listHead {
+          position:sticky;
+          top:0;
+          z-index:2;
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          padding:12px;
+          border-bottom:1px solid #eaecf0;
+          background:#fff;
+        }
+
+        .listHead span {
+          color:#667085;
+          font-size:10px;
+          font-weight:800;
+        }
+
+        .productButton {
+          width:100%;
+          min-width:0;
+          display:grid;
+          grid-template-columns:50px minmax(0,1fr) 24px;
+          align-items:center;
+          gap:10px;
+          padding:10px 12px;
+          border:0;
+          border-bottom:1px solid #f2f4f7;
+          background:#fff;
+          text-align:left;
+          cursor:pointer;
+          transition:
+            background .15s ease,
+            box-shadow .15s ease;
+        }
+
+        .productButton:hover {
+          background:#f8fafc;
+        }
+
+        .productButton.active {
+          background:#f2f4f7;
+          box-shadow:
+            inset 3px 0 0 #101828;
+        }
+
+        .productButton strong,
+        .productButton span {
+          display:block;
+        }
+
+        .productButton strong {
+          font-size:11px;
+        }
+
+        .productButton span {
+          margin-top:3px;
+          color:#667085;
+          font-size:9px;
+        }
+
+        .productButton small {
+          color:#067647;
+          font-weight:900;
+        }
+
+        .thumb,
+        .heroPhoto {
+          overflow:hidden;
+          display:grid;
+          place-items:center;
+          background:#f2f4f7;
+          color:#98a2b3;
+        }
+
+        .thumb {
+          width:50px;
+          height:50px;
+          border-radius:11px;
+          border:1px solid #eaecf0;
+        }
+
+        .thumb img,
+        .heroPhoto img {
+          width:100%;
+          height:100%;
+          object-fit:contain;
+        }
+
+        .detail {
+          min-height:560px;
+          background:
+            linear-gradient(
+              180deg,
+              #ffffff 0%,
+              #fbfcfe 100%
+            );
+        }
+
+        .hero {
+          display:grid;
+          grid-template-columns:108px minmax(0,1fr) auto;
+          gap:20px;
+          align-items:center;
+          padding:24px 26px;
+          border-bottom:1px solid #eaecf0;
+          background:
+            linear-gradient(
+              135deg,
+              #ffffff 0%,
+              #f8fafc 100%
+            );
+        }
+
+        .heroPhoto {
+          width:108px;
+          height:138px;
+          border-radius:16px;
+          border:1px solid #e4e7ec;
+          background:#f8fafc;
+          box-shadow:
+            0 8px 24px rgba(16,24,40,.07);
+        }
+
+        .hero h2 {
+          margin:7px 0 6px;
+          max-width:760px;
+          color:#101828;
+          font-size:26px;
+          line-height:1.16;
+          letter-spacing:-.025em;
+        }
+
+        .hero p {
+          margin:0;
+          color:#667085;
+          font-size:12px;
+          font-weight:650;
+        }
+
+        .eyebrow {
+          display:inline-flex;
+          align-items:center;
+          min-height:24px;
+          padding:0 9px;
+          border-radius:999px;
+          background:#f2f4f7;
+          color:#475467;
+          font-size:9px;
+          font-weight:900;
+          letter-spacing:.09em;
+          text-transform:uppercase;
+        }
+
+        .editButton,
+        .editorActions button {
+          min-height:42px;
+          padding:0 16px;
+          border:1px solid #d0d5dd;
+          border-radius:11px;
+          background:#fff;
+          color:#344054;
+          font-size:12px;
+          font-weight:850;
+          box-shadow:
+            0 1px 2px rgba(16,24,40,.04);
+          cursor:pointer;
+        }
+
+        .editButton:hover,
+        .editorActions button:hover:not(:disabled) {
+          background:#f9fafb;
+          border-color:#98a2b3;
+        }
+
+        .sections,
+        .editor {
+          padding:22px 24px 26px;
+        }
+
+        .productInfoGrid {
+          display:grid;
+          grid-template-columns:
+            repeat(2,minmax(0,1fr));
+          gap:14px;
+        }
+
+        .section {
+          min-width:0;
+          padding:18px;
+          border:1px solid #e4e7ec;
+          border-radius:14px;
+          background:#fff;
+          box-shadow:
+            0 1px 2px rgba(16,24,40,.03);
+        }
+
+        .section:nth-child(1),
+        .section:nth-child(3) {
+          grid-column:1 / -1;
+        }
+
+        .section h3 {
+          margin:0 0 9px;
+          color:#101828;
+          font-size:11px;
+          font-weight:900;
+          letter-spacing:.045em;
+          text-transform:uppercase;
+        }
+
+        .section p {
+          margin:0;
+          color:#344054;
+          font-size:13px;
+          line-height:1.62;
+          white-space:pre-wrap;
+          overflow-wrap:anywhere;
+        }
+
+        .editorGrid {
+          display:grid;
+          grid-template-columns:
+            repeat(2,minmax(0,1fr));
+          gap:16px;
+          align-items:start;
+        }
+
+        .editorField {
+          display:grid;
+          gap:8px;
+          min-width:0;
+          padding:15px;
+          border:1px solid #e4e7ec;
+          border-radius:14px;
+          background:#fff;
+        }
+
+        .editorField.wide {
+          grid-column:1 / -1;
+        }
+
+        .editorField span {
+          color:#344054;
+          font-size:11px;
+          font-weight:900;
+          letter-spacing:.025em;
+        }
+
+        .editorField textarea {
+          width:100%;
+          min-height:128px;
+          box-sizing:border-box;
+          resize:vertical;
+          border:1px solid #d0d5dd;
+          border-radius:11px;
+          background:#fff;
+          padding:12px 13px;
+          color:#101828;
+          font-family:inherit;
+          font-size:13px;
+          line-height:1.5;
+          outline:none;
+          transition:
+            border-color .15s ease,
+            box-shadow .15s ease;
+        }
+
+        .editorField.wide textarea {
+          min-height:145px;
+        }
+
+        .editorField textarea:focus {
+          border-color:#667085;
+          box-shadow:
+            0 0 0 3px rgba(102,112,133,.10);
+        }
+
+        .editorActions {
+          grid-column:1 / -1;
+          display:flex;
+          justify-content:flex-end;
+          gap:10px;
+          padding-top:4px;
+        }
+
+        .editorActions .primary {
+          min-width:120px;
+          border-color:#101828;
+          background:#101828;
+          color:#fff;
+        }
+
+        .editorActions .primary:hover:not(:disabled) {
+          background:#1d2939;
+          border-color:#1d2939;
+        }
+
+        .editorActions button:disabled {
+          opacity:.55;
+          cursor:not-allowed;
+        }
+
+        .empty,
+        .detailEmpty,
+        .emptySheet {
+          padding:24px;
+          color:#667085;
+          text-align:center;
+          font-size:11px;
+        }
+
+        .notice {
+          padding:10px 12px;
+          border-radius:10px;
+          font-size:11px;
+          font-weight:800;
+        }
+
+        .notice.good {
+          border:1px solid #abefc6;
+          background:#ecfdf3;
+          color:#067647;
+        }
+
+        .notice.error {
+          border:1px solid #fecdca;
+          background:#fef3f2;
+          color:#b42318;
+        }
+
+        @media (max-width:1050px) {
+          .productInfoGrid,
+          .editorGrid {
+            grid-template-columns:1fr;
+          }
+
+          .section:nth-child(1),
+          .section:nth-child(3),
+          .editorField.wide,
+          .editorActions {
+            grid-column:auto;
+          }
+        }
+
+        @media (max-width:900px) {
+          .layout {
+            grid-template-columns:1fr;
+          }
+
+          .productList {
+            max-height:320px;
+          }
+
+          .hero {
+            grid-template-columns:90px minmax(0,1fr) auto;
+            padding:20px;
+          }
+
+          .heroPhoto {
+            width:90px;
+            height:116px;
+          }
+        }
+
+        @media (max-width:640px) {
+          .filters {
+            grid-template-columns:1fr;
+          }
+
+          .hero {
+            grid-template-columns:76px minmax(0,1fr);
+            gap:13px;
+            padding:16px;
+          }
+
+          .heroPhoto {
+            width:76px;
+            height:96px;
+            border-radius:12px;
+          }
+
+          .hero h2 {
+            font-size:19px;
+          }
+
+          .editButton {
+            grid-column:1 / -1;
+            width:100%;
+          }
+
+          .sections,
+          .editor {
+            padding:14px;
+          }
+
+          .section,
+          .editorField {
+            padding:14px;
+          }
+
+          .editorActions {
+            display:grid;
+            grid-template-columns:1fr 1fr;
+          }
+
+          .editorActions button {
+            width:100%;
+          }
+        }
+
+        @media (max-width:760px) {
+          .sheetToolbar {
+            align-items:stretch;
+          }
+
+          .sheetActions {
+            width:100%;
+          }
+
+          .sheetActions .toolbarButton {
+            flex:1 1 calc(50% - 4px);
+          }
+
+          .sheetDisplayControl {
+            width:100%;
+          }
+
+          .sheetDisplayControl > div {
+            width:100%;
+            overflow-x:auto;
+          }
+
+          .sheetDisplayControl button {
+            flex:1 0 auto;
+          }
+        }
+
+      `}</style>
+    </Page>
+  )
 }
 
-console.log('')
-console.log(
-  '========================================'
-)
-console.log(
-  'TERMINÉ'
-)
-console.log(
-  '========================================'
-)
+function SheetSection({
+  title,
+  value,
+}: {
+  title: string
+  value?: string
+}) {
+  if (!value) {
+    return null
+  }
 
-console.log(
-  `Produits actifs : ${
-    products?.length || 0
-  }`
-)
+  return (
+    <section className="section">
+      <h3>{title}</h3>
+      <p>{value}</p>
+    </section>
+  )
+}
 
-console.log(
-  `Fiches mises à jour : ${updated}`
-)
-
-console.log(
-  `Fiches avec informations : ${precise}`
-)
-
-console.log(
-  `Fiches R.A.S : ${ras}`
-)
-
-console.log(
-  `Erreurs : ${errors}`
-)
-
-console.log(
-  '========================================'
-)
-
-console.log('')
-
-if (errors === 0) {
-  console.log(
-    'SUCCÈS — Toutes les fiches ont été remises au nouveau format.'
+function EditorField({
+  label,
+  value,
+  onChange,
+  fieldClass = '',
+}: {
+  label: string
+  value: string
+  onChange: (
+    value: string
+  ) => void
+  fieldClass?: string
+}) {
+  return (
+    <label
+      className={`editorField ${fieldClass}`}
+    >
+      <span>{label}</span>
+      <textarea
+        value={value}
+        onChange={(event) =>
+          onChange(
+            event.target.value
+          )
+        }
+      />
+    </label>
   )
 }
