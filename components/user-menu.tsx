@@ -1,6 +1,10 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
@@ -19,26 +23,41 @@ type LoginZone =
 
 export function UserMenu() {
   const router = useRouter()
-  const menuRef = useRef<HTMLDivElement>(null)
 
-  const [open, setOpen] = useState(false)
-  const [zone, setZone] = useState<LoginZone>('All')
-  const [user, setUser] = useState<CurrentUser>({
-    name: 'Utilisateur',
-    email: '',
-    department: '',
-    role: '',
-  })
+  const menuRef =
+    useRef<HTMLDivElement>(null)
+
+  const logoutInProgress =
+    useRef(false)
+
+  const [open, setOpen] =
+    useState(false)
+
+  const [loggingOut, setLoggingOut] =
+    useState(false)
+
+  const [zone, setZone] =
+    useState<LoginZone>('All')
+
+  const [user, setUser] =
+    useState<CurrentUser>({
+      name: 'Utilisateur',
+      email: '',
+      department: '',
+      role: '',
+    })
 
   useEffect(() => {
-    const savedZone = localStorage.getItem('nukustock_login_zone') as
-      | LoginZone
-      | null
+    const savedZone =
+      localStorage.getItem(
+        'nukustock_login_zone'
+      ) as LoginZone | null
 
     if (
       savedZone === 'Beverage' ||
       savedZone === 'Food' ||
-      savedZone === 'Matériel & Accessoires' ||
+      savedZone ===
+        'Matériel & Accessoires' ||
       savedZone === 'All'
     ) {
       setZone(savedZone)
@@ -46,64 +65,186 @@ export function UserMenu() {
   }, [])
 
   useEffect(() => {
+    let active = true
+
     const loadUser = async () => {
+      /*
+       * getSession() lit la session locale.
+       * Cela évite un appel réseau getUser()
+       * inutile à chaque montage du menu.
+       */
       const {
-        data: { user },
-      } = await supabase.auth.getUser()
+        data: {
+          session,
+        },
+      } =
+        await supabase.auth.getSession()
 
-      if (!user) return
+      if (
+        !active ||
+        !session?.user
+      ) {
+        return
+      }
 
-      const metadata = user.user_metadata || {}
+      const authUser =
+        session.user
+
+      const metadata =
+        authUser.user_metadata || {}
+
+      const appMetadata =
+        authUser.app_metadata || {}
+
+      const employeeName =
+        String(
+          appMetadata.employee_name ||
+          ''
+        ).trim()
 
       setUser({
         name:
+          employeeName ||
           metadata.full_name ||
-          `${metadata.first_name || ''} ${metadata.last_name || ''}`.trim() ||
-          user.email ||
+          `${metadata.first_name || ''} ${
+            metadata.last_name || ''
+          }`.trim() ||
+          authUser.email ||
           'Utilisateur',
-        email: user.email || '',
-        department: metadata.department || '',
-        role: metadata.role || '',
+
+        email:
+          authUser.email || '',
+
+        department:
+          metadata.department ||
+          '',
+
+        role:
+          appMetadata.bar_role ||
+          metadata.role ||
+          '',
       })
     }
 
-    loadUser()
+    void loadUser()
+
+    return () => {
+      active = false
+    }
   }, [])
 
   useEffect(() => {
-    const closeOnOutsideClick = (event: MouseEvent) => {
+    const closeOnOutsideClick = (
+      event: MouseEvent
+    ) => {
       if (
         menuRef.current &&
-        !menuRef.current.contains(event.target as Node)
+        !menuRef.current.contains(
+          event.target as Node
+        )
       ) {
         setOpen(false)
       }
     }
 
-    document.addEventListener('mousedown', closeOnOutsideClick)
+    document.addEventListener(
+      'mousedown',
+      closeOnOutsideClick
+    )
 
     return () => {
-      document.removeEventListener('mousedown', closeOnOutsideClick)
+      document.removeEventListener(
+        'mousedown',
+        closeOnOutsideClick
+      )
     }
   }, [])
 
-  const disconnectAndGoToLogin = async (switchUser = false) => {
-    setOpen(false)
+  const disconnectAndGoToLogin =
+    async (
+      switchUser = false
+    ) => {
+      /*
+       * Protection anti double-clic /
+       * double signOut.
+       */
+      if (
+        logoutInProgress.current
+      ) {
+        return
+      }
 
-    const { error } = await supabase.auth.signOut()
+      logoutInProgress.current =
+        true
 
-    if (error) {
-      window.alert(`Erreur : ${error.message}`)
-      return
+      setLoggingOut(true)
+      setOpen(false)
+
+      try {
+        /*
+         * scope local :
+         * on supprime uniquement
+         * la session de ce navigateur.
+         */
+        const { error } =
+          await supabase.auth.signOut({
+            scope: 'local',
+          })
+
+        /*
+         * Même si Supabase retourne
+         * temporairement un rate-limit,
+         * on tente quand même de revenir
+         * au login après nettoyage local.
+         */
+        if (error) {
+          console.warn(
+            'Déconnexion Supabase :',
+            error.message
+          )
+        }
+
+        localStorage.removeItem(
+          'nukustock_login_zone'
+        )
+
+        const destination =
+          switchUser
+            ? '/login?switch=1'
+            : '/login'
+
+        /*
+         * Un seul changement de page.
+         * Pas de router.refresh()
+         * après signOut.
+         */
+        window.location.replace(
+          destination
+        )
+      } catch (error) {
+        console.error(
+          'Erreur déconnexion :',
+          error
+        )
+
+        window.location.replace(
+          switchUser
+            ? '/login?switch=1'
+            : '/login'
+        )
+      }
     }
 
-    router.replace(switchUser ? '/login?switch=1' : '/login')
-    router.refresh()
-  }
-
-  const changeZone = (nextZone: LoginZone) => {
+  const changeZone = (
+    nextZone: LoginZone
+  ) => {
     setZone(nextZone)
-    localStorage.setItem('nukustock_login_zone', nextZone)
+
+    localStorage.setItem(
+      'nukustock_login_zone',
+      nextZone
+    )
+
     setOpen(false)
 
     const destination =
@@ -111,12 +252,12 @@ export function UserMenu() {
         ? '/inventory?scope=beverage'
         : nextZone === 'Food'
         ? '/inventory?scope=food'
-        : nextZone === 'Matériel & Accessoires'
+        : nextZone ===
+          'Matériel & Accessoires'
         ? '/inventory?scope=equipment'
         : '/'
 
     router.push(destination)
-    router.refresh()
   }
 
   const initials =
@@ -124,7 +265,10 @@ export function UserMenu() {
       .split(' ')
       .filter(Boolean)
       .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase())
+      .map(
+        part =>
+          part[0]?.toUpperCase()
+      )
       .join('') || 'U'
 
   return (
@@ -138,17 +282,31 @@ export function UserMenu() {
     >
       <button
         type="button"
-        onClick={() => setOpen((value) => !value)}
+        disabled={loggingOut}
+        onClick={() =>
+          setOpen(
+            value => !value
+          )
+        }
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 10,
-          border: '1px solid #e5e7eb',
+          border:
+            '1px solid #e5e7eb',
           background: '#fff',
           borderRadius: 14,
-          padding: '7px 10px 7px 7px',
-          cursor: 'pointer',
+          padding:
+            '7px 10px 7px 7px',
+          cursor:
+            loggingOut
+              ? 'wait'
+              : 'pointer',
           color: '#101828',
+          opacity:
+            loggingOut
+              ? 0.65
+              : 1,
         }}
       >
         <span
@@ -167,9 +325,21 @@ export function UserMenu() {
           {initials}
         </span>
 
-        <span className="userMenuIdentity" style={{ textAlign: 'left' }}>
-          <strong style={{ display: 'block', fontSize: 12 }}>
-            {user.name}
+        <span
+          className="userMenuIdentity"
+          style={{
+            textAlign: 'left',
+          }}
+        >
+          <strong
+            style={{
+              display: 'block',
+              fontSize: 12,
+            }}
+          >
+            {loggingOut
+              ? 'Déconnexion...'
+              : user.name}
           </strong>
 
           <span
@@ -180,7 +350,12 @@ export function UserMenu() {
               color: '#667085',
             }}
           >
-            {[user.department, user.role].filter(Boolean).join(' · ') ||
+            {[
+              user.department,
+              user.role,
+            ]
+              .filter(Boolean)
+              .join(' · ') ||
               user.email}
           </span>
 
@@ -197,20 +372,29 @@ export function UserMenu() {
           </span>
         </span>
 
-        <span style={{ color: '#667085' }}>▾</span>
+        <span
+          style={{
+            color: '#667085',
+          }}
+        >
+          ▾
+        </span>
       </button>
 
-      {open && (
+      {open && !loggingOut && (
         <div
           style={{
             position: 'absolute',
-            top: 'calc(100% + 8px)',
+            top:
+              'calc(100% + 8px)',
             right: 0,
             width: 280,
             background: '#fff',
-            border: '1px solid #e5e7eb',
+            border:
+              '1px solid #e5e7eb',
             borderRadius: 16,
-            boxShadow: '0 18px 50px rgba(16,24,40,.16)',
+            boxShadow:
+              '0 18px 50px rgba(16,24,40,.16)',
             overflow: 'hidden',
             zIndex: 100,
           }}
@@ -218,10 +402,17 @@ export function UserMenu() {
           <div
             style={{
               padding: 14,
-              borderBottom: '1px solid #e5e7eb',
+              borderBottom:
+                '1px solid #e5e7eb',
             }}
           >
-            <strong style={{ display: 'block' }}>{user.name}</strong>
+            <strong
+              style={{
+                display: 'block',
+              }}
+            >
+              {user.name}
+            </strong>
 
             {user.email && (
               <div
@@ -235,7 +426,8 @@ export function UserMenu() {
               </div>
             )}
 
-            {(user.department || user.role) && (
+            {(user.department ||
+              user.role) && (
               <div
                 style={{
                   marginTop: 6,
@@ -243,7 +435,12 @@ export function UserMenu() {
                   fontWeight: 700,
                 }}
               >
-                {[user.department, user.role].filter(Boolean).join(' · ')}
+                {[
+                  user.department,
+                  user.role,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
               </div>
             )}
           </div>
@@ -251,7 +448,8 @@ export function UserMenu() {
           <div
             style={{
               padding: 14,
-              borderBottom: '1px solid #e5e7eb',
+              borderBottom:
+                '1px solid #e5e7eb',
             }}
           >
             <div
@@ -259,8 +457,10 @@ export function UserMenu() {
                 fontSize: 10,
                 fontWeight: 800,
                 color: '#667085',
-                textTransform: 'uppercase',
-                letterSpacing: '.08em',
+                textTransform:
+                  'uppercase',
+                letterSpacing:
+                  '.08em',
                 marginBottom: 8,
               }}
             >
@@ -269,13 +469,17 @@ export function UserMenu() {
 
             <select
               value={zone}
-              onChange={(e) =>
-                changeZone(e.target.value as LoginZone)
+              onChange={event =>
+                changeZone(
+                  event.target
+                    .value as LoginZone
+                )
               }
               style={{
                 width: '100%',
                 minHeight: 40,
-                border: '1px solid #d0d5dd',
+                border:
+                  '1px solid #d0d5dd',
                 borderRadius: 10,
                 background: '#fff',
                 color: '#101828',
@@ -283,40 +487,66 @@ export function UserMenu() {
                 fontWeight: 700,
               }}
             >
-              <option value="All">All — Accès général</option>
-              <option value="Beverage">Beverage</option>
-              <option value="Food">Food</option>
-              <option value="Matériel & Accessoires">
-                Matériel & Accessoires
+              <option value="All">
+                All — Accès général
+              </option>
+
+              <option value="Beverage">
+                Beverage
+              </option>
+
+              <option value="Food">
+                Food
+              </option>
+
+              <option
+                value="Matériel & Accessoires"
+              >
+                Matériel &
+                Accessoires
               </option>
             </select>
           </div>
 
           <button
             type="button"
-            onClick={() => disconnectAndGoToLogin(true)}
+            disabled={loggingOut}
+            onClick={() =>
+              void disconnectAndGoToLogin(
+                true
+              )
+            }
             style={{
               width: '100%',
               border: 0,
               background: '#fff',
-              padding: '12px 14px',
+              padding:
+                '12px 14px',
               textAlign: 'left',
               cursor: 'pointer',
               fontWeight: 700,
             }}
           >
-            ⇄ Changer d&apos;utilisateur
+            ⇄ Changer
+            d&apos;utilisateur
           </button>
 
           <button
             type="button"
-            onClick={() => disconnectAndGoToLogin(false)}
+            disabled={loggingOut}
+            onClick={() =>
+              void disconnectAndGoToLogin(
+                false
+              )
+            }
             style={{
               width: '100%',
               border: 0,
-              borderTop: '1px solid #f2f4f7',
+              borderTop:
+                '1px solid #f2f4f7',
               background: '#fff',
-              padding: '12px 14px',
+              padding:
+                '12px 14px',
               textAlign: 'left',
               cursor: 'pointer',
               fontWeight: 800,
