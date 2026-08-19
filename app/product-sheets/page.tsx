@@ -3,6 +3,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react'
 
@@ -26,6 +27,12 @@ type BarRole =
   | 'assistant_manager'
   | 'staff'
   | null
+
+type ViewMode =
+  | 'auto'
+  | 'phone'
+  | 'tablet'
+  | 'pc'
 
 function normalize(
   value: unknown
@@ -106,6 +113,71 @@ export default function ProductSheetsPage() {
 
   const [message, setMessage] =
     useState('')
+
+
+  const importInputRef =
+    useRef<HTMLInputElement>(
+      null
+    )
+
+  const [
+    viewMode,
+    setViewMode,
+  ] =
+    useState<ViewMode>(
+      'auto'
+    )
+
+  const [
+    importing,
+    setImporting,
+  ] =
+    useState(false)
+
+  const [
+    deleting,
+    setDeleting,
+  ] =
+    useState(false)
+
+  useEffect(() => {
+    try {
+      const saved =
+        localStorage.getItem(
+          'bar_product_sheets_view_mode'
+        ) as ViewMode | null
+
+      if (
+        saved === 'auto' ||
+        saved === 'phone' ||
+        saved === 'tablet' ||
+        saved === 'pc'
+      ) {
+        setViewMode(
+          saved
+        )
+      }
+    } catch {
+      // Rien : affichage auto par défaut.
+    }
+  }, [])
+
+  const changeViewMode = (
+    nextMode: ViewMode
+  ) => {
+    setViewMode(
+      nextMode
+    )
+
+    try {
+      localStorage.setItem(
+        'bar_product_sheets_view_mode',
+        nextMode
+      )
+    } catch {
+      // Rien : le choix reste actif pour la session courante.
+    }
+  }
 
   const canManage =
     role === 'manager_admin' ||
@@ -604,12 +676,711 @@ export default function ProductSheetsPage() {
       )
     }
 
+  const deleteSelectedSheet =
+    async () => {
+      if (
+        !canManage ||
+        !selectedId ||
+        deleting
+      ) {
+        return
+      }
+
+      const selectedProduct =
+        products.find(
+          (product: any) =>
+            product.id ===
+            selectedId
+        )
+
+      const productName =
+        selectedProduct?.name ||
+        'ce produit'
+
+      const confirmed =
+        window.confirm(
+          `Supprimer la fiche de "${productName}" ?\n\nLe produit restera dans NukuStock. Seule sa fiche Bar Team sera supprimée.`
+        )
+
+      if (!confirmed) {
+        return
+      }
+
+      const dbProductId =
+        productDbIds[
+          selectedId
+        ] ||
+        sheets[selectedId]
+          ?.product_id
+
+      if (!dbProductId) {
+        setError(
+          'Identifiant Supabase du produit introuvable.'
+        )
+        return
+      }
+
+      setDeleting(true)
+      setError('')
+      setMessage('')
+
+      const {
+        error:
+          deleteError,
+      } =
+        await supabase
+          .from(
+            'bar_product_sheets'
+          )
+          .delete()
+          .eq(
+            'product_id',
+            dbProductId
+          )
+
+      setDeleting(false)
+
+      if (deleteError) {
+        setError(
+          deleteError.message
+        )
+        return
+      }
+
+      setSheets(
+        (current) => {
+          const next = {
+            ...current,
+          }
+
+          delete next[
+            selectedId
+          ]
+
+          return next
+        }
+      )
+
+      setEditing(false)
+      setDraft(null)
+
+      setMessage(
+        `Fiche "${productName}" supprimée.`
+      )
+    }
+
+  const exportSheets =
+    () => {
+      const exportedSheets =
+        products
+          .map(
+            (product: any) => {
+              const sheet =
+                sheets[
+                  product.id
+                ]
+
+              if (!sheet) {
+                return null
+              }
+
+              return {
+                ui_product_id:
+                  product.id,
+
+                db_product_id:
+                  productDbIds[
+                    product.id
+                  ] ||
+                  sheet.product_id,
+
+                internal_reference:
+                  product.internalRef ||
+                  product.internal_reference ||
+                  '',
+
+                name:
+                  product.name ||
+                  '',
+
+                category:
+                  product.category ||
+                  '',
+
+                subcategory:
+                  product.subcategory ||
+                  '',
+
+                description:
+                  sheet.description ||
+                  '',
+
+                history:
+                  sheet.history ||
+                  '',
+
+                production_method:
+                  sheet.production_method ||
+                  '',
+
+                aromatic_profile:
+                  sheet.aromatic_profile ||
+                  '',
+
+                anecdote:
+                  sheet.anecdote ||
+                  '',
+
+                service_notes:
+                  sheet.service_notes ||
+                  '',
+
+                updated_at:
+                  sheet.updated_at ||
+                  null,
+              }
+            }
+          )
+          .filter(Boolean)
+
+      const payload = {
+        app:
+          'NukuStock',
+
+        module:
+          'bar_product_sheets',
+
+        version:
+          1,
+
+        exported_at:
+          new Date()
+            .toISOString(),
+
+        count:
+          exportedSheets.length,
+
+        sheets:
+          exportedSheets,
+      }
+
+      const blob =
+        new Blob(
+          [
+            JSON.stringify(
+              payload,
+              null,
+              2
+            ),
+          ],
+          {
+            type:
+              'application/json;charset=utf-8',
+          }
+        )
+
+      const url =
+        URL.createObjectURL(
+          blob
+        )
+
+      const anchor =
+        document.createElement(
+          'a'
+        )
+
+      anchor.href =
+        url
+
+      anchor.download =
+        `Bar-Team-Fiches-Produits-${new Date()
+          .toISOString()
+          .slice(0, 10)}.json`
+
+      anchor.click()
+
+      URL.revokeObjectURL(
+        url
+      )
+
+      setMessage(
+        `${exportedSheets.length} fiche(s) exportée(s).`
+      )
+    }
+
+  const importSheets =
+    async (
+      event:
+        React.ChangeEvent<HTMLInputElement>
+    ) => {
+      const file =
+        event.target.files?.[0]
+
+      event.target.value =
+        ''
+
+      if (
+        !file ||
+        !canManage
+      ) {
+        return
+      }
+
+      setImporting(true)
+      setError('')
+      setMessage('')
+
+      try {
+        const raw =
+          await file.text()
+
+        const parsed =
+          JSON.parse(
+            raw
+          )
+
+        const rows =
+          Array.isArray(
+            parsed
+          )
+            ? parsed
+            : Array.isArray(
+                parsed?.sheets
+              )
+            ? parsed.sheets
+            : []
+
+        if (!rows.length) {
+          throw new Error(
+            'Aucune fiche produit trouvée dans ce fichier.'
+          )
+        }
+
+        const productByRef =
+          new Map<
+            string,
+            any
+          >()
+
+        const productByName =
+          new Map<
+            string,
+            any
+          >()
+
+        for (
+          const product
+          of products as any[]
+        ) {
+          const ref =
+            String(
+              product.internalRef ||
+              product.internal_reference ||
+              ''
+            )
+              .trim()
+              .toLowerCase()
+
+          if (ref) {
+            productByRef.set(
+              ref,
+              product
+            )
+          }
+
+          const name =
+            normalize(
+              product.name
+            )
+
+          if (name) {
+            productByName.set(
+              name,
+              product
+            )
+          }
+        }
+
+        const payloads:
+          ProductSheet[] = []
+
+        const uiIds:
+          string[] = []
+
+        for (
+          const row
+          of rows
+        ) {
+          const ref =
+            String(
+              row.internal_reference ||
+              row.internalRef ||
+              ''
+            )
+              .trim()
+              .toLowerCase()
+
+          const rowName =
+            normalize(
+              row.name
+            )
+
+          const matchedProduct =
+            (
+              ref
+                ? productByRef.get(
+                    ref
+                  )
+                : null
+            ) ||
+            (
+              rowName
+                ? productByName.get(
+                    rowName
+                  )
+                : null
+            ) ||
+            products.find(
+              (product: any) =>
+                product.id ===
+                row.ui_product_id
+            )
+
+          if (!matchedProduct) {
+            continue
+          }
+
+          const dbProductId =
+            productDbIds[
+              matchedProduct.id
+            ] ||
+            row.db_product_id ||
+            row.product_id
+
+          if (!dbProductId) {
+            continue
+          }
+
+          payloads.push({
+            product_id:
+              String(
+                dbProductId
+              ),
+
+            description:
+              String(
+                row.description ||
+                ''
+              ),
+
+            history:
+              String(
+                row.history ||
+                ''
+              ),
+
+            production_method:
+              String(
+                row.production_method ||
+                ''
+              ),
+
+            aromatic_profile:
+              String(
+                row.aromatic_profile ||
+                ''
+              ),
+
+            anecdote:
+              String(
+                row.anecdote ||
+                ''
+              ),
+
+            service_notes:
+              String(
+                row.service_notes ||
+                ''
+              ),
+
+            updated_at:
+              new Date()
+                .toISOString(),
+          })
+
+          uiIds.push(
+            matchedProduct.id
+          )
+        }
+
+        if (
+          !payloads.length
+        ) {
+          throw new Error(
+            'Aucune fiche du fichier ne correspond aux produits NukuStock actuels.'
+          )
+        }
+
+        const {
+          data,
+          error:
+            importError,
+        } =
+          await supabase
+            .from(
+              'bar_product_sheets'
+            )
+            .upsert(
+              payloads,
+              {
+                onConflict:
+                  'product_id',
+              }
+            )
+            .select()
+
+        if (importError) {
+          throw importError
+        }
+
+        const nextSheets = {
+          ...sheets,
+        }
+
+        for (
+          let index = 0;
+          index <
+          (data || []).length;
+          index += 1
+        ) {
+          const row =
+            data![index]
+
+          const uiId =
+            uiIds[index]
+
+          if (!uiId) {
+            continue
+          }
+
+          nextSheets[
+            uiId
+          ] = {
+            product_id:
+              row.product_id,
+
+            description:
+              row.description ||
+              '',
+
+            history:
+              row.history ||
+              '',
+
+            production_method:
+              row.production_method ||
+              '',
+
+            aromatic_profile:
+              row.aromatic_profile ||
+              '',
+
+            anecdote:
+              row.anecdote ||
+              '',
+
+            service_notes:
+              row.service_notes ||
+              '',
+
+            updated_at:
+              row.updated_at,
+          }
+        }
+
+        setSheets(
+          nextSheets
+        )
+
+        setMessage(
+          `${payloads.length} fiche(s) importée(s) / mise(s) à jour.`
+        )
+      } catch (
+        importFailure
+      ) {
+        setError(
+          importFailure instanceof
+            Error
+            ? importFailure.message
+            : 'Erreur pendant l’import.'
+        )
+      } finally {
+        setImporting(false)
+      }
+    }
+
   return (
     <Page
       title="Fiches Produits"
       subtitle="Base de connaissances Bar Team · produits classés par catégorie"
     >
-      <div className="sheetPage">
+      <input
+        ref={
+          importInputRef
+        }
+        type="file"
+        accept=".json,application/json"
+        style={{
+          display:
+            'none',
+        }}
+        onChange={
+          importSheets
+        }
+      />
+
+      <div
+        className={`sheetPage sheetView-${viewMode}`}
+      >
+        <div className="sheetToolbar">
+          <div className="sheetActions">
+            {canManage && (
+              <>
+                <button
+                  type="button"
+                  className="toolbarButton primary"
+                  disabled={
+                    !selectedId
+                  }
+                  onClick={
+                    startEdit
+                  }
+                >
+                  Modifier
+                </button>
+
+                <button
+                  type="button"
+                  className="toolbarButton danger"
+                  disabled={
+                    !selectedId ||
+                    deleting
+                  }
+                  onClick={() =>
+                    void deleteSelectedSheet()
+                  }
+                >
+                  {deleting
+                    ? 'Suppression…'
+                    : 'Supprimer'}
+                </button>
+
+                <button
+                  type="button"
+                  className="toolbarButton"
+                  disabled={
+                    importing
+                  }
+                  onClick={() =>
+                    importInputRef.current
+                      ?.click()
+                  }
+                >
+                  {importing
+                    ? 'Import…'
+                    : 'Importer'}
+                </button>
+              </>
+            )}
+
+            <button
+              type="button"
+              className="toolbarButton"
+              onClick={
+                exportSheets
+              }
+            >
+              Exporter
+            </button>
+          </div>
+
+          <div className="sheetDisplayControl">
+            <span>
+              Affichage
+            </span>
+
+            <div>
+              <button
+                type="button"
+                className={
+                  viewMode ===
+                  'auto'
+                    ? 'active'
+                    : ''
+                }
+                onClick={() =>
+                  changeViewMode(
+                    'auto'
+                  )
+                }
+              >
+                Auto
+              </button>
+
+              <button
+                type="button"
+                className={
+                  viewMode ===
+                  'phone'
+                    ? 'active'
+                    : ''
+                }
+                onClick={() =>
+                  changeViewMode(
+                    'phone'
+                  )
+                }
+              >
+                Téléphone
+              </button>
+
+              <button
+                type="button"
+                className={
+                  viewMode ===
+                  'tablet'
+                    ? 'active'
+                    : ''
+                }
+                onClick={() =>
+                  changeViewMode(
+                    'tablet'
+                  )
+                }
+              >
+                Tablette
+              </button>
+
+              <button
+                type="button"
+                className={
+                  viewMode ===
+                  'pc'
+                    ? 'active'
+                    : ''
+                }
+                onClick={() =>
+                  changeViewMode(
+                    'pc'
+                  )
+                }
+              >
+                PC
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div className="filters">
           <select
             value={category}
@@ -1048,6 +1819,155 @@ export default function ProductSheetsPage() {
           gap:12px;
         }
 
+        .sheetToolbar {
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:12px;
+          flex-wrap:wrap;
+          padding:10px 12px;
+          border:1px solid #e5e7eb;
+          border-radius:14px;
+          background:#fff;
+        }
+
+        .sheetActions {
+          display:flex;
+          align-items:center;
+          gap:8px;
+          flex-wrap:wrap;
+        }
+
+        .toolbarButton {
+          min-height:38px;
+          padding:0 13px;
+          border:1px solid #d0d5dd;
+          border-radius:10px;
+          background:#fff;
+          color:#344054;
+          font-size:12px;
+          font-weight:800;
+          cursor:pointer;
+        }
+
+        .toolbarButton:hover:not(:disabled) {
+          background:#f9fafb;
+        }
+
+        .toolbarButton:disabled {
+          opacity:.45;
+          cursor:not-allowed;
+        }
+
+        .toolbarButton.primary {
+          background:#101828;
+          color:#fff;
+          border-color:#101828;
+        }
+
+        .toolbarButton.danger {
+          color:#b42318;
+          border-color:#fecdca;
+          background:#fff5f5;
+        }
+
+        .sheetDisplayControl {
+          display:flex;
+          align-items:center;
+          gap:8px;
+          flex-wrap:wrap;
+        }
+
+        .sheetDisplayControl > span {
+          font-size:10px;
+          font-weight:900;
+          text-transform:uppercase;
+          letter-spacing:.08em;
+          color:#667085;
+        }
+
+        .sheetDisplayControl > div {
+          display:flex;
+          align-items:center;
+          padding:3px;
+          gap:3px;
+          background:#f2f4f7;
+          border-radius:10px;
+        }
+
+        .sheetDisplayControl button {
+          min-height:30px;
+          padding:0 9px;
+          border:0;
+          border-radius:8px;
+          background:transparent;
+          color:#667085;
+          font-size:10px;
+          font-weight:800;
+          cursor:pointer;
+        }
+
+        .sheetDisplayControl button.active {
+          background:#fff;
+          color:#101828;
+          box-shadow:0 1px 3px rgba(16,24,40,.12);
+        }
+
+        .sheetView-phone {
+          width:min(430px,100%);
+          margin:0 auto;
+        }
+
+        .sheetView-tablet {
+          width:min(860px,100%);
+          margin:0 auto;
+        }
+
+        .sheetView-pc {
+          width:100%;
+        }
+
+        .sheetView-phone .filters,
+        .sheetView-phone .layout {
+          grid-template-columns:1fr;
+        }
+
+        .sheetView-phone .sheetToolbar {
+          align-items:stretch;
+        }
+
+        .sheetView-phone .sheetActions,
+        .sheetView-phone .sheetDisplayControl {
+          width:100%;
+        }
+
+        .sheetView-phone .sheetDisplayControl {
+          justify-content:space-between;
+        }
+
+        .sheetView-phone .sheetDisplayControl > div {
+          width:100%;
+          overflow-x:auto;
+        }
+
+        .sheetView-phone .sheetDisplayControl button {
+          flex:1 0 auto;
+        }
+
+        .sheetView-phone .hero {
+          grid-template-columns:72px minmax(0,1fr);
+        }
+
+        .sheetView-phone .hero .editButton {
+          grid-column:1 / -1;
+          width:100%;
+        }
+
+        .sheetView-tablet .layout {
+          grid-template-columns:minmax(240px,.8fr) minmax(0,1.4fr);
+        }
+
+
         .filters {
           display:grid;
           grid-template-columns:240px 1fr;
@@ -1318,6 +2238,34 @@ export default function ProductSheetsPage() {
             width:100%;
           }
         }
+
+        @media (max-width: 760px) {
+          .sheetToolbar {
+            align-items:stretch;
+          }
+
+          .sheetActions {
+            width:100%;
+          }
+
+          .sheetActions .toolbarButton {
+            flex:1 1 calc(50% - 4px);
+          }
+
+          .sheetDisplayControl {
+            width:100%;
+          }
+
+          .sheetDisplayControl > div {
+            width:100%;
+            overflow-x:auto;
+          }
+
+          .sheetDisplayControl button {
+            flex:1 0 auto;
+          }
+        }
+
       `}</style>
     </Page>
   )
