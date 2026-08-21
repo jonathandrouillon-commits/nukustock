@@ -601,6 +601,12 @@ export default function Products() {
   const { items: masterData, save: saveMasterData } = useMasterData()
 
   const [q, setQ] = useState('')
+
+  const [printOrientation, setPrintOrientation] =
+    useState<'portrait' | 'landscape'>('landscape')
+
+  const [printFontSize, setPrintFontSize] =
+    useState(8)
   const [msg, setMsg] = useState('')
   const [syncingProducts, setSyncingProducts] = useState(false)
   const [supplierModalOpen, setSupplierModalOpen] = useState(false)
@@ -1847,6 +1853,228 @@ export default function Products() {
     flexDirection: 'column',
   }
 
+  const printProductsGrouped = () => {
+    const sortedProducts =
+      [...shown].sort(
+        (a, b) =>
+          String(a.category || '').localeCompare(
+            String(b.category || ''),
+            'fr',
+            {
+              sensitivity: 'base',
+              numeric: true,
+            }
+          ) ||
+          String(a.subcategory || '').localeCompare(
+            String(b.subcategory || ''),
+            'fr',
+            {
+              sensitivity: 'base',
+              numeric: true,
+            }
+          ) ||
+          String(a.name || '').localeCompare(
+            String(b.name || ''),
+            'fr',
+            {
+              sensitivity: 'base',
+              numeric: true,
+            }
+          )
+      )
+
+    let currentCategory = ''
+    let currentSubcategory = ''
+    const rows: string[] = []
+
+    for (const product of sortedProducts) {
+      const category =
+        String(
+          product.category ||
+            'Sans catégorie'
+        ).trim()
+
+      const subcategory =
+        String(
+          product.subcategory ||
+            'Sans sous-catégorie'
+        ).trim()
+
+      if (category !== currentCategory) {
+        currentCategory = category
+        currentSubcategory = ''
+
+        rows.push(
+          `<tr class="categoryRow"><td colspan="7">${category.toUpperCase()}</td></tr>`
+        )
+      }
+
+      if (subcategory !== currentSubcategory) {
+        currentSubcategory = subcategory
+
+        rows.push(
+          `<tr class="subcategoryRow"><td colspan="7"><span>${subcategory}</span></td></tr>`
+        )
+      }
+
+      const totalStock =
+        (product.lots || []).reduce(
+          (sum: number, lot: any) =>
+            sum +
+            Math.max(
+              0,
+              Number(lot.quantity) || 0
+            ),
+          0
+        )
+
+      const locations =
+        [
+          ...new Set(
+            (product.lots || [])
+              .map((lot: any) => lot.location)
+              .filter(Boolean)
+          ),
+        ].join(', ')
+
+      rows.push(
+        `<tr class="productRow">
+          <td>${product.internalRef || ''}</td>
+          <td>${product.name || ''}</td>
+          <td>${product.category || ''}</td>
+          <td>${product.subcategory || ''}</td>
+          <td>${product.mainSupplier || ''}</td>
+          <td>${totalStock}</td>
+          <td>${locations}</td>
+        </tr>`
+      )
+    }
+
+    const printWindow =
+      window.open(
+        '',
+        '_blank',
+        'width=1200,height=900'
+      )
+
+    if (!printWindow) {
+      window.alert(
+        "Impossible d'ouvrir la fenêtre d'impression."
+      )
+      return
+    }
+
+    printWindow.document.write(`
+      <!doctype html>
+      <html lang="fr">
+        <head>
+          <meta charset="utf-8" />
+          <title>NukuStock - Produits</title>
+          <style>
+            @page {
+              size: A4 ${printOrientation};
+              margin: 10mm;
+            }
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              font-family: Arial, Helvetica, sans-serif;
+              color: #111827;
+              background: #fff;
+              font-size: ${printFontSize}px;
+            }
+            .brand {
+              font-size: ${printFontSize + 10}px;
+              font-weight: 900;
+              margin-bottom: 3px;
+            }
+            .meta {
+              margin-bottom: 8mm;
+              font-size: ${Math.max(7, printFontSize - 1)}px;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+            }
+            th, td {
+              border: 1px solid #cfd6df;
+              padding: 4px 5px;
+              vertical-align: top;
+            }
+            th {
+              background: #f2f4f7;
+              font-weight: 900;
+              text-align: left;
+            }
+            .categoryRow td {
+              padding: 7px 8px;
+              background: #172033;
+              color: #fff;
+              border-color: #172033;
+              font-size: ${printFontSize + 2}px;
+              font-weight: 900;
+              letter-spacing: .08em;
+            }
+            .subcategoryRow td {
+              padding: 6px 8px;
+              background: #eef2f6;
+              color: #111827;
+              font-size: ${printFontSize + 1}px;
+              font-weight: 900;
+            }
+            .subcategoryRow td span {
+              display: flex;
+              align-items: center;
+              gap: 8px;
+            }
+            .subcategoryRow td span::after {
+              content: "";
+              flex: 1;
+              border-bottom: 1px dotted #98a2b3;
+            }
+            .productRow td {
+              font-size: ${printFontSize}px;
+            }
+            tr {
+              break-inside: avoid;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="brand">NUKUTEPIPI - NukuStock</div>
+          <div class="meta">
+            Liste produits · ${sortedProducts.length} référence(s) ·
+            ${new Date().toLocaleDateString('fr-FR')}
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Référence</th>
+                <th>Produit</th>
+                <th>Catégorie</th>
+                <th>Sous-catégorie</th>
+                <th>Fournisseur</th>
+                <th>Stock</th>
+                <th>Lieux</th>
+              </tr>
+            </thead>
+            <tbody>${rows.join('')}</tbody>
+          </table>
+
+          <script>
+            window.onload = () => {
+              window.print()
+              window.onafterprint = () => window.close()
+            }
+          </script>
+        </body>
+      </html>
+    `)
+
+    printWindow.document.close()
+  }
+
   const sectionTitleStyle: CSSProperties = {
     fontSize: 17,
     fontWeight: 800,
@@ -1879,6 +2107,66 @@ export default function Products() {
             onChange={productDisplay.setVisible}
             essential={PRODUCT_SCREEN_ESSENTIAL}
           />
+
+          <label
+            style={{
+              display: 'grid',
+              gap: 3,
+              minWidth: 145,
+              fontSize: 9,
+              fontWeight: 800,
+              color: '#667085',
+            }}
+          >
+            FORMAT IMPRESSION
+            <select
+              className="input"
+              value={printOrientation}
+              onChange={(event) =>
+                setPrintOrientation(
+                  event.target.value as 'portrait' | 'landscape'
+                )
+              }
+            >
+              <option value="portrait">Portrait</option>
+              <option value="landscape">Paysage</option>
+            </select>
+          </label>
+
+          <label
+            style={{
+              display: 'grid',
+              gap: 3,
+              minWidth: 145,
+              fontSize: 9,
+              fontWeight: 800,
+              color: '#667085',
+            }}
+          >
+            TYPOGRAPHIE
+            <select
+              className="input"
+              value={printFontSize}
+              onChange={(event) =>
+                setPrintFontSize(
+                  Number(event.target.value) || 8
+                )
+              }
+            >
+              <option value={7}>Petite</option>
+              <option value={8}>Normale</option>
+              <option value={10}>Grande</option>
+              <option value={12}>Très grande</option>
+            </select>
+          </label>
+
+          <button
+            className="button secondary"
+            type="button"
+            onClick={printProductsGrouped}
+          >
+            Imprimer produits
+          </button>
 
           <button
             className="button secondary"

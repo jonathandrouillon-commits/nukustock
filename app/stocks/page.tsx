@@ -334,6 +334,12 @@ export default function Stocks() {
       'category-subcategory-location-product'
     )
 
+  const [printOrientation, setPrintOrientation] =
+    useState<'portrait' | 'landscape'>('landscape')
+
+  const [printFontSize, setPrintFontSize] =
+    useState(8)
+
   const [quickEntryOpen, setQuickEntryOpen] =
     useState(false)
   const [quickProductId, setQuickProductId] =
@@ -1526,31 +1532,71 @@ export default function Stocks() {
       .map((column) => `<th>${column.label}</th>`)
       .join('')
 
-    const rows = await Promise.all(
-      getSortedExportRows().map((row) => {
-        return Promise.all(
-          selectedDefinitions.map(async (column) => {
-            const value = getStockPrintValue(
-              column.key,
-              row
-            )
+    const sortedPrintRows =
+      getSortedExportRows()
 
-            if (column.key.startsWith('qr')) {
-              const qr = await QRCode.toDataURL(value, {
-                width: 90,
-                margin: 1,
-                errorCorrectionLevel: 'M',
-              })
-              return `<td class="qrCell"><img src="${qr}" alt="${column.label}" /><div>${value.split('|').pop() || ''}</div></td>`
-            }
+    let currentCategory = ''
+    let currentSubcategory = ''
 
-            return `<td>${value}</td>`
-          })
-        ).then(
-          (cells) => `<tr>${cells.join('')}</tr>`
+    const printedRows: string[] = []
+
+    for (const row of sortedPrintRows) {
+      const category =
+        String(
+          row.product.category ||
+            'Sans catégorie'
+        ).trim()
+
+      const subcategory =
+        String(
+          row.product.subcategory ||
+            'Sans sous-catégorie'
+        ).trim()
+
+      if (category !== currentCategory) {
+        currentCategory = category
+        currentSubcategory = ''
+
+        printedRows.push(
+          `<tr class="categoryRow"><td colspan="${selectedDefinitions.length}">${category.toUpperCase()}</td></tr>`
         )
-      })
-    ).then((items) => items.join(''))
+      }
+
+      if (subcategory !== currentSubcategory) {
+        currentSubcategory = subcategory
+
+        printedRows.push(
+          `<tr class="subcategoryRow"><td colspan="${selectedDefinitions.length}"><span>${subcategory}</span></td></tr>`
+        )
+      }
+
+      const cells = await Promise.all(
+        selectedDefinitions.map(async (column) => {
+          const value = getStockPrintValue(
+            column.key,
+            row
+          )
+
+          if (column.key.startsWith('qr')) {
+            const qr = await QRCode.toDataURL(value, {
+              width: 90,
+              margin: 1,
+              errorCorrectionLevel: 'M',
+            })
+
+            return `<td class="qrCell"><img src="${qr}" alt="${column.label}" /><div>${value.split('|').pop() || ''}</div></td>`
+          }
+
+          return `<td>${value}</td>`
+        })
+      )
+
+      printedRows.push(
+        `<tr class="productRow">${cells.join('')}</tr>`
+      )
+    }
+
+    const rows = printedRows.join('')
 
     const printWindow = window.open(
       '',
@@ -1573,7 +1619,7 @@ export default function Stocks() {
           <title>NukuStock - Stock disponible</title>
           <style>
             @page {
-              size: A4 landscape;
+              size: A4 ${printOrientation};
               margin: 10mm;
             }
             * { box-sizing: border-box; }
@@ -1604,7 +1650,7 @@ export default function Stocks() {
               width: 100%;
               border-collapse: collapse;
               table-layout: auto;
-              font-size: 7px;
+              font-size: ${printFontSize}px;
             }
             th, td {
               border: 1px solid #999;
@@ -1621,6 +1667,37 @@ export default function Stocks() {
             .qrCell { text-align: center; min-width: 24mm; }
             .qrCell img { width: 20mm; height: 20mm; display: block; margin: 0 auto 1mm; }
             .qrCell div { font-size: 5.5px; font-weight: 700; overflow-wrap: anywhere; }
+
+            .categoryRow td {
+              padding: 7px 8px !important;
+              background: #172033 !important;
+              color: #fff !important;
+              border-color: #172033 !important;
+              font-size: ${printFontSize + 2}px !important;
+              font-weight: 900 !important;
+              letter-spacing: .08em;
+            }
+            .subcategoryRow td {
+              padding: 6px 8px !important;
+              background: #eef2f6 !important;
+              color: #111827 !important;
+              border-color: #cfd6df !important;
+              font-size: ${printFontSize + 1}px !important;
+              font-weight: 900 !important;
+            }
+            .subcategoryRow td span {
+              display: flex;
+              align-items: center;
+              gap: 8px;
+            }
+            .subcategoryRow td span::after {
+              content: "";
+              flex: 1;
+              border-bottom: 1px dotted #98a2b3;
+            }
+            .productRow td {
+              font-size: ${printFontSize}px !important;
+            }
           </style>
         </head>
         <body>
@@ -2653,6 +2730,48 @@ export default function Stocks() {
                   </option>
                 ))}
               </select>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns:
+                  'repeat(auto-fit,minmax(180px,1fr))',
+                gap: 10,
+                marginBottom: 18,
+              }}
+            >
+              <label style={{ display: 'grid', gap: 6, fontSize: 12, fontWeight: 800 }}>
+                Format
+                <select
+                  className="input"
+                  value={printOrientation}
+                  onChange={(event) =>
+                    setPrintOrientation(
+                      event.target.value as 'portrait' | 'landscape'
+                    )
+                  }
+                >
+                  <option value="portrait">Portrait</option>
+                  <option value="landscape">Paysage</option>
+                </select>
+              </label>
+
+              <label style={{ display: 'grid', gap: 6, fontSize: 12, fontWeight: 800 }}>
+                Taille typographie
+                <select
+                  className="input"
+                  value={printFontSize}
+                  onChange={(event) =>
+                    setPrintFontSize(Number(event.target.value) || 8)
+                  }
+                >
+                  <option value={7}>Petite</option>
+                  <option value={8}>Normale</option>
+                  <option value={10}>Grande</option>
+                  <option value={12}>Très grande</option>
+                </select>
+              </label>
             </div>
 
             <div
