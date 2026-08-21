@@ -1,2113 +1,1726 @@
 'use client'
 
-import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
 import {
   useEffect,
   useMemo,
   useState,
-  type ReactNode,
 } from 'react'
-import { UserMenu } from '@/components/user-menu'
-import {
-  useInventories,
-  useOrders,
-  useProducts,
-  useRequests,
-  useStockMovements,
-} from '@/lib/store'
 
-type ViewMode =
-  | 'auto'
-  | 'phone'
-  | 'tablet'
-  | 'pc'
+import { supabase } from '@/lib/supabase'
 
-type NavItem = {
-  href: string
-  label: string
-  icon: string
-}
-
-type NavGroup = {
-  label: string
-  icon: string
-  items: NavItem[]
-}
-
-const VIEW_MODE_KEY = 'nukustock_view_mode'
-const BAR_NUKU_HOST = 'barnuku.fenuaprobartender.com'
-
-const navItems: NavItem[] = [
-  { href: '/', label: 'Dashboard', icon: '⌂' },
-  { href: '/scan', label: 'Scan QR', icon: '⌗' },
-  { href: '/products', label: 'Produits', icon: '▣' },
-  { href: '/equipment-glassware', label: 'Matériel & Verrerie', icon: '▦' },
-  { href: '/product-images', label: 'Photos produits', icon: '▧' },
-  { href: '/stocks', label: 'Stocks', icon: '▤' },
-  { href: '/stock-entry', label: 'Entrée rapide', icon: '＋' },
-  { href: '/locations', label: 'Lieux de stockage', icon: '⌖' },
-  { href: '/movements', label: 'Mouvements', icon: '↕' },
-  { href: '/requests', label: 'Réquisitions', icon: '☷' },
-  { href: '/orders', label: 'Commandes', icon: '▧' },
-  { href: '/transfers', label: 'Transferts', icon: '⇄' },
-  { href: '/inventory', label: 'Inventaires', icon: '☑' },
-  { href: '/suppliers', label: 'Fournisseurs', icon: '◇' },
-  { href: '/transport', label: 'Transport', icon: '✈' },
-  { href: '/planning-bar', label: 'Planning Bar', icon: '▦' },
-  { href: '/labels', label: 'Étiquettes', icon: '▦' },
-  { href: '/checklist-setup', label: 'Check List & Set Up', icon: '☑' },
-  { href: '/import', label: 'Import / Export', icon: '⇩' },
-  { href: '/settings', label: 'Réglages', icon: '⚙' },
-]
-
-const navGroups: NavGroup[] = [
-  {
-    label: 'PRODUITS',
-    icon: '▣',
-    items: [
-      { href: '/products', label: 'Produits', icon: '▣' },
-      { href: '/equipment-glassware', label: 'Matériel & Verrerie', icon: '▦' },
-      { href: '/product-images', label: 'Photos produits', icon: '▧' },
-      { href: '/labels', label: 'Étiquettes', icon: '▦' },
-    ],
-  },
-  {
-    label: 'STOCKS',
-    icon: '▤',
-    items: [
-      { href: '/stocks', label: 'Stocks', icon: '▤' },
-      { href: '/stock-entry', label: 'Entrée rapide', icon: '＋' },
-      { href: '/movements', label: 'Mouvements', icon: '↕' },
-      { href: '/transfers', label: 'Transferts', icon: '⇄' },
-      { href: '/inventory', label: 'Inventaires', icon: '☑' },
-      { href: '/locations', label: 'Lieux de stockage', icon: '⌖' },
-    ],
-  },
-  {
-    label: 'APPROVISIONNEMENT',
-    icon: '☷',
-    items: [
-      { href: '/requests', label: 'Réquisitions', icon: '☷' },
-      { href: '/orders', label: 'Commandes', icon: '▧' },
-      { href: '/suppliers', label: 'Fournisseurs', icon: '◇' },
-      { href: '/transport', label: 'Transport', icon: '✈' },
-    ],
-  },
-  {
-    label: 'BAR TEAM',
-    icon: '♟',
-    items: [
-      { href: '/planning-bar', label: 'Planning', icon: '▦' },
-      { href: '/checklist-setup', label: 'Check List & Set Up', icon: '☑' },
-    ],
-  },
-]
-
-const barTeamGroup =
-  navGroups.find(
-    (group) => group.label === 'BAR TEAM'
-  )
-
-const barTeamItems =
-  barTeamGroup?.items || []
-
-const BAR_NUKU_ALLOWED_ROUTES = [
-  '/bar',
-  ...barTeamItems.map((item) => item.href),
-  '/login',
-  '/forgot-password',
-  '/update-password',
-]
-
-function isBarNukuPathAllowed(
-  pathname: string
-) {
-  return BAR_NUKU_ALLOWED_ROUTES.some(
-    (href) =>
-      pathname === href ||
-      pathname.startsWith(`${href}/`)
-  )
-}
-
-const mobileQuickLinks = [
-  '/',
-  '/stocks',
-  '/requests',
-  '/inventory',
-  '/scan',
-]
-
-function isActive(
-  pathname: string,
-  href: string
-) {
-  if (href === '/') {
-    return pathname === '/'
-  }
-
-  return (
-    pathname === href ||
-    pathname.startsWith(`${href}/`)
-  )
-}
-
-function getAutoResolved():
-  Exclude<ViewMode, 'auto'> {
-  if (
-    typeof window ===
-    'undefined'
-  ) {
-    return 'pc'
-  }
-
-  if (window.innerWidth <= 767) {
-    return 'phone'
-  }
-
-  if (window.innerWidth <= 1199) {
-    return 'tablet'
-  }
-
-  return 'pc'
-}
-
-
-type GlobalSearchResult = {
+type ChecklistTask = {
   id: string
-  title: string
-  subtitle: string
-  href: string
-  type:
-    | 'Produit'
-    | 'Lieu'
-    | 'Commande'
-    | 'Réquisition'
-    | 'Inventaire'
-    | 'Mouvement'
-    | 'Entrée rapide'
-    | 'Module'
+  label: string
+  section:
+    | 'Contrôles'
+    | 'Ouverture'
+    | 'Préparations'
+    | 'Mise en place'
 }
 
-function normalizeSearch(value: unknown) {
-  return String(value ?? '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim()
+type DailyChecklist = {
+  date: string
+  userId: string
+  userName: string
+  checked: Record<string, boolean>
+  completedCount: number
+  totalCount: number
+  percent: number
+  finishedAt: string | null
+  updatedAt: string
 }
 
-export function AppShell({
-  children,
-}: {
-  children: ReactNode
-}) {
-  const pathname = usePathname()
-  const router = useRouter()
+type Tab =
+  | 'opening'
+  | 'setup'
+  | 'history'
 
-  const [isBarNuku, setIsBarNuku] = useState(false)
-  const [siteModeResolved, setSiteModeResolved] = useState(false)
+const CHECKLIST_NAME = 'Ouverture Bar'
 
-  const { items: products } = useProducts()
-  const { items: orders } = useOrders()
-  const { items: requests } = useRequests()
-  const { items: inventories } = useInventories()
-  const { items: movements } = useStockMovements()
+const STORAGE_KEY =
+  'barnuku_opening_checklists_v1'
 
-  const [globalSearch, setGlobalSearch] = useState('')
-  const [searchOpen, setSearchOpen] = useState(false)
+const TASKS: ChecklistTask[] = [
+  {
+    id: 'check-fitness',
+    label: 'Check Fitness',
+    section: 'Contrôles',
+  },
+  {
+    id: 'check-spa-1',
+    label: 'Check Spa 1',
+    section: 'Contrôles',
+  },
+  {
+    id: 'check-spa-2',
+    label: 'Check Spa 2',
+    section: 'Contrôles',
+  },
+  {
+    id: 'check-business-center',
+    label: 'Check Business Center',
+    section: 'Contrôles',
+  },
+  {
+    id: 'check-game-room',
+    label: 'Check Game Room',
+    section: 'Contrôles',
+  },
 
+  {
+    id: 'music',
+    label: 'Allumage de la musique',
+    section: 'Ouverture',
+  },
+  {
+    id: 'lights',
+    label: 'Allumage des lumières',
+    section: 'Ouverture',
+  },
+  {
+    id: 'glass-machine',
+    label: 'Allumage machine à verres',
+    section: 'Ouverture',
+  },
 
-  const [
-    viewMode,
-    setViewMode,
-  ] = useState<ViewMode>('auto')
+  {
+    id: 'flavoured-water',
+    label: 'Préparation eau parfumée',
+    section: 'Préparations',
+  },
+  {
+    id: 'lemonade',
+    label: 'Préparation citronnade',
+    section: 'Préparations',
+  },
+  {
+    id: 'fill-locations',
+    label: 'Remplissage lieu',
+    section: 'Préparations',
+  },
+  {
+    id: 'fill-ice',
+    label: 'Remplissage glace',
+    section: 'Préparations',
+  },
 
-  const [
-    resolvedAuto,
-    setResolvedAuto,
-  ] =
-    useState<
-      Exclude<ViewMode, 'auto'>
-    >('pc')
+  {
+    id: 'lemon',
+    label: 'Citron',
+    section: 'Mise en place',
+  },
+  {
+    id: 'orange',
+    label: 'Orange',
+    section: 'Mise en place',
+  },
+  {
+    id: 'mint',
+    label: 'Menthe',
+    section: 'Mise en place',
+  },
+  {
+    id: 'basil',
+    label: 'Basilic',
+    section: 'Mise en place',
+  },
+  {
+    id: 'coconut-cream',
+    label: 'Crème de coco',
+    section: 'Mise en place',
+  },
+  {
+    id: 'house-syrup',
+    label: 'Sirop maison',
+    section: 'Mise en place',
+  },
+  {
+    id: 'guy-lemonade',
+    label: 'Citronnade Guy',
+    section: 'Mise en place',
+  },
+  {
+    id: 'guy-orange-juice',
+    label: "Jus d'orange Guy",
+    section: 'Mise en place',
+  },
+  {
+    id: 'green-juice',
+    label: 'Jus vert',
+    section: 'Mise en place',
+  },
+  {
+    id: 'red-juice',
+    label: 'Jus rouge',
+    section: 'Mise en place',
+  },
+]
 
-  const [
-    selectorOpen,
-    setSelectorOpen,
-  ] = useState(false)
+const SECTIONS: ChecklistTask['section'][] = [
+  'Contrôles',
+  'Ouverture',
+  'Préparations',
+  'Mise en place',
+]
 
-  const [
-    tabletMenuOpen,
-    setTabletMenuOpen,
-  ] = useState(false)
+function pad(value: number) {
+  return String(value).padStart(2, '0')
+}
 
-  const [
-    mobileMenuOpen,
-    setMobileMenuOpen,
-  ] = useState(false)
+function localDateKey(date = new Date()) {
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+  ].join('-')
+}
 
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
-    PRODUITS: true,
-    STOCKS: true,
-    APPROVISIONNEMENT: true,
-    'BAR TEAM': true,
-  })
-
-  const toggleGroup = (label: string) => {
-    setOpenGroups((current) => ({
-      ...current,
-      [label]: !current[label],
-    }))
-  }
-
-  const effectiveMode =
-    viewMode === 'auto'
-      ? resolvedAuto
-      : viewMode
-
-  const rootClass = useMemo(
-    () =>
-      `nskAppShell view-${effectiveMode}${isBarNuku ? ' barNukuMode' : ''}`,
-    [effectiveMode, isBarNuku]
+function formatDateFr(value: string) {
+  const date = new Date(
+    `${value}T12:00:00`
   )
 
-  useEffect(() => {
-    const hostname = window.location.hostname.toLowerCase()
-    const barMode = hostname === BAR_NUKU_HOST
-
-    setIsBarNuku(barMode)
-    setSiteModeResolved(true)
-  }, [])
-
-  useEffect(() => {
-    if (!siteModeResolved || !isBarNuku) return
-
-    if (!isBarNukuPathAllowed(pathname)) {
-      router.replace('/bar')
+  return new Intl.DateTimeFormat(
+    'fr-FR',
+    {
+      weekday: 'long',
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
     }
-  }, [isBarNuku, pathname, router, siteModeResolved])
+  ).format(date)
+}
 
-  useEffect(() => {
-    const saved =
-      window.localStorage.getItem(
-        VIEW_MODE_KEY
-      )
-
-    if (
-      saved === 'auto' ||
-      saved === 'phone' ||
-      saved === 'tablet' ||
-      saved === 'pc'
-    ) {
-      const isDesktopScreen =
-        window.innerWidth >= 1200
-
-      if (
-        isDesktopScreen &&
-        (saved === 'phone' ||
-          saved === 'tablet')
-      ) {
-        setViewMode('pc')
-        window.localStorage.setItem(
-          VIEW_MODE_KEY,
-          'pc'
-        )
-      } else {
-        setViewMode(saved)
-      }
-    }
-
-    const handleResize = () => {
-      setResolvedAuto(
-        getAutoResolved()
-      )
-    }
-
-    handleResize()
-
-    window.addEventListener(
-      'resize',
-      handleResize
-    )
-
-    return () => {
-      window.removeEventListener(
-        'resize',
-        handleResize
-      )
-    }
-  }, [])
-
-  useEffect(() => {
-    setSelectorOpen(false)
-    setTabletMenuOpen(false)
-    setMobileMenuOpen(false)
-    setSearchOpen(false)
-  }, [pathname])
-
-  const chooseView = (
-    mode: ViewMode
-  ) => {
-    setViewMode(mode)
-
-    window.localStorage.setItem(
-      VIEW_MODE_KEY,
-      mode
-    )
-
-    setSelectorOpen(false)
-    setTabletMenuOpen(false)
-    setMobileMenuOpen(false)
+function formatTime(value?: string | null) {
+  if (!value) {
+    return '—'
   }
 
-  const modeLabel = {
-    auto: 'Automatique',
-    phone: 'Téléphone',
-    tablet: 'Tablette',
-    pc: 'PC',
-  }[viewMode]
+  const date = new Date(value)
 
+  return new Intl.DateTimeFormat(
+    'fr-FR',
+    {
+      hour: '2-digit',
+      minute: '2-digit',
+    }
+  ).format(date)
+}
 
-  const globalSearchResults = useMemo<GlobalSearchResult[]>(() => {
-    if (isBarNuku) return []
+function getStoredHistory():
+  DailyChecklist[] {
+  if (
+    typeof window === 'undefined'
+  ) {
+    return []
+  }
 
-    const query = normalizeSearch(globalSearch)
-
-    if (query.length < 2) return []
-
-    const results: GlobalSearchResult[] = []
-
-    const matches = (...values: unknown[]) =>
-      values.some((value) =>
-        normalizeSearch(value).includes(query)
+  try {
+    const raw =
+      window.localStorage.getItem(
+        STORAGE_KEY
       )
 
-    navItems.forEach((item) => {
-      if (matches(item.label, item.href)) {
-        results.push({
-          id: `module-${item.href}`,
-          title: item.label,
-          subtitle: 'Module NukuStock',
-          href: item.href,
-          type: 'Module',
-        })
-      }
-    })
+    if (!raw) {
+      return []
+    }
 
-    products.forEach((product) => {
-      if (
-        matches(
-          product.name,
-          product.internalRef,
-          product.supplierRef,
-          product.category,
-          product.subcategory,
-          product.mainSupplier
+    const parsed =
+      JSON.parse(raw)
+
+    if (!Array.isArray(parsed)) {
+      return []
+    }
+
+    return parsed
+  } catch {
+    return []
+  }
+}
+
+function saveStoredHistory(
+  history: DailyChecklist[]
+) {
+  if (
+    typeof window === 'undefined'
+  ) {
+    return
+  }
+
+  window.localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify(history)
+  )
+}
+
+function emptyChecked() {
+  return TASKS.reduce<
+    Record<string, boolean>
+  >(
+    (acc, task) => {
+      acc[task.id] = false
+      return acc
+    },
+    {}
+  )
+}
+
+export default function ChecklistSetupPage() {
+  const [tab, setTab] =
+    useState<Tab>('opening')
+
+  const [today] =
+    useState(() => localDateKey())
+
+  const [
+    userId,
+    setUserId,
+  ] = useState('')
+
+  const [
+    userName,
+    setUserName,
+  ] = useState('Utilisateur')
+
+  const [
+    checked,
+    setChecked,
+  ] = useState<
+    Record<string, boolean>
+  >(emptyChecked)
+
+  const [
+    finishedAt,
+    setFinishedAt,
+  ] = useState<string | null>(
+    null
+  )
+
+  const [
+    history,
+    setHistory,
+  ] = useState<DailyChecklist[]>(
+    []
+  )
+
+  const [
+    loaded,
+    setLoaded,
+  ] = useState(false)
+
+  const completedCount =
+    useMemo(
+      () =>
+        TASKS.filter(
+          (task) =>
+            checked[task.id]
+        ).length,
+      [checked]
+    )
+
+  const percent =
+    Math.round(
+      (completedCount /
+        TASKS.length) *
+        100
+    )
+
+  const isComplete =
+    completedCount === TASKS.length
+
+  useEffect(() => {
+    const load = async () => {
+      const stored =
+        getStoredHistory()
+
+      setHistory(stored)
+
+      try {
+        const {
+          data: {
+            session,
+          },
+        } =
+          await supabase.auth.getSession()
+
+        const user =
+          session?.user
+
+        const nextUserId =
+          user?.id || 'local'
+
+        const metadata =
+          user?.user_metadata || {}
+
+        const appMetadata =
+          user?.app_metadata || {}
+
+        const nextUserName =
+          String(
+            metadata.full_name ||
+              metadata.first_name ||
+              appMetadata.employee_name ||
+              metadata.email ||
+              user?.email ||
+              'Utilisateur'
+          )
+            .trim()
+            .toUpperCase()
+
+        setUserId(nextUserId)
+        setUserName(nextUserName)
+
+        const current =
+          stored.find(
+            (item) =>
+              item.date === today &&
+              item.userId ===
+                nextUserId
+          )
+
+        if (current) {
+          setChecked({
+            ...emptyChecked(),
+            ...current.checked,
+          })
+
+          setFinishedAt(
+            current.finishedAt ||
+              null
+          )
+        }
+      } finally {
+        setLoaded(true)
+      }
+    }
+
+    void load()
+  }, [today])
+
+  useEffect(() => {
+    if (!loaded) {
+      return
+    }
+
+    const now =
+      new Date().toISOString()
+
+    const record:
+      DailyChecklist = {
+      date: today,
+      userId:
+        userId || 'local',
+      userName,
+      checked,
+      completedCount,
+      totalCount:
+        TASKS.length,
+      percent,
+      finishedAt,
+      updatedAt: now,
+    }
+
+    setHistory(
+      (current) => {
+        const withoutToday =
+          current.filter(
+            (item) =>
+              !(
+                item.date ===
+                  today &&
+                item.userId ===
+                  record.userId
+              )
+          )
+
+        const next = [
+          record,
+          ...withoutToday,
+        ].sort(
+          (a, b) =>
+            b.date.localeCompare(
+              a.date
+            ) ||
+            b.updatedAt.localeCompare(
+              a.updatedAt
+            )
         )
-      ) {
-        results.push({
-          id: `product-${product.id}`,
-          title: product.name,
-          subtitle: [
-            product.internalRef,
-            product.category,
-            product.subcategory,
-          ]
-            .filter(Boolean)
-            .join(' · '),
-          href: `/products?search=${encodeURIComponent(product.name)}`,
-          type: 'Produit',
-        })
-      }
-    })
 
-    const locations = new Set<string>()
-    products.forEach((product) => {
-      product.lots?.forEach((lot) => {
-        if (lot.location) locations.add(lot.location)
-      })
-    })
-
-    Array.from(locations).forEach((location) => {
-      if (matches(location)) {
-        results.push({
-          id: `location-${location}`,
-          title: location,
-          subtitle: 'Lieu de stockage',
-          href: `/stocks?location=${encodeURIComponent(location)}`,
-          type: 'Lieu',
-        })
-      }
-    })
-
-    orders.forEach((order) => {
-      if (
-        matches(
-          order.id,
-          order.supplierName,
-          order.quoteNumber,
-          order.purchaseOrderNumber,
-          order.invoiceNumber,
-          order.bl,
-          order.status
+        saveStoredHistory(
+          next
         )
-      ) {
-        results.push({
-          id: `order-${order.id}`,
-          title:
-            order.purchaseOrderNumber ||
-            order.quoteNumber ||
-            order.invoiceNumber ||
-            order.id,
-          subtitle: `${order.supplierName || 'Commande fournisseur'} · ${order.status}`,
-          href: '/orders',
-          type: 'Commande',
-        })
+
+        return next
       }
-    })
-
-    requests.forEach((request) => {
-      if (
-        matches(
-          request.id,
-          request.service,
-          request.status,
-          request.sourceLocation,
-          request.destinationLocation
-        )
-      ) {
-        results.push({
-          id: `request-${request.id}`,
-          title: request.id,
-          subtitle: `${request.service} · ${request.status}`,
-          href: '/requests',
-          type: 'Réquisition',
-        })
-      }
-    })
-
-    inventories.forEach((inventory) => {
-      if (
-        matches(
-          inventory.id,
-          inventory.name,
-          inventory.type,
-          inventory.inventoryScope,
-          inventory.location,
-          ...(inventory.locations || [])
-        )
-      ) {
-        results.push({
-          id: `inventory-${inventory.id}`,
-          title: inventory.name || inventory.id,
-          subtitle: `${inventory.type} · ${inventory.location || inventory.locations?.join(', ') || 'Tous lieux'}`,
-          href: '/inventory',
-          type: 'Inventaire',
-        })
-      }
-    })
-
-    movements.forEach((movement) => {
-      if (
-        matches(
-          movement.id,
-          movement.referenceId,
-          movement.productName,
-          movement.internalRef,
-          movement.fromLocation,
-          movement.toLocation,
-          movement.note,
-          movement.supplierName,
-          movement.quoteNumber,
-          movement.purchaseOrderNumber,
-          movement.invoiceNumber
-        )
-      ) {
-        const isQuickEntry =
-          movement.type === 'ENTREE_PRODUIT' &&
-          Boolean(movement.referenceId?.startsWith('ER-'))
-
-        results.push({
-          id: `movement-${movement.id}`,
-          title:
-            isQuickEntry && movement.referenceId
-              ? movement.referenceId
-              : movement.productName,
-          subtitle: [
-            movement.productName,
-            movement.fromLocation,
-            movement.toLocation,
-          ]
-            .filter(Boolean)
-            .join(' · '),
-          href: '/movements',
-          type: isQuickEntry ? 'Entrée rapide' : 'Mouvement',
-        })
-      }
-    })
-
-    const unique = new Map<string, GlobalSearchResult>()
-
-    results.forEach((result) => {
-      const key =
-        result.type === 'Entrée rapide'
-          ? `${result.type}-${result.title}`
-          : result.id
-
-      if (!unique.has(key)) unique.set(key, result)
-    })
-
-    return Array.from(unique.values()).slice(0, 12)
+    )
   }, [
-    globalSearch,
-    products,
-    orders,
-    requests,
-    inventories,
-    movements,
-    isBarNuku,
+    checked,
+    completedCount,
+    finishedAt,
+    loaded,
+    percent,
+    today,
+    userId,
+    userName,
   ])
 
-  const openSearchResult = (result: GlobalSearchResult) => {
-    setSearchOpen(false)
-    setGlobalSearch('')
-    router.push(result.href)
+  const toggleTask = (
+    taskId: string
+  ) => {
+    if (finishedAt) {
+      return
+    }
+
+    setChecked(
+      (current) => ({
+        ...current,
+        [taskId]:
+          !current[taskId],
+      })
+    )
+  }
+
+  const finishOpening = () => {
+    if (!isComplete) {
+      return
+    }
+
+    setFinishedAt(
+      new Date().toISOString()
+    )
+  }
+
+  const reopenToday = () => {
+    const confirmed =
+      window.confirm(
+        "Réouvrir la check list d'aujourd'hui pour la modifier ?"
+      )
+
+    if (!confirmed) {
+      return
+    }
+
+    setFinishedAt(null)
+  }
+
+  const resetToday = () => {
+    const confirmed =
+      window.confirm(
+        "Réinitialiser toutes les cases de la check list d'aujourd'hui ?"
+      )
+
+    if (!confirmed) {
+      return
+    }
+
+    setChecked(
+      emptyChecked()
+    )
+    setFinishedAt(null)
+  }
+
+  const printChecklist = () => {
+    window.print()
+  }
+
+  const sectionProgress = (
+    section:
+      ChecklistTask['section']
+  ) => {
+    const tasks =
+      TASKS.filter(
+        (task) =>
+          task.section === section
+      )
+
+    const done =
+      tasks.filter(
+        (task) =>
+          checked[task.id]
+      ).length
+
+    return {
+      done,
+      total: tasks.length,
+    }
   }
 
   return (
-    <div className={rootClass}>
-      {tabletMenuOpen && (
+    <main className="checklistPage">
+      <section className="pageHeader noPrint">
+        <div>
+          <span className="eyebrow">
+            BAR TEAM
+          </span>
+
+          <h1>
+            Check List & Set Up
+          </h1>
+
+          <p>
+            Contrôle quotidien de
+            l'ouverture du bar et
+            suivi des mises en place.
+          </p>
+        </div>
+      </section>
+
+      <nav className="tabs noPrint">
         <button
           type="button"
-          className="nskTabletOverlay"
-          aria-label="Fermer le menu"
-          onClick={() =>
-            setTabletMenuOpen(false)
+          className={
+            tab === 'opening'
+              ? 'active'
+              : ''
           }
-        />
-      )}
+          onClick={() =>
+            setTab('opening')
+          }
+        >
+          ✓ Ouverture Bar
+        </button>
 
-      <aside
-        className={`nskSidebar ${
-          tabletMenuOpen
-            ? 'nskTabletOpen'
-            : ''
-        }`}
-      >
-        <div className="nskSidebarBrand">
-          <div className="nskSidebarLogo">
-            <img
-              src="/images/nukutepipi.jpg"
-              alt="Nukutepipi"
-            />
-          </div>
+        <button
+          type="button"
+          className={
+            tab === 'setup'
+              ? 'active'
+              : ''
+          }
+          onClick={() =>
+            setTab('setup')
+          }
+        >
+          ▣ SET UP
+        </button>
 
-          <div className="nskBrandText">
-            <strong>
-              {isBarNuku ? 'Bar Nuku' : 'NukuStock'}
-            </strong>
-            <span className="nskPoweredBy">
-              powered by
-              <br />
-              Fenua Pro Bartender
-            </span>
-          </div>
-
-          <button
-            type="button"
-            className="nskTabletClose"
-            aria-label="Fermer"
-            onClick={() =>
-              setTabletMenuOpen(false)
-            }
-          >
-            ×
-          </button>
-        </div>
-
-        <nav className="nskSidebarNav">
-          {isBarNuku ? (
-            <>
-              <Link
-                href="/bar"
-                className={
-                  isActive(pathname, '/bar')
-                    ? 'active'
-                    : ''
-                }
-              >
-                <span
-                  className="nskSidebarIcon"
-                  aria-hidden="true"
-                >
-                  ◉
-                </span>
-                <span>Accueil Bar</span>
-              </Link>
-
-              <div className="nskNavGroup">
-                <button
-                  type="button"
-                  className={`nskNavGroupButton ${
-                    barTeamItems.some((item) =>
-                      isActive(pathname, item.href)
-                    )
-                      ? 'activeGroup'
-                      : ''
-                  }`}
-                  onClick={() =>
-                    toggleGroup('BAR TEAM')
-                  }
-                  aria-expanded={
-                    openGroups['BAR TEAM'] ?? true
-                  }
-                >
-                  <span
-                    className="nskSidebarIcon"
-                    aria-hidden="true"
-                  >
-                    ♟
-                  </span>
-                  <span className="nskNavGroupLabel">
-                    BAR TEAM
-                  </span>
-                  <span
-                    className="nskNavChevron"
-                    aria-hidden="true"
-                  >
-                    {(openGroups['BAR TEAM'] ?? true)
-                      ? '⌄'
-                      : '›'}
-                  </span>
-                </button>
-
-                {(openGroups['BAR TEAM'] ?? true) && (
-                  <div className="nskNavGroupItems">
-                    {barTeamItems.map((item) => (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        className={
-                          isActive(pathname, item.href)
-                            ? 'active'
-                            : ''
-                        }
-                      >
-                        <span
-                          className="nskSidebarIcon"
-                          aria-hidden="true"
-                        >
-                          {item.icon}
-                        </span>
-                        <span>{item.label}</span>
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </>
-          ) : (
-            <>
-              <Link
-                href="/"
-                className={isActive(pathname, '/') ? 'active' : ''}
-              >
-                <span className="nskSidebarIcon" aria-hidden="true">⌂</span>
-                <span>Dashboard</span>
-              </Link>
-
-              <Link
-                href="/scan"
-                className={isActive(pathname, '/scan') ? 'active' : ''}
-              >
-                <span className="nskSidebarIcon" aria-hidden="true">⌗</span>
-                <span>Scan QR</span>
-              </Link>
-
-              {navGroups.map((group) => {
-                const groupActive = group.items.some((item) =>
-                  isActive(pathname, item.href)
-                )
-                const groupOpen = openGroups[group.label] ?? groupActive
-
-                return (
-                  <div className="nskNavGroup" key={group.label}>
-                    <button
-                      type="button"
-                      className={`nskNavGroupButton ${groupActive ? 'activeGroup' : ''}`}
-                      onClick={() => toggleGroup(group.label)}
-                      aria-expanded={groupOpen}
-                    >
-                      <span className="nskSidebarIcon" aria-hidden="true">
-                        {group.icon}
-                      </span>
-                      <span className="nskNavGroupLabel">{group.label}</span>
-                      <span className="nskNavChevron" aria-hidden="true">
-                        {groupOpen ? '⌄' : '›'}
-                      </span>
-                    </button>
-
-                    {groupOpen && (
-                      <div className="nskNavGroupItems">
-                        {group.items.map((item) => (
-                          <Link
-                            key={item.href}
-                            href={item.href}
-                            className={isActive(pathname, item.href) ? 'active' : ''}
-                          >
-                            <span className="nskSidebarIcon" aria-hidden="true">
-                              {item.icon}
-                            </span>
-                            <span>{item.label}</span>
-                          </Link>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-
-              <Link
-                href="/import"
-                className={isActive(pathname, '/import') ? 'active' : ''}
-              >
-                <span className="nskSidebarIcon" aria-hidden="true">⇩</span>
-                <span>Import / Export</span>
-              </Link>
-
-              <Link
-                href="/settings"
-                className={isActive(pathname, '/settings') ? 'active' : ''}
-              >
-                <span className="nskSidebarIcon" aria-hidden="true">⚙</span>
-                <span>Réglages</span>
-              </Link>
-            </>
-          )}
-        </nav>
-
-        <div className="nskSidebarFoot">
-          <strong>
-            {isBarNuku ? 'Bar Nuku' : 'NukuStock'}
-          </strong>
-          <span>
-            {isBarNuku
-              ? 'Portail équipe Bar · Nukutepipi'
-              : 'Gestion des stocks Nukutepipi'}
-          </span>
-        </div>
-      </aside>
-
-      <main className="nskMain">
-        <header className="nskTopbar">
-          <div className="nskTopbarLeft">
-            <button
-              type="button"
-              className="nskTabletMenuButton"
-              aria-label="Ouvrir le menu"
-              onClick={() =>
-                setTabletMenuOpen(true)
-              }
-            >
-              ☰
-            </button>
-
-            <div className="nskTopbarTitle">
-              <span className="nskEyebrow">
-                {isBarNuku ? 'BAR NUKU' : 'NUKUTEPIPI'}
-              </span>
-              <strong>
-                {isBarNuku ? 'Portail équipe Bar' : 'Gestion des stocks'}
-              </strong>
-            </div>
-          </div>
-
-          {!isBarNuku && (
-          <div className="nskGlobalSearch">
-            <span
-              className="nskGlobalSearchIcon"
-              aria-hidden="true"
-            >
-              ⌕
-            </span>
-
-            <input
-              value={globalSearch}
-              onChange={(event) => {
-                setGlobalSearch(event.target.value)
-                setSearchOpen(true)
-              }}
-              onFocus={() => setSearchOpen(true)}
-              onKeyDown={(event) => {
-                if (
-                  event.key === 'Enter' &&
-                  globalSearchResults[0]
-                ) {
-                  openSearchResult(globalSearchResults[0])
-                }
-
-                if (event.key === 'Escape') {
-                  setSearchOpen(false)
-                }
-              }}
-              placeholder="Rechercher produit, lieu, ER, commande..."
-              aria-label="Recherche globale NukuStock"
-            />
-
-            {globalSearch && (
-              <button
-                type="button"
-                className="nskGlobalSearchClear"
-                aria-label="Effacer la recherche"
-                onClick={() => {
-                  setGlobalSearch('')
-                  setSearchOpen(false)
-                }}
-              >
-                ×
-              </button>
-            )}
-
-            {searchOpen && globalSearch.trim().length >= 2 && (
-              <div className="nskGlobalSearchResults">
-                {globalSearchResults.length > 0 ? (
-                  globalSearchResults.map((result) => (
-                    <button
-                      type="button"
-                      key={result.id}
-                      onMouseDown={(event) =>
-                        event.preventDefault()
-                      }
-                      onClick={() =>
-                        openSearchResult(result)
-                      }
-                    >
-                      <span className="nskSearchType">
-                        {result.type}
-                      </span>
-
-                      <span className="nskSearchText">
-                        <strong>{result.title}</strong>
-                        <small>
-                          {result.subtitle || 'Ouvrir'}
-                        </small>
-                      </span>
-
-                      <span
-                        className="nskSearchArrow"
-                        aria-hidden="true"
-                      >
-                        →
-                      </span>
-                    </button>
-                  ))
-                ) : (
-                  <div className="nskSearchEmpty">
-                    Aucun résultat pour « {globalSearch} »
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-          )}
-
-          <div className="nskTopbarRight">
-            <div className="nskViewSelector">
-              <button
-                type="button"
-                className="nskViewSelectorButton"
-                onClick={() =>
-                  setSelectorOpen(
-                    (open) => !open
-                  )
-                }
-              >
-                <span>
-                  Écran
-                </span>
-                <strong>
-                  {modeLabel}
-                </strong>
-                <b>⌄</b>
-              </button>
-
-              {selectorOpen && (
-                <div className="nskViewSelectorMenu">
-                  <button
-                    type="button"
-                    className={
-                      viewMode === 'auto'
-                        ? 'active'
-                        : ''
-                    }
-                    onClick={() =>
-                      chooseView('auto')
-                    }
-                  >
-                    <span>
-                      Automatique
-                    </span>
-                    <small>
-                      Détection de l’écran
-                    </small>
-                  </button>
-
-                  <button
-                    type="button"
-                    className={
-                      viewMode === 'phone'
-                        ? 'active'
-                        : ''
-                    }
-                    onClick={() =>
-                      chooseView('phone')
-                    }
-                  >
-                    <span>
-                      Téléphone
-                    </span>
-                    <small>
-                      Largeur mobile
-                    </small>
-                  </button>
-
-                  <button
-                    type="button"
-                    className={
-                      viewMode === 'tablet'
-                        ? 'active'
-                        : ''
-                    }
-                    onClick={() =>
-                      chooseView('tablet')
-                    }
-                  >
-                    <span>
-                      Tablette
-                    </span>
-                    <small>
-                      Interface tablette
-                    </small>
-                  </button>
-
-                  <button
-                    type="button"
-                    className={
-                      viewMode === 'pc'
-                        ? 'active'
-                        : ''
-                    }
-                    onClick={() =>
-                      chooseView('pc')
-                    }
-                  >
-                    <span>
-                      PC
-                    </span>
-                    <small>
-                      Interface complète
-                    </small>
-                  </button>
-                </div>
-              )}
-            </div>
-
-            <UserMenu />
-          </div>
-        </header>
-
-        <div className="nskViewStage">
-          <div className="nskViewCanvas">
-            {children}
-          </div>
-        </div>
-      </main>
-
-      <nav className={`nskMobileNav ${isBarNuku ? 'nskBarMobileNav' : ''}`}>
-        {(isBarNuku
-          ? [
-              {
-                href: '/bar',
-                label: 'Accueil',
-                icon: '◉',
-              },
-              ...barTeamItems,
-            ]
-          : navItems.filter((item) =>
-              mobileQuickLinks.includes(item.href)
-            )
-        ).map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={
-              isActive(pathname, item.href)
-                ? 'active'
-                : ''
-            }
-          >
-            <span
-              className="nskMobileNavIcon"
-              aria-hidden="true"
-            >
-              {item.icon}
-            </span>
-            <span className="nskMobileNavLabel">
-              {item.label}
-            </span>
-          </Link>
-        ))}
-
-        {!isBarNuku && (
-          <button
-            type="button"
-            className={
-              mobileMenuOpen
-                ? 'active'
-                : ''
-            }
-            onClick={() =>
-              setMobileMenuOpen(true)
-            }
-          >
-            <span
-              className="nskMobileNavIcon"
-              aria-hidden="true"
-            >
-              ☰
-            </span>
-            <span className="nskMobileNavLabel">
-              Menu
-            </span>
-          </button>
-        )}
+        <button
+          type="button"
+          className={
+            tab === 'history'
+              ? 'active'
+              : ''
+          }
+          onClick={() =>
+            setTab('history')
+          }
+        >
+          ↺ Historique
+        </button>
       </nav>
 
-      {!isBarNuku && mobileMenuOpen && (
-        <div className="nskMobileMenuScreen">
-          <div className="nskMobileMenuHeader">
+      {tab === 'opening' && (
+        <div
+          className="printSheet"
+          id="opening-checklist-print"
+        >
+          <section className="openingHero">
             <div>
-              <span>
-                NUKUTEPIPI
-              </span>
-              <strong>
-                Tous les modules
-              </strong>
+              <div className="heroTop">
+                <span className="heroEyebrow">
+                  NUKUTEPIPI
+                </span>
+
+                <span
+                  className={`statusBadge ${
+                    finishedAt
+                      ? 'done'
+                      : isComplete
+                        ? 'ready'
+                        : 'progress'
+                  }`}
+                >
+                  {finishedAt
+                    ? 'TERMINÉE'
+                    : isComplete
+                      ? 'PRÊTE À VALIDER'
+                      : 'EN COURS'}
+                </span>
+              </div>
+
+              <h2>
+                {CHECKLIST_NAME}
+              </h2>
+
+              <div className="metaGrid">
+                <div>
+                  <span>
+                    Date
+                  </span>
+                  <strong>
+                    {formatDateFr(
+                      today
+                    )}
+                  </strong>
+                </div>
+
+                <div>
+                  <span>
+                    Réalisé par
+                  </span>
+                  <strong>
+                    {userName}
+                  </strong>
+                </div>
+
+                <div>
+                  <span>
+                    Validation
+                  </span>
+                  <strong>
+                    {finishedAt
+                      ? formatTime(
+                          finishedAt
+                        )
+                      : 'En attente'}
+                  </strong>
+                </div>
+              </div>
             </div>
+
+            <div className="progressCard">
+              <div className="progressTop">
+                <span>
+                  % de l'ouverture
+                </span>
+
+                <strong>
+                  {percent}%
+                </strong>
+              </div>
+
+              <div className="progressTrack">
+                <div
+                  className="progressFill"
+                  style={{
+                    width:
+                      `${percent}%`,
+                  }}
+                />
+              </div>
+
+              <div className="progressBottom">
+                <span>
+                  {completedCount} /{' '}
+                  {TASKS.length}{' '}
+                  tâches réalisées
+                </span>
+
+                {percent === 100 && (
+                  <b>
+                    ✓ Complet
+                  </b>
+                )}
+              </div>
+            </div>
+          </section>
+
+          <section className="actionsBar noPrint">
+            <button
+              type="button"
+              className="secondaryButton"
+              onClick={
+                printChecklist
+              }
+            >
+              🖨 Imprimer la Check List
+            </button>
 
             <button
               type="button"
-              aria-label="Fermer"
-              onClick={() =>
-                setMobileMenuOpen(false)
-              }
+              className="ghostButton"
+              onClick={resetToday}
             >
-              ×
+              Réinitialiser
             </button>
-          </div>
 
-          <div className="nskMobileMenuGrid">
-            {navItems.map(
-              (item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={
-                    isActive(
-                      pathname,
-                      item.href
-                    )
-                      ? 'active'
-                      : ''
-                  }
-                >
-                  <span
-                    className="nskMobileMenuIcon"
-                    aria-hidden="true"
+            {finishedAt ? (
+              <button
+                type="button"
+                className="secondaryButton"
+                onClick={
+                  reopenToday
+                }
+              >
+                Réouvrir
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="primaryButton"
+                disabled={!isComplete}
+                onClick={
+                  finishOpening
+                }
+              >
+                ✓ Terminer l'ouverture
+              </button>
+            )}
+          </section>
+
+          <div className="sectionGrid">
+            {SECTIONS.map(
+              (section) => {
+                const sectionTasks =
+                  TASKS.filter(
+                    (task) =>
+                      task.section ===
+                      section
+                  )
+
+                const progress =
+                  sectionProgress(
+                    section
+                  )
+
+                return (
+                  <section
+                    className="taskSection"
+                    key={section}
                   >
-                    {item.icon}
-                  </span>
-                  <span>
-                    {item.label}
-                  </span>
-                </Link>
-              )
+                    <header>
+                      <div>
+                        <span className="sectionLabel">
+                          {section}
+                        </span>
+
+                        <strong>
+                          {
+                            progress.done
+                          }{' '}
+                          /{' '}
+                          {
+                            progress.total
+                          }
+                        </strong>
+                      </div>
+
+                      <div className="sectionTrack">
+                        <div
+                          style={{
+                            width: `${
+                              progress.total
+                                ? Math.round(
+                                    (progress.done /
+                                      progress.total) *
+                                      100
+                                  )
+                                : 0
+                            }%`,
+                          }}
+                        />
+                      </div>
+                    </header>
+
+                    <div className="taskList">
+                      {sectionTasks.map(
+                        (task) => {
+                          const done =
+                            Boolean(
+                              checked[
+                                task.id
+                              ]
+                            )
+
+                          return (
+                            <label
+                              className={`taskRow ${
+                                done
+                                  ? 'checked'
+                                  : ''
+                              } ${
+                                finishedAt
+                                  ? 'locked'
+                                  : ''
+                              }`}
+                              key={
+                                task.id
+                              }
+                            >
+                              <input
+                                type="checkbox"
+                                checked={
+                                  done
+                                }
+                                disabled={
+                                  Boolean(
+                                    finishedAt
+                                  )
+                                }
+                                onChange={() =>
+                                  toggleTask(
+                                    task.id
+                                  )
+                                }
+                              />
+
+                              <span className="visualCheckbox">
+                                {done
+                                  ? '✓'
+                                  : ''}
+                              </span>
+
+                              <span className="taskText">
+                                {
+                                  task.label
+                                }
+                              </span>
+                            </label>
+                          )
+                        }
+                      )}
+                    </div>
+                  </section>
+                )
+              }
             )}
           </div>
+
+          <footer className="printFooter">
+            <div>
+              <span>
+                Progression finale
+              </span>
+              <strong>
+                {percent}%
+              </strong>
+            </div>
+
+            <div>
+              <span>
+                Tâches réalisées
+              </span>
+              <strong>
+                {completedCount} /{' '}
+                {TASKS.length}
+              </strong>
+            </div>
+
+            <div>
+              <span>
+                Heure de validation
+              </span>
+              <strong>
+                {finishedAt
+                  ? formatTime(
+                      finishedAt
+                    )
+                  : '—'}
+              </strong>
+            </div>
+          </footer>
         </div>
       )}
 
-      <style jsx global>{`
-        * {
-          box-sizing: border-box;
-        }
+      {tab === 'setup' && (
+        <section className="setupPlaceholder noPrint">
+          <div className="placeholderIcon">
+            ▣
+          </div>
 
-        html,
-        body {
-          margin: 0;
-          min-width: 0;
-          max-width: 100%;
-        }
+          <h2>SET UP</h2>
 
-        body {
-          overflow-x: auto;
-        }
+          <p>
+            Cette zone reste dédiée
+            aux fiches et photos de
+            mise en place du bar.
+          </p>
+        </section>
+      )}
 
-        .nskAppShell {
+      {tab === 'history' && (
+        <section className="historyPanel noPrint">
+          <div className="historyHeader">
+            <div>
+              <span className="eyebrow">
+                HISTORIQUE
+              </span>
+
+              <h2>
+                Ouvertures Bar
+              </h2>
+            </div>
+          </div>
+
+          <div className="historyTableWrap">
+            <table className="historyTable">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Personne</th>
+                  <th>Progression</th>
+                  <th>Statut</th>
+                  <th>Validation</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {history.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="emptyCell"
+                    >
+                      Aucun historique.
+                    </td>
+                  </tr>
+                ) : (
+                  history.map(
+                    (item) => (
+                      <tr
+                        key={`${item.date}-${item.userId}`}
+                      >
+                        <td>
+                          {formatDateFr(
+                            item.date
+                          )}
+                        </td>
+
+                        <td>
+                          {
+                            item.userName
+                          }
+                        </td>
+
+                        <td>
+                          <div className="historyProgress">
+                            <div>
+                              <span
+                                style={{
+                                  width: `${item.percent}%`,
+                                }}
+                              />
+                            </div>
+
+                            <strong>
+                              {
+                                item.percent
+                              }
+                              %
+                            </strong>
+                          </div>
+                        </td>
+
+                        <td>
+                          <span
+                            className={`historyStatus ${
+                              item.finishedAt
+                                ? 'done'
+                                : ''
+                            }`}
+                          >
+                            {item.finishedAt
+                              ? 'Terminée'
+                              : 'En cours'}
+                          </span>
+                        </td>
+
+                        <td>
+                          {item.finishedAt
+                            ? formatTime(
+                                item.finishedAt
+                              )
+                            : '—'}
+                        </td>
+                      </tr>
+                    )
+                  )
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      <style jsx>{`
+        .checklistPage {
           min-height: 100vh;
+          padding: 28px;
           background: #f4f6f9;
+          color: #101828;
         }
 
-        .nskSidebar {
-          position: fixed;
-          inset: 0 auto 0 0;
-          z-index: 60;
-          width: 230px;
+        .pageHeader {
           display: flex;
-          flex-direction: column;
-          background: #0c1525;
-          color: #fff;
-        }
-
-        .nskSidebarBrand {
-          position: relative;
-          min-height: 156px;
-          padding: 18px 16px 16px;
-          display: flex;
-          flex-direction: column;
-          align-items: flex-start;
-          gap: 10px;
-          border-bottom: 1px solid rgba(255,255,255,.08);
-        }
-
-        .nskSidebarLogo {
-          width: 168px;
-          height: 54px;
-          display: flex;
-          align-items: center;
-          justify-content: flex-start;
-          overflow: hidden;
-          border-radius: 8px;
-          background: #fff;
-        }
-
-        .nskSidebarLogo img {
-          display: block;
-          max-width: 100%;
-          max-height: 100%;
-          object-fit: contain;
-          object-position: left center;
-        }
-
-        .nskBrandText {
-          display: flex;
-          flex-direction: column;
-          min-width: 0;
-        }
-
-        .nskBrandText strong {
-          color: #fff;
-          font-size: 18px;
-          line-height: 1.1;
-          font-weight: 900;
-          letter-spacing: -.02em;
-        }
-
-        .nskBrandText .nskPoweredBy {
-          margin-top: 5px;
-          color: #a7b3c6;
-          font-size: 10px;
-          line-height: 1.35;
-          font-weight: 600;
-        }
-
-        .nskTabletClose {
-          display: none;
-          position: absolute;
-          top: 14px;
-          right: 14px;
-          width: 36px;
-          height: 36px;
-          border: 0;
-          border-radius: 10px;
-          background: rgba(255,255,255,.08);
-          color: #fff;
-          font-size: 22px;
-        }
-
-        .nskSidebarNav {
-          flex: 1;
-          overflow-y: auto;
-          padding: 14px 10px;
-        }
-
-        .nskSidebarNav a {
-          min-height: 42px;
-          margin-bottom: 3px;
-          padding: 0 12px;
-          border-radius: 10px;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          color: #91a0b6;
-          text-decoration: none;
-          font-size: 13px;
-          font-weight: 600;
-        }
-
-        .nskSidebarNav a.active {
-          background: #17243a;
-          color: #fff;
-        }
-
-        .nskNavGroup {
-          margin: 5px 0;
-        }
-
-        .nskNavGroupButton {
-          width: 100%;
-          min-height: 42px;
-          padding: 0 12px;
-          border: 0;
-          border-radius: 10px;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          background: transparent;
-          color: #91a0b6;
-          cursor: pointer;
-          text-align: left;
-          font: inherit;
-          font-size: 11px;
-          font-weight: 800;
-          letter-spacing: .045em;
-        }
-
-        .nskNavGroupButton:hover,
-        .nskNavGroupButton.activeGroup {
-          color: #fff;
-          background: rgba(255,255,255,.035);
-        }
-
-        .nskNavGroupLabel {
-          flex: 1;
-        }
-
-        .nskNavChevron {
-          width: 18px;
-          text-align: center;
-          font-size: 15px;
-          color: #728097;
-        }
-
-        .nskNavGroupItems {
-          padding: 2px 0 4px 12px;
-        }
-
-        .nskNavGroupItems a {
-          min-height: 38px;
-          margin-bottom: 2px;
-          padding-left: 10px;
-          font-size: 12px;
-        }
-
-        .nskSidebarIcon {
-          width: 18px;
-          display: inline-flex;
-          justify-content: center;
-          flex: 0 0 auto;
-        }
-
-        .nskSidebarFoot {
-          padding: 16px;
-          display: flex;
-          flex-direction: column;
-          gap: 3px;
-          border-top: 1px solid rgba(255,255,255,.08);
-        }
-
-        .nskSidebarFoot span {
-          color: #728097;
-          font-size: 10px;
-        }
-
-        .nskMain {
-          min-height: 100vh;
-          margin-left: 230px;
-        }
-
-        .nskTopbar {
-          position: sticky;
-          top: 0;
-          z-index: 50;
-          height: 78px;
-          padding: 0 28px;
-          display: flex;
-          align-items: center;
           justify-content: space-between;
-          gap: 16px;
-          background: rgba(255,255,255,.97);
-          border-bottom: 1px solid #e7eaf0;
-          backdrop-filter: blur(12px);
+          gap: 20px;
+          margin-bottom: 18px;
         }
 
-        .nskTopbarLeft,
-        .nskTopbarRight {
-          display: flex;
-          align-items: center;
-        }
-
-        .nskTopbarLeft {
-          min-width: 0;
-          gap: 12px;
-        }
-
-        .nskTopbarRight {
-          flex: 0 0 auto;
-          gap: 12px;
-        }
-
-        .nskGlobalSearch {
-          position: relative;
-          width: min(430px, 36vw);
-          min-width: 220px;
-        }
-
-        .nskGlobalSearch input {
-          width: 100%;
-          height: 44px;
-          padding: 0 42px 0 38px;
-          border: 1px solid #dfe3ea;
-          border-radius: 12px;
-          outline: none;
-          background: #fff;
-          color: #101828;
-          font-size: 12px;
-          font-weight: 600;
-        }
-
-        .nskGlobalSearch input:focus {
-          border-color: #98a2b3;
-          box-shadow: 0 0 0 3px rgba(152,162,179,.12);
-        }
-
-        .nskGlobalSearchIcon {
-          position: absolute;
-          left: 13px;
-          top: 50%;
-          z-index: 2;
-          transform: translateY(-50%);
-          color: #667085;
-          font-size: 18px;
-          pointer-events: none;
-        }
-
-        .nskGlobalSearchClear {
-          position: absolute;
-          right: 9px;
-          top: 50%;
-          z-index: 3;
-          width: 28px;
-          height: 28px;
-          transform: translateY(-50%);
-          border: 0;
-          border-radius: 8px;
-          background: #f2f4f7;
-          color: #667085;
-          cursor: pointer;
-          font-size: 18px;
-        }
-
-        .nskGlobalSearchResults {
-          position: absolute;
-          top: calc(100% + 8px);
-          left: 0;
-          right: 0;
-          z-index: 300;
-          max-height: min(520px, 70vh);
-          overflow-y: auto;
-          padding: 7px;
-          border: 1px solid #dfe3ea;
-          border-radius: 14px;
-          background: #fff;
-          box-shadow: 0 20px 55px rgba(15,23,42,.18);
-        }
-
-        .nskGlobalSearchResults > button {
-          width: 100%;
-          min-height: 58px;
-          padding: 8px 10px;
-          border: 0;
-          border-radius: 10px;
-          display: grid;
-          grid-template-columns: 92px minmax(0,1fr) 20px;
-          align-items: center;
-          gap: 9px;
-          background: transparent;
-          color: #101828;
-          text-align: left;
-          cursor: pointer;
-        }
-
-        .nskGlobalSearchResults > button:hover {
-          background: #f4f6f9;
-        }
-
-        .nskSearchType {
-          padding: 5px 7px;
-          border-radius: 8px;
-          background: #eef2f6;
-          color: #475467;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-          text-align: center;
-          font-size: 9px;
+        .eyebrow,
+        .heroEyebrow,
+        .sectionLabel {
+          color: #7f56d9;
+          font-size: 10px;
           font-weight: 900;
+          letter-spacing: .12em;
           text-transform: uppercase;
         }
 
-        .nskSearchText {
-          min-width: 0;
-          display: flex;
-          flex-direction: column;
+        .pageHeader h1,
+        .historyHeader h2 {
+          margin: 5px 0 0;
+          font-size: 30px;
+          line-height: 1.05;
         }
 
-        .nskSearchText strong {
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-          font-size: 12px;
-        }
-
-        .nskSearchText small {
-          margin-top: 3px;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
+        .pageHeader p {
+          max-width: 680px;
+          margin: 8px 0 0;
           color: #667085;
-          font-size: 10px;
+          font-size: 13px;
+          line-height: 1.5;
         }
 
-        .nskSearchArrow {
-          color: #98a2b3;
-          font-size: 15px;
-        }
-
-        .nskSearchEmpty {
-          padding: 18px 12px;
-          color: #667085;
-          text-align: center;
-          font-size: 11px;
-        }
-
-        .nskTopbarTitle {
-          display: flex;
-          flex-direction: column;
-          min-width: 0;
-        }
-
-        .nskTopbarTitle .nskEyebrow {
-          color: #9aa4b2;
-          font-size: 10px;
-          font-weight: 800;
-          letter-spacing: .08em;
-        }
-
-        .nskTopbarTitle strong {
-          margin-top: 2px;
-          font-size: 14px;
-          white-space: nowrap;
-        }
-
-        .nskTabletMenuButton {
-          display: none;
-          width: 42px;
-          height: 42px;
+        .tabs {
+          display: inline-flex;
+          gap: 6px;
+          margin-bottom: 18px;
+          padding: 6px;
           border: 1px solid #e4e7ec;
-          border-radius: 12px;
+          border-radius: 15px;
           background: #fff;
-          font-size: 20px;
+          box-shadow: 0 8px 24px rgba(16,24,40,.05);
         }
 
-        .nskViewSelector {
-          position: relative;
-        }
-
-        .nskViewSelectorButton {
-          min-width: 118px;
-          height: 44px;
-          padding: 6px 10px;
-          border: 1px solid #dfe3ea;
-          border-radius: 12px;
-          background: #fff;
-          color: #344054;
-          display: grid;
-          grid-template-columns:
-            1fr auto;
-          grid-template-rows:
-            auto auto;
-          column-gap: 8px;
-          text-align: left;
-          cursor: pointer;
-        }
-
-        .nskViewSelectorButton span {
-          grid-column: 1;
-          color: #98a2b3;
-          font-size: 9px;
-        }
-
-        .nskViewSelectorButton strong {
-          grid-column: 1;
-          font-size: 11px;
-        }
-
-        .nskViewSelectorButton b {
-          grid-column: 2;
-          grid-row: 1 / span 2;
-          align-self: center;
-          font-size: 14px;
-        }
-
-        .nskViewSelectorMenu {
-          position: absolute;
-          top: calc(100% + 8px);
-          right: 0;
-          z-index: 200;
-          width: 230px;
-          padding: 8px;
-          border: 1px solid #dfe3ea;
-          border-radius: 14px;
-          background: #fff;
-          box-shadow: 0 20px 50px rgba(15,23,42,.16);
-        }
-
-        .nskViewSelectorMenu button {
-          width: 100%;
-          padding: 10px 11px;
+        .tabs button {
+          min-height: 40px;
+          padding: 0 15px;
           border: 0;
           border-radius: 10px;
           background: transparent;
+          color: #667085;
+          cursor: pointer;
+          font-size: 12px;
+          font-weight: 850;
+        }
+
+        .tabs button.active {
+          background: #101828;
+          color: #fff;
+        }
+
+        .printSheet {
+          max-width: 1250px;
+          margin: 0 auto;
+        }
+
+        .openingHero {
+          display: grid;
+          grid-template-columns: minmax(0,1fr) 340px;
+          gap: 20px;
+          padding: 24px;
+          border: 1px solid #e4e7ec;
+          border-radius: 22px;
+          background: #fff;
+          box-shadow: 0 12px 36px rgba(16,24,40,.06);
+        }
+
+        .heroTop {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+
+        .openingHero h2 {
+          margin: 8px 0 18px;
+          font-size: 31px;
+          letter-spacing: -.03em;
+        }
+
+        .statusBadge {
+          display: inline-flex;
+          min-height: 28px;
+          align-items: center;
+          padding: 0 10px;
+          border-radius: 999px;
+          background: #f2f4f7;
+          color: #475467;
+          font-size: 9px;
+          font-weight: 900;
+        }
+
+        .statusBadge.ready {
+          background: #ecfdf3;
+          color: #027a48;
+        }
+
+        .statusBadge.done {
+          background: #e8f8ef;
+          color: #067647;
+        }
+
+        .metaGrid {
+          display: grid;
+          grid-template-columns: repeat(3,minmax(0,1fr));
+          gap: 12px;
+        }
+
+        .metaGrid > div {
+          padding: 12px 14px;
+          border-radius: 12px;
+          background: #f8fafc;
+        }
+
+        .metaGrid span,
+        .printFooter span {
+          display: block;
+          color: #98a2b3;
+          font-size: 9px;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: .06em;
+        }
+
+        .metaGrid strong,
+        .printFooter strong {
+          display: block;
+          margin-top: 4px;
+          color: #101828;
+          font-size: 12px;
+        }
+
+        .progressCard {
           display: flex;
           flex-direction: column;
-          align-items: flex-start;
-          color: #344054;
-          cursor: pointer;
+          justify-content: center;
+          padding: 20px;
+          border-radius: 18px;
+          background: #101828;
+          color: #fff;
         }
 
-        .nskViewSelectorMenu button.active {
-          background: #eef3f8;
-          color: #0c1525;
+        .progressTop {
+          display: flex;
+          align-items: end;
+          justify-content: space-between;
+          gap: 12px;
         }
 
-        .nskViewSelectorMenu span {
-          font-size: 12px;
+        .progressTop span {
+          color: #cbd5e1;
+          font-size: 11px;
           font-weight: 800;
         }
 
-        .nskViewSelectorMenu small {
-          margin-top: 2px;
-          color: #98a2b3;
+        .progressTop strong {
+          font-size: 42px;
+          line-height: .95;
+          letter-spacing: -.05em;
+        }
+
+        .progressTrack {
+          height: 10px;
+          margin-top: 18px;
+          overflow: hidden;
+          border-radius: 999px;
+          background: rgba(255,255,255,.14);
+        }
+
+        .progressFill {
+          height: 100%;
+          border-radius: inherit;
+          background: #fff;
+          transition: width .2s ease;
+        }
+
+        .progressBottom {
+          display: flex;
+          justify-content: space-between;
+          gap: 10px;
+          margin-top: 9px;
+          color: #cbd5e1;
           font-size: 10px;
         }
 
-        .nskViewStage {
-          width: 100%;
-          min-width: 0;
-          overflow: auto;
+        .progressBottom b {
+          color: #fff;
         }
 
-        .nskViewCanvas {
-          min-width: 0;
-          background: #f4f6f9;
-        }
-
-        .nskMobileNav,
-        .nskMobileMenuScreen,
-        .nskTabletOverlay {
-          display: none;
-        }
-
-        /* PC */
-        .view-pc .nskSidebar {
+        .actionsBar {
           display: flex;
-          transform: none;
+          justify-content: flex-end;
+          gap: 9px;
+          margin: 14px 0;
+          flex-wrap: wrap;
         }
 
-        .view-pc .nskMain {
-          margin-left: 208px;
-        }
-
-        .view-pc .nskViewCanvas {
-          width: 100%;
-          max-width: none;
-          margin: 0;
-        }
-
-        /* TABLETTE */
-        .view-tablet .nskSidebar {
-          width: 260px;
-          transform: translateX(-100%);
-          transition: transform .2s ease;
-          box-shadow: 18px 0 50px rgba(0,0,0,.18);
-        }
-
-        .view-tablet .nskSidebar.nskTabletOpen {
-          transform: translateX(0);
-        }
-
-        .view-tablet .nskTabletClose {
-          display: grid;
-          place-items: center;
-        }
-
-        .view-tablet .nskMain {
-          margin-left: 0;
-        }
-
-        .view-tablet .nskTabletMenuButton {
-          display: grid;
-          place-items: center;
-        }
-
-        .view-tablet .nskGlobalSearch {
-          width: min(360px, 42vw);
-          min-width: 190px;
-        }
-
-        .view-tablet .nskTabletOverlay {
-          display: block;
-          position: fixed;
-          inset: 0;
-          z-index: 55;
-          border: 0;
-          background: rgba(10,18,30,.34);
-        }
-
-        .view-tablet .nskViewStage {
-          display: flex;
-          justify-content: center;
-          padding: 16px;
-        }
-
-        .view-tablet .nskViewCanvas {
-          width: min(100%, 1024px);
-          min-width: 768px;
-          border-radius: 16px;
-          overflow: hidden;
-          box-shadow: 0 0 0 1px #e6e9ef;
-        }
-
-        /* TÉLÉPHONE */
-        .view-phone {
-          min-width: 0;
-          overflow-x: hidden;
-          padding-bottom:
-            calc(72px + env(safe-area-inset-bottom));
-        }
-
-        .view-phone .nskSidebar,
-        .view-phone .nskTabletOverlay {
-          display: none !important;
-        }
-
-        .view-phone .nskMain {
-          width: 100%;
-          min-width: 0;
-          margin-left: 0;
-        }
-
-        .view-phone .nskTopbar {
-          height: 62px;
-          padding: 0 10px;
-        }
-
-        .view-phone .nskTabletMenuButton,
-        .view-phone .nskTopbarTitle .nskEyebrow {
-          display: none;
-        }
-
-        .view-phone .nskTopbarTitle strong {
-          font-size: 12px;
-        }
-
-        .view-phone .nskTopbarRight {
-          gap: 5px;
-        }
-
-        .view-phone .nskGlobalSearch {
-          position: static;
-          width: auto;
-          min-width: 0;
-        }
-
-        .view-phone .nskGlobalSearch input {
-          width: 42px;
-          height: 38px;
-          padding: 0;
-          color: transparent;
+        .actionsBar button {
+          min-height: 44px;
+          padding: 0 16px;
+          border-radius: 12px;
           cursor: pointer;
+          font-size: 11px;
+          font-weight: 900;
         }
 
-        .view-phone .nskGlobalSearch input::placeholder {
-          color: transparent;
+        .primaryButton {
+          border: 1px solid #101828;
+          background: #101828;
+          color: #fff;
         }
 
-        .view-phone .nskGlobalSearchIcon {
-          left: auto;
-          right: 0;
-          width: 42px;
-          text-align: center;
+        .primaryButton:disabled {
+          cursor: not-allowed;
+          opacity: .35;
         }
 
-        .view-phone .nskGlobalSearch:focus-within {
-          position: fixed;
-          inset: 8px 8px auto 8px;
-          z-index: 400;
-          width: auto;
-        }
-
-        .view-phone .nskGlobalSearch:focus-within input {
-          width: 100%;
-          height: 46px;
-          padding: 0 42px 0 38px;
+        .secondaryButton {
+          border: 1px solid #d0d5dd;
+          background: #fff;
           color: #101828;
-          cursor: text;
-          box-shadow: 0 12px 35px rgba(15,23,42,.18);
         }
 
-        .view-phone .nskGlobalSearch:focus-within input::placeholder {
-          color: #98a2b3;
-        }
-
-        .view-phone .nskGlobalSearch:focus-within .nskGlobalSearchIcon {
-          left: 13px;
-          right: auto;
-          width: auto;
-        }
-
-        .view-phone .nskGlobalSearchResults {
-          top: calc(100% + 7px);
-          max-height: calc(100dvh - 80px);
-        }
-
-        .view-phone .nskGlobalSearchResults > button {
-          grid-template-columns: 76px minmax(0,1fr) 16px;
-        }
-
-        .view-phone .nskViewSelectorButton {
-          min-width: 94px;
-          height: 38px;
-          padding: 4px 7px;
-        }
-
-        .view-phone .nskViewSelectorButton span {
-          display: none;
-        }
-
-        .view-phone .nskViewSelectorButton strong {
-          font-size: 10px;
-          align-self: center;
-        }
-
-        .view-phone .nskViewStage {
-          width: 100%;
-          padding: 0;
-          overflow-x: hidden;
-        }
-
-        .view-phone .nskViewCanvas {
-          width: 100%;
-          max-width: 430px;
-          min-width: 0;
-          margin: 0 auto;
-          overflow-x: hidden;
-        }
-
-        .view-phone .nskViewCanvas > * {
-          width: 100% !important;
-          max-width: 100% !important;
-          min-width: 0 !important;
-        }
-
-        .view-phone .nskViewCanvas .toolbar {
-          display: grid !important;
-          grid-template-columns: 1fr !important;
-          gap: 8px !important;
-        }
-
-        .view-phone .nskViewCanvas .toolbar > * {
-          width: 100% !important;
-          min-width: 0 !important;
-        }
-
-        .view-phone .nskViewCanvas .formGrid {
-          grid-template-columns: 1fr !important;
-        }
-
-        .view-phone .nskViewCanvas input,
-        .view-phone .nskViewCanvas select,
-        .view-phone .nskViewCanvas textarea,
-        .view-phone .nskViewCanvas button {
-          font-size: 16px;
-        }
-
-        /* Les listes déroulantes doivent rester totalement accessibles
-           en mode Téléphone, y compris dans les fenêtres modales. */
-        .view-phone .nskViewCanvas select {
-          display: block !important;
-          width: 100% !important;
-          max-width: none !important;
-          min-width: 0 !important;
-          height: 48px !important;
-          min-height: 48px !important;
-          overflow: visible !important;
-          appearance: auto !important;
-          -webkit-appearance: menulist !important;
-          position: relative !important;
-          z-index: 1 !important;
-        }
-
-        .view-phone .nskViewStage,
-        .view-phone .nskViewCanvas {
-          overflow-y: visible !important;
-        }
-
-        .view-phone .modalBackdrop {
-          position: fixed !important;
-          inset: 0 !important;
-          z-index: 500 !important;
-          width: 100vw !important;
-          max-width: 100vw !important;
-          height: 100dvh !important;
-          max-height: 100dvh !important;
-          overflow: hidden !important;
-        }
-
-        .view-phone .modal {
-          width: 100% !important;
-          max-width: 100% !important;
-          max-height: 100dvh !important;
-          overflow-y: auto !important;
-          overflow-x: visible !important;
-          -webkit-overflow-scrolling: touch !important;
-        }
-
-        .view-phone .modal .field,
-        .view-phone .modal .formGrid {
-          overflow: visible !important;
-        }
-
-        .view-phone .modal select {
-          position: relative !important;
-          z-index: 510 !important;
-          overflow: visible !important;
-        }
-
-        .view-phone .nskViewCanvas .tableWrap {
-          max-width: 100%;
-          overflow-x: auto !important;
-        }
-
-        .view-phone .nskMobileNav {
-          position: fixed;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          z-index: 120;
-          width: 100%;
-          height:
-            calc(66px + env(safe-area-inset-bottom));
-          padding-bottom:
-            env(safe-area-inset-bottom);
-          display: grid;
-          grid-template-columns:
-            repeat(5, minmax(0,1fr));
-          background: rgba(255,255,255,.98);
-          border-top: 1px solid #e6e9ef;
-          box-shadow: 0 -8px 30px rgba(15,23,42,.08);
-        }
-
-        .view-phone .nskMobileNav.nskBarMobileNav {
-          grid-template-columns: repeat(3, minmax(0,1fr));
-        }
-
-        .barNukuMode .nskSidebar {
-          background: #101827;
-        }
-
-        .barNukuMode .nskSidebarNav a.active {
-          background: #23324a;
-        }
-
-        .barNukuMode .nskTopbar {
-          border-bottom-color: #dfe5ec;
-        }
-
-        .view-phone .nskMobileNav a,
-        .view-phone .nskMobileNav button {
-          min-width: 0;
-          border: 0;
+        .ghostButton {
+          border: 1px solid transparent;
           background: transparent;
-          color: #7c8797;
-          text-decoration: none;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 4px;
+          color: #667085;
         }
 
-        .view-phone .nskMobileNav a.active,
-        .view-phone .nskMobileNav button.active {
-          color: #0c1525;
+        .sectionGrid {
+          display: grid;
+          grid-template-columns: repeat(2,minmax(0,1fr));
+          gap: 14px;
         }
 
-        .nskMobileNavIcon {
-          font-size: 18px;
-          line-height: 1;
-        }
-
-        .nskMobileNavLabel {
-          width: 100%;
-          padding: 0 2px;
+        .taskSection {
           overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-          text-align: center;
-          font-size: 9px;
-          font-weight: 700;
+          border: 1px solid #e4e7ec;
+          border-radius: 18px;
+          background: #fff;
+          box-shadow: 0 8px 26px rgba(16,24,40,.045);
         }
 
-        .view-phone .nskMobileMenuScreen {
-          position: fixed;
-          inset: 0;
-          z-index: 250;
-          display: flex;
-          flex-direction: column;
-          background: #f4f6f9;
+        .taskSection header {
+          display: grid;
+          grid-template-columns: minmax(0,1fr) 120px;
+          gap: 14px;
+          align-items: center;
+          padding: 16px 18px;
+          border-bottom: 1px solid #eef2f6;
+          background: #fbfcfd;
         }
 
-        .nskMobileMenuHeader {
-          min-height: 72px;
-          padding:
-            calc(10px + env(safe-area-inset-top))
-            16px
-            10px;
+        .taskSection header > div:first-child {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          background: #fff;
-          border-bottom: 1px solid #e7eaf0;
+          gap: 10px;
         }
 
-        .nskMobileMenuHeader > div {
-          display: flex;
-          flex-direction: column;
+        .taskSection header strong {
+          color: #667085;
+          font-size: 10px;
         }
 
-        .nskMobileMenuHeader span {
-          color: #98a2b3;
-          font-size: 9px;
-          font-weight: 800;
-          letter-spacing: .08em;
+        .sectionTrack {
+          height: 7px;
+          overflow: hidden;
+          border-radius: 999px;
+          background: #eaecf0;
         }
 
-        .nskMobileMenuHeader strong {
-          margin-top: 2px;
-          font-size: 19px;
+        .sectionTrack div {
+          height: 100%;
+          border-radius: inherit;
+          background: #101828;
+          transition: width .2s ease;
         }
 
-        .nskMobileMenuHeader button {
-          width: 44px;
-          height: 44px;
-          border: 1px solid #e4e7ec;
-          border-radius: 12px;
-          background: #fff;
-          font-size: 25px;
-        }
-
-        .nskMobileMenuGrid {
-          flex: 1;
-          overflow-y: auto;
-          padding:
-            16px
-            14px
-            calc(24px + env(safe-area-inset-bottom));
+        .taskList {
           display: grid;
-          grid-template-columns:
-            repeat(2, minmax(0,1fr));
-          gap: 10px;
-          align-content: start;
+          padding: 8px;
         }
 
-        .nskMobileMenuGrid a {
-          min-width: 0;
-          min-height: 72px;
-          padding: 11px;
-          border: 1px solid #e5e9f0;
-          border-radius: 16px;
-          display: flex;
+        .taskRow {
+          position: relative;
+          display: grid;
+          grid-template-columns: 28px minmax(0,1fr);
+          gap: 10px;
           align-items: center;
-          gap: 10px;
+          min-height: 52px;
+          padding: 8px 10px;
+          border-radius: 11px;
+          cursor: pointer;
+          transition: background .15s ease;
+        }
+
+        .taskRow:hover {
+          background: #f8fafc;
+        }
+
+        .taskRow.checked {
+          background: #f0fdf4;
+        }
+
+        .taskRow.locked {
+          cursor: default;
+        }
+
+        .taskRow input {
+          position: absolute;
+          opacity: 0;
+          pointer-events: none;
+        }
+
+        .visualCheckbox {
+          display: grid;
+          width: 26px;
+          height: 26px;
+          place-items: center;
+          border: 2px solid #cfd4dc;
+          border-radius: 8px;
           background: #fff;
+          color: #fff;
+          font-size: 14px;
+          font-weight: 900;
+        }
+
+        .taskRow.checked .visualCheckbox {
+          border-color: #067647;
+          background: #067647;
+        }
+
+        .taskText {
           color: #344054;
-          text-decoration: none;
           font-size: 12px;
-          font-weight: 700;
+          font-weight: 750;
         }
 
-        .nskMobileMenuGrid a.active {
-          background: #eef3f8;
-          color: #0c1525;
+        .taskRow.checked .taskText {
+          color: #067647;
         }
 
-        .nskMobileMenuIcon {
-          width: 34px;
-          height: 34px;
-          flex: 0 0 auto;
+        .printFooter {
+          display: grid;
+          grid-template-columns: repeat(3,minmax(0,1fr));
+          gap: 10px;
+          margin-top: 14px;
+          padding: 16px 18px;
+          border: 1px solid #e4e7ec;
+          border-radius: 16px;
+          background: #fff;
+        }
+
+        .setupPlaceholder {
+          min-height: 430px;
           display: grid;
           place-items: center;
-          border-radius: 10px;
-          background: #f2f4f7;
+          align-content: center;
+          padding: 40px;
+          border: 1px solid #e4e7ec;
+          border-radius: 20px;
+          background: #fff;
+          text-align: center;
         }
 
+        .placeholderIcon {
+          display: grid;
+          width: 64px;
+          height: 64px;
+          place-items: center;
+          border-radius: 18px;
+          background: #f2f4f7;
+          color: #101828;
+          font-size: 24px;
+        }
 
-        /* Sécurité PC : sur un écran large, le menu latéral ne peut plus
-           être masqué par un ancien style global. */
-        @media (min-width: 1200px) {
-          .nskAppShell.view-pc .nskSidebar {
-            display: flex !important;
-            visibility: visible !important;
-            opacity: 1 !important;
-            transform: none !important;
-            left: 0 !important;
+        .setupPlaceholder h2 {
+          margin: 14px 0 4px;
+        }
+
+        .setupPlaceholder p {
+          max-width: 420px;
+          color: #667085;
+          line-height: 1.55;
+        }
+
+        .historyPanel {
+          overflow: hidden;
+          border: 1px solid #e4e7ec;
+          border-radius: 20px;
+          background: #fff;
+        }
+
+        .historyHeader {
+          padding: 20px 22px;
+          border-bottom: 1px solid #eef2f6;
+        }
+
+        .historyTableWrap {
+          overflow-x: auto;
+        }
+
+        .historyTable {
+          width: 100%;
+          border-collapse: collapse;
+        }
+
+        .historyTable th,
+        .historyTable td {
+          padding: 13px 16px;
+          border-bottom: 1px solid #f0f2f5;
+          text-align: left;
+          white-space: nowrap;
+          font-size: 11px;
+        }
+
+        .historyTable th {
+          color: #667085;
+          background: #fafbfc;
+          font-size: 9px;
+          text-transform: uppercase;
+          letter-spacing: .06em;
+        }
+
+        .historyProgress {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+        }
+
+        .historyProgress > div {
+          width: 100px;
+          height: 7px;
+          overflow: hidden;
+          border-radius: 999px;
+          background: #eaecf0;
+        }
+
+        .historyProgress span {
+          display: block;
+          height: 100%;
+          background: #101828;
+        }
+
+        .historyProgress strong {
+          font-size: 10px;
+        }
+
+        .historyStatus {
+          display: inline-flex;
+          padding: 5px 8px;
+          border-radius: 999px;
+          background: #fff4e5;
+          color: #b54708;
+          font-size: 9px;
+          font-weight: 900;
+        }
+
+        .historyStatus.done {
+          background: #ecfdf3;
+          color: #027a48;
+        }
+
+        .emptyCell {
+          padding: 40px !important;
+          text-align: center !important;
+          color: #98a2b3;
+        }
+
+        @media (max-width: 900px) {
+          .checklistPage {
+            padding: 18px;
           }
 
-          .nskAppShell.view-pc .nskMain {
-            margin-left: 230px !important;
-            width: auto !important;
+          .openingHero {
+            grid-template-columns: 1fr;
           }
 
-          .nskAppShell.view-pc .nskMobileNav,
-          .nskAppShell.view-pc .nskMobileMenuScreen,
-          .nskAppShell.view-pc .nskTabletOverlay,
-          .nskAppShell.view-pc .nskTabletMenuButton {
+          .sectionGrid {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        @media (max-width: 600px) {
+          .checklistPage {
+            padding: 12px;
+          }
+
+          .pageHeader h1 {
+            font-size: 24px;
+          }
+
+          .tabs {
+            width: 100%;
+            display: grid;
+            grid-template-columns: 1fr;
+          }
+
+          .tabs button {
+            width: 100%;
+          }
+
+          .openingHero {
+            padding: 16px;
+            border-radius: 16px;
+          }
+
+          .openingHero h2 {
+            font-size: 25px;
+          }
+
+          .metaGrid,
+          .printFooter {
+            grid-template-columns: 1fr;
+          }
+
+          .actionsBar {
+            display: grid;
+            grid-template-columns: 1fr;
+          }
+
+          .actionsBar button {
+            width: 100%;
+          }
+
+          .taskSection header {
+            grid-template-columns: 1fr;
+          }
+
+          .taskRow {
+            min-height: 56px;
+          }
+        }
+
+        @media print {
+          @page {
+            size: A4 portrait;
+            margin: 10mm;
+          }
+
+          :global(body) {
+            background: #fff !important;
+          }
+
+          :global(.nskSidebar),
+          :global(.nskTopbar),
+          :global(.nskMobileNav),
+          :global(.noPrint) {
             display: none !important;
           }
-        }
 
-        @media (max-width: 420px) {
-          .view-phone .nskTopbarTitle strong {
-            max-width: 110px;
-            overflow: hidden;
-            text-overflow: ellipsis;
+          :global(.nskMain) {
+            margin: 0 !important;
+          }
+
+          :global(.nskViewStage),
+          :global(.nskViewCanvas) {
+            width: 100% !important;
+            max-width: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: visible !important;
+            box-shadow: none !important;
+          }
+
+          .checklistPage {
+            min-height: auto;
+            padding: 0;
+            background: #fff;
+          }
+
+          .printSheet {
+            width: 100%;
+            max-width: none;
+          }
+
+          .openingHero {
+            grid-template-columns: 1fr 230px;
+            gap: 10px;
+            padding: 12px;
+            border-radius: 10px;
+            box-shadow: none;
+            break-inside: avoid;
+          }
+
+          .openingHero h2 {
+            margin: 4px 0 10px;
+            font-size: 21px;
+          }
+
+          .metaGrid {
+            gap: 5px;
+          }
+
+          .metaGrid > div {
+            padding: 6px 7px;
+          }
+
+          .progressCard {
+            padding: 10px;
+            border-radius: 10px;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+
+          .progressTop strong {
+            font-size: 28px;
+          }
+
+          .sectionGrid {
+            grid-template-columns: repeat(2,minmax(0,1fr));
+            gap: 7px;
+            margin-top: 8px;
+          }
+
+          .taskSection {
+            border-radius: 9px;
+            box-shadow: none;
+            break-inside: avoid;
+          }
+
+          .taskSection header {
+            grid-template-columns: 1fr;
+            padding: 7px 9px;
+          }
+
+          .sectionTrack {
+            display: none;
+          }
+
+          .taskList {
+            padding: 3px;
+          }
+
+          .taskRow {
+            min-height: 27px;
+            grid-template-columns: 18px minmax(0,1fr);
+            gap: 6px;
+            padding: 2px 5px;
+          }
+
+          .visualCheckbox {
+            width: 16px;
+            height: 16px;
+            border-width: 1px;
+            border-radius: 3px;
+            font-size: 9px;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+
+          .taskText {
+            font-size: 9px;
+          }
+
+          .printFooter {
+            gap: 5px;
+            margin-top: 7px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            break-inside: avoid;
+          }
+
+          .printFooter span {
+            font-size: 7px;
+          }
+
+          .printFooter strong {
+            font-size: 9px;
           }
         }
       `}</style>
-    </div>
+    </main>
   )
 }
-
-export default AppShell
