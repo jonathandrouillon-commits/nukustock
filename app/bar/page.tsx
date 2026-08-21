@@ -307,6 +307,48 @@ export default function BarPage() {
     )
 
   /*
+   * Supprime définitivement une réquisition.
+   * Double confirmation pour éviter une suppression accidentelle.
+   */
+  const deleteRequest = (
+    request: InternalRequest
+  ) => {
+    const firstConfirm =
+      window.confirm(
+        `Supprimer définitivement la réquisition ${request.id} ?`
+      )
+
+    if (!firstConfirm) return
+
+    const secondConfirm =
+      window.confirm(
+        `CONFIRMATION\n\nLa réquisition ${request.id} sera définitivement supprimée.\n\nContinuer ?`
+      )
+
+    if (!secondConfirm) return
+
+    const updatedRequests =
+      requests.filter(
+        (item) =>
+          item.id !== request.id
+      )
+
+    saveRequests(updatedRequests)
+
+    if (treatingId === request.id) {
+      setTreatingId('')
+      setTreatmentOpen(false)
+      setTreatmentLines([])
+    }
+
+    setError('')
+    setModalError('')
+    setMessage(
+      `Réquisition ${request.id} supprimée.`
+    )
+  }
+
+  /*
    * Ouvre la réquisition.
    */
   const openTreatment = (
@@ -991,7 +1033,11 @@ export default function BarPage() {
         </div>
       )}
 
-      {/* <BarPushNotifications /> */}
+      <BarPushNotifications />
+
+      <div className="pwaInstallRow">
+        <PwaInstallButton />
+      </div>
 
       <section className="quickLinks">
         <Link
@@ -1226,17 +1272,31 @@ export default function BarPage() {
 
                   <div className="requestActions">
                     {!request.stockAppliedAt ? (
-                      <button
-                        type="button"
-                        className="treatButton"
-                        onClick={() =>
-                          openTreatment(
-                            request
-                          )
-                        }
-                      >
-                        Traiter la demande
-                      </button>
+                      <div className="requestActionButtons">
+                        <button
+                          type="button"
+                          className="deleteRequestButton"
+                          onClick={() =>
+                            deleteRequest(
+                              request
+                            )
+                          }
+                        >
+                          Supprimer
+                        </button>
+
+                        <button
+                          type="button"
+                          className="treatButton"
+                          onClick={() =>
+                            openTreatment(
+                              request
+                            )
+                          }
+                        >
+                          Traiter la demande
+                        </button>
+                      </div>
                     ) : !request.deliveredAt ? (
                       <div className="deliveryActions">
                         <div className="treatedLabel">
@@ -2105,6 +2165,42 @@ export default function BarPage() {
           justify-content: flex-end;
         }
 
+        .requestActionButtons {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+
+        .deleteRequestButton {
+          min-height: 40px;
+          padding: 0 16px;
+          border: 1px solid #fda29b;
+          border-radius: 11px;
+          background: #fff;
+          color: #b42318;
+          font-size: 12px;
+          font-weight: 900;
+          cursor: pointer;
+          transition: background .15s ease, border-color .15s ease, transform .15s ease;
+        }
+
+        .deleteRequestButton:hover {
+          background: #fef3f2;
+          border-color: #f97066;
+        }
+
+        .deleteRequestButton:active {
+          transform: scale(.98);
+        }
+
+        .pwaInstallRow {
+          display: flex;
+          justify-content: flex-end;
+          margin-bottom: 12px;
+        }
+
         .treatButton {
           min-height: 40px;
           padding: 0 16px;
@@ -2527,6 +2623,23 @@ export default function BarPage() {
           .cancelButton,
           .confirmButton {
             width: 100%;
+          }
+        }
+
+        @media (max-width: 640px) {
+          .requestActionButtons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            width: 100%;
+          }
+
+          .deleteRequestButton,
+          .requestActionButtons .treatButton {
+            width: 100%;
+          }
+
+          .pwaInstallRow {
+            justify-content: stretch;
           }
         }
       `}</style>
