@@ -477,17 +477,38 @@ const CAVE_A_JUS_ZONES = [
   'Stock Emile / Guy',
 ] as const
 
+function normalizeLocationKey(value: string) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 function isCaveAJusLocation(value: string) {
-  return value === CAVE_A_JUS || value.startsWith(`${CAVE_A_JUS} - `)
+  const normalized = normalizeLocationKey(value)
+
+  return (
+    normalized === 'cave a jus' ||
+    normalized.startsWith('cave a jus - ')
+  )
 }
 
 function getCaveAJusZone(value: string) {
-  if (!value.startsWith(`${CAVE_A_JUS} - `)) return ''
-  return value.slice(`${CAVE_A_JUS} - `.length)
+  if (!isCaveAJusLocation(value)) return ''
+
+  const separatorIndex = value.indexOf(' - ')
+
+  if (separatorIndex < 0) return ''
+
+  return value.slice(separatorIndex + 3).trim()
 }
 
 function buildCaveAJusLocation(zone: string) {
-  return zone ? `${CAVE_A_JUS} - ${zone}` : CAVE_A_JUS
+  return zone
+    ? `${CAVE_A_JUS} - ${zone}`
+    : CAVE_A_JUS
 }
 
 const createAllocation = (defaultLocation = ''): AllocationRow => ({
@@ -705,9 +726,16 @@ export default function Products() {
         ...new Set(
           [
             ...getMasterItems('location')
-              .map((item) => item.name)
+              .map((item) =>
+                isCaveAJusLocation(item.name)
+                  ? CAVE_A_JUS
+                  : item.name
+              )
               .filter(
-                (name) => !name.startsWith(`${CAVE_A_JUS} - `)
+                (name) =>
+                  !normalizeLocationKey(name).startsWith(
+                    'cave a jus - '
+                  )
               ),
             ...form.lots
               .map((lot) =>
@@ -1237,7 +1265,10 @@ export default function Products() {
       const usedLocations = new Set<string>()
 
       for (const allocation of entry.allocations) {
-        if (allocation.location === CAVE_A_JUS) {
+        if (
+          isCaveAJusLocation(allocation.location) &&
+          !getCaveAJusZone(allocation.location)
+        ) {
           alert(
             `Lot n°${index + 1} : pour « Cave à jus », choisis « Stock Mahana Resort » ou « Stock Emile / Guy ».`
           )
@@ -3271,7 +3302,7 @@ export default function Products() {
                                       allocation.id,
                                       {
                                         location:
-                                          nextLocation === CAVE_A_JUS
+                                          isCaveAJusLocation(nextLocation)
                                             ? CAVE_A_JUS
                                             : nextLocation,
                                       }
@@ -3292,37 +3323,60 @@ export default function Products() {
                                 {isCaveAJusLocation(
                                   allocation.location
                                 ) && (
-                                  <select
-                                    className="input"
-                                    value={getCaveAJusZone(
-                                      allocation.location
-                                    )}
-                                    onChange={(e) =>
-                                      updateAllocation(
-                                        entry.id,
-                                        allocation.id,
-                                        {
-                                          location:
-                                            buildCaveAJusLocation(
-                                              e.target.value
-                                            ),
-                                        }
-                                      )
-                                    }
+                                  <div
+                                    style={{
+                                      display: 'grid',
+                                      gap: 6,
+                                      padding: 10,
+                                      borderRadius: 10,
+                                      border:
+                                        '1px solid rgba(255,255,255,.14)',
+                                      background:
+                                        'rgba(255,255,255,.05)',
+                                    }}
                                   >
-                                    <option value="">
-                                      Choisir la zone de la Cave à jus
-                                    </option>
+                                    <div
+                                      style={{
+                                        fontSize: 11,
+                                        fontWeight: 900,
+                                        color: '#ffffff',
+                                      }}
+                                    >
+                                      Zone Cave à jus
+                                    </div>
 
-                                    {CAVE_A_JUS_ZONES.map((zone) => (
-                                      <option
-                                        key={zone}
-                                        value={zone}
-                                      >
-                                        {zone}
+                                    <select
+                                      className="input"
+                                      value={getCaveAJusZone(
+                                        allocation.location
+                                      )}
+                                      onChange={(e) =>
+                                        updateAllocation(
+                                          entry.id,
+                                          allocation.id,
+                                          {
+                                            location:
+                                              buildCaveAJusLocation(
+                                                e.target.value
+                                              ),
+                                          }
+                                        )
+                                      }
+                                    >
+                                      <option value="">
+                                        Choisir la zone
                                       </option>
-                                    ))}
-                                  </select>
+
+                                      {CAVE_A_JUS_ZONES.map((zone) => (
+                                        <option
+                                          key={zone}
+                                          value={zone}
+                                        >
+                                          {zone}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
                                 )}
                               </div>
 
