@@ -1643,9 +1643,9 @@ function BarPlanningPage() {
     let active = true
 
     const resolveBarNukuEmployeeOnce = async () => {
-      // AuthGate/AppShell gèrent déjà les changements de session.
-      // Le Planning lit seulement la session courante une fois pour
-      // identifier le membre du staff, sans ajouter de listener Auth.
+      // La session globale est déjà gérée par AuthGate/AppShell.
+      // Planning lit la session une seule fois et n'installe pas
+      // son propre listener onAuthStateChange.
       const {
         data: { session },
       } = await supabase.auth.getSession()
@@ -1721,21 +1721,32 @@ function BarPlanningPage() {
 
   useEffect(() => {
     try {
-      const host =
-        window.location.hostname
-          .toLowerCase()
-          .replace(/^www\./, '')
-          .trim()
-
-      const barPortal =
-        host ===
-        'barnuku.fenuaprobartender.com'
-
-      const s =
-        localStorage.getItem(
-          SIGNATURES_KEY
+      const e = localStorage.getItem(EMPLOYEES_KEY)
+      const p = localStorage.getItem(PLANNING_KEY)
+      const w = localStorage.getItem(WEEK_KEY)
+      const s = localStorage.getItem(SIGNATURES_KEY)
+      const special = localStorage.getItem(SPECIAL_INFO_KEY)
+      const saved = localStorage.getItem(SAVED_PLANNINGS_KEY)
+      if (e) {
+        const parsed = JSON.parse(e) as Employee[]
+        setEmployees(
+          parsed.map((employee, index) => ({
+            ...employee,
+            role:
+              employee.role ||
+              employeeRole(
+                employee.id,
+                employee.name
+              ),
+            // Force la palette actuelle même si une ancienne couleur
+            // est déjà enregistrée dans le localStorage.
+            color:
+              EMPLOYEE_COLORS[index % EMPLOYEE_COLORS.length],
+          }))
         )
-
+      }
+      if (p) setPlanning(JSON.parse(p))
+      if (w) setWeekStart(w)
       const parsedSignatures: WeeklySignatures =
         s ? JSON.parse(s) : {}
 
@@ -1747,188 +1758,40 @@ function BarPlanningPage() {
         ...parsedSignatures,
       }
 
-      if (
-        Object.keys(
-          allRecoveredSignatures
-        ).length
-      ) {
-        setWeeklySignatures(
-          allRecoveredSignatures
-        )
+      if (Object.keys(allRecoveredSignatures).length) {
+        setWeeklySignatures(allRecoveredSignatures)
       }
+      if (special) setSpecialDayInfo(JSON.parse(special))
 
-      if (barPortal) {
-        /*
-         * BAR NUKU
-         * =========
-         * Supabase est la source de vérité du planning.
-         *
-         * On ne recharge PAS ici un ancien PLANNING_KEY / WEEK_KEY
-         * provenant du téléphone ou de la tablette.
-         * Sinon un appareil qui a mémorisé la semaine suivante
-         * (ou un planning vide) peut afficher un tableau vide alors
-         * que le planning publié existe bien dans Supabase.
-         */
-        const currentMonday =
-          isoDate(
-            mondayOf(
-              new Date()
-            )
+      if (saved) {
+        const parsedSaved = JSON.parse(saved) as Array<
+          SavedPlanning | null | undefined
+        >
+
+        const restoredSaved =
+          mergeSignaturesIntoSavedPlannings(
+            Array.isArray(parsedSaved)
+              ? parsedSaved
+              : [],
+            allRecoveredSignatures
           )
 
-        setWeekStart(
-          currentMonday
-        )
-
-        setEmployees(
-          defaultEmployees.map(
-            (
-              employee,
-              index
-            ) => ({
-              ...employee,
-              role:
-                employee.role ||
-                employeeRole(
-                  employee.id,
-                  employee.name
-                ),
-              color:
-                EMPLOYEE_COLORS[
-                  index %
-                    EMPLOYEE_COLORS.length
-                ],
-            })
-          )
-        )
-
-        setPlanning({})
-        setSpecialDayInfo({})
-
-        /*
-         * Les historiques embarqués restent visibles
-         * pendant les quelques millisecondes nécessaires
-         * au chargement Supabase.
-         */
         setSavedPlannings(
           mergeHistoricalPlannings(
-            HISTORICAL_PLANNINGS
+            restoredSaved
           )
         )
       } else {
-        /*
-         * NUKUSTOCK / usage back-office :
-         * conservation du comportement local existant.
-         */
-        const e =
-          localStorage.getItem(
-            EMPLOYEES_KEY
-          )
-        const p =
-          localStorage.getItem(
-            PLANNING_KEY
-          )
-        const w =
-          localStorage.getItem(
-            WEEK_KEY
-          )
-        const special =
-          localStorage.getItem(
-            SPECIAL_INFO_KEY
-          )
-        const saved =
-          localStorage.getItem(
-            SAVED_PLANNINGS_KEY
-          )
-
-        if (e) {
-          const parsed =
-            JSON.parse(e) as Employee[]
-
-          setEmployees(
-            parsed.map(
-              (
-                employee,
-                index
-              ) => ({
-                ...employee,
-                role:
-                  employee.role ||
-                  employeeRole(
-                    employee.id,
-                    employee.name
-                  ),
-                color:
-                  EMPLOYEE_COLORS[
-                    index %
-                      EMPLOYEE_COLORS.length
-                  ],
-              })
-            )
-          )
-        }
-
-        if (p) {
-          setPlanning(
-            JSON.parse(p)
-          )
-        }
-
-        if (w) {
-          setWeekStart(w)
-        }
-
-        if (special) {
-          setSpecialDayInfo(
-            JSON.parse(
-              special
-            )
-          )
-        }
-
-        if (saved) {
-          const parsedSaved =
-            JSON.parse(saved) as Array<
-              SavedPlanning |
-              null |
-              undefined
-            >
-
-          const restoredSaved =
+        setSavedPlannings(
+          mergeHistoricalPlannings(
             mergeSignaturesIntoSavedPlannings(
-              Array.isArray(
-                parsedSaved
-              )
-                ? parsedSaved
-                : [],
+              HISTORICAL_PLANNINGS,
               allRecoveredSignatures
             )
-
-          setSavedPlannings(
-            mergeHistoricalPlannings(
-              restoredSaved
-            )
           )
-        } else {
-          setSavedPlannings(
-            mergeHistoricalPlannings(
-              mergeSignaturesIntoSavedPlannings(
-                HISTORICAL_PLANNINGS,
-                allRecoveredSignatures
-              )
-            )
-          )
-        }
+        )
       }
-    } catch (
-      storageError
-    ) {
-      console.error(
-        'Initialisation locale Planning Bar :',
-        storageError
-      )
-    }
-
+    } catch {}
     setLoaded(true)
   }, [])
 
@@ -3594,200 +3457,291 @@ function BarPlanningPage() {
     shellDisplayMode === 'phone'
 
   const topActionsNode = (
-        <div className="topActions noPrint">
-          {barNukuCanManage && (
-          <div className="planningMainButtons">
-            <button
-              type="button"
-              className={`btn ${planningView === 'dashboard' ? 'activeTab' : ''}`}
-              onClick={() =>
-                setPlanningView('dashboard')
-              }
-            >
-              Dashboard
-            </button>
+    <div className="planningCommandBar noPrint">
+      <div className="planningCommandNav">
+        <button
+          type="button"
+          className={`commandNavButton ${
+            planningView === 'dashboard'
+              ? 'active'
+              : ''
+          }`}
+          onClick={() => {
+            setMobileManagerMenuOpen(false)
+            setExportMenuOpen(false)
+            setShareMenuOpen(false)
+            setPlanningView('dashboard')
+          }}
+        >
+          <span className="commandIcon">⌂</span>
+          <span>Dashboard</span>
+        </button>
 
+        <button
+          type="button"
+          className={`commandNavButton ${
+            planningView === 'planning'
+              ? 'active'
+              : ''
+          }`}
+          onClick={() => {
+            setMobileManagerMenuOpen(false)
+            setExportMenuOpen(false)
+            setShareMenuOpen(false)
+            setPlanningView('planning')
+          }}
+        >
+          <span className="commandIcon">▦</span>
+          <span>Planning</span>
+        </button>
+
+        <button
+          type="button"
+          className={`commandNavButton ${
+            planningView === 'saved'
+              ? 'active'
+              : ''
+          }`}
+          onClick={() => {
+            setMobileManagerMenuOpen(false)
+            setExportMenuOpen(false)
+            setShareMenuOpen(false)
+            setPlanningView('saved')
+          }}
+        >
+          <span className="commandIcon">✓</span>
+          <span>Sauvegardés</span>
+          <span className="commandCount">
+            {uniqueSavedPlannings.length}
+          </span>
+        </button>
+      </div>
+
+      {barNukuCanManage && (
+        <div className="planningCommandActions">
+          <button
+            type="button"
+            className="commandButton commandPrimary"
+            onClick={() =>
+              saveCurrentPlanning()
+            }
+          >
+            <span className="commandIcon">✓</span>
+            Sauvegarder
+          </button>
+
+          <div className="actionDropdown">
             <button
               type="button"
-              className="btn"
+              className={`commandButton ${
+                mobileManagerMenuOpen
+                  ? 'open'
+                  : ''
+              }`}
+              aria-expanded={
+                mobileManagerMenuOpen
+              }
               onClick={() => {
-                setPlanningView('planning')
-                createNewPlanning()
+                setExportMenuOpen(false)
+                setShareMenuOpen(false)
+                setMobileManagerMenuOpen(
+                  current => !current
+                )
               }}
             >
-              + Nouveau planning
+              <span className="commandIcon">⚙</span>
+              Gestion
+              <span className="commandChevron">
+                {mobileManagerMenuOpen
+                  ? '⌃'
+                  : '⌄'}
+              </span>
             </button>
 
-            <button
-              type="button"
-              className="btn danger"
-              onClick={deleteCurrentPlanning}
-              disabled={!currentSavedPlanning}
-            >
-              Supprimer planning
-            </button>
+            {mobileManagerMenuOpen && (
+              <div className="actionDropdownMenu managementMenu">
+                <div className="menuLabel">
+                  PLANNING
+                </div>
 
-            <button
-              type="button"
-              className="btn primary"
-              onClick={() =>
-                saveCurrentPlanning()
-              }
-            >
-              Sauvegarder planning
-            </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileManagerMenuOpen(false)
+                    setPlanningView('planning')
+                    createNewPlanning()
+                  }}
+                >
+                  <span>＋</span>
+                  Nouveau planning
+                </button>
 
-            <button
-              type="button"
-              className="btn"
-              onClick={() =>
-                setStaffManagerMode('add')
-              }
-            >
-              + Ajouter staff
-            </button>
+                <div className="menuSeparator" />
 
-            <button
-              type="button"
-              className="btn"
-              onClick={() =>
-                setStaffManagerMode('remove')
-              }
-            >
-              Supprimer staff
-            </button>
+                <div className="menuLabel">
+                  ÉQUIPE
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileManagerMenuOpen(false)
+                    setStaffManagerMode('add')
+                  }}
+                >
+                  <span>＋</span>
+                  Ajouter staff
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileManagerMenuOpen(false)
+                    setStaffManagerMode('remove')
+                  }}
+                >
+                  <span>−</span>
+                  Supprimer staff
+                </button>
+
+                <div className="menuSeparator" />
+
+                <button
+                  type="button"
+                  className="menuDanger"
+                  disabled={!currentSavedPlanning}
+                  onClick={() => {
+                    setMobileManagerMenuOpen(false)
+                    deleteCurrentPlanning()
+                  }}
+                >
+                  <span>×</span>
+                  Supprimer planning
+                </button>
+              </div>
+            )}
           </div>
-          )}
 
-          <div className="topActionGroup">
+          <div className="actionDropdown">
             <button
               type="button"
-              className={`btn ${planningView === 'planning' ? 'activeTab' : ''}`}
-              onClick={() =>
-                setPlanningView('planning')
-              }
+              className={`commandButton ${
+                exportMenuOpen
+                  ? 'open'
+                  : ''
+              }`}
+              onClick={() => {
+                setMobileManagerMenuOpen(false)
+                setExportMenuOpen(open => !open)
+                setShareMenuOpen(false)
+              }}
             >
-              Planning
+              <span className="commandIcon">⇩</span>
+              Exporter
+              <span className="commandChevron">⌄</span>
             </button>
 
+            {exportMenuOpen && (
+              <div className="actionDropdownMenu">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExportMenuOpen(false)
+                    exportExcel()
+                  }}
+                >
+                  Excel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExportMenuOpen(false)
+                    exportPdf()
+                  }}
+                >
+                  PDF
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExportMenuOpen(false)
+                    void downloadPlanningJpeg()
+                  }}
+                >
+                  JPEG
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExportMenuOpen(false)
+                    window.print()
+                  }}
+                >
+                  Imprimer
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="actionDropdown">
             <button
               type="button"
-              className={`btn ${planningView === 'saved' ? 'activeTab' : ''}`}
-              onClick={() =>
-                setPlanningView('saved')
-              }
+              className={`commandButton ${
+                shareMenuOpen
+                  ? 'open'
+                  : ''
+              }`}
+              onClick={() => {
+                setMobileManagerMenuOpen(false)
+                setShareMenuOpen(open => !open)
+                setExportMenuOpen(false)
+              }}
             >
-              Sauvegardés ({uniqueSavedPlannings.length})
+              <span className="commandIcon">↗</span>
+              Partager
+              <span className="commandChevron">⌄</span>
             </button>
 
-            {barNukuCanManage && (
-            <>
-            <div className="actionDropdown">
-              <button
-                className="btn"
-                onClick={() => {
-                  setExportMenuOpen(open => !open)
-                  setShareMenuOpen(false)
-                }}
-              >
-                Exporter ▾
-              </button>
+            {shareMenuOpen && (
+              <div className="actionDropdownMenu right">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShareMenuOpen(false)
+                    shareWhatsApp()
+                  }}
+                >
+                  WhatsApp
+                </button>
 
-              {exportMenuOpen && (
-                <div className="actionDropdownMenu">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setExportMenuOpen(false)
-                      exportExcel()
-                    }}
-                  >
-                    Excel
-                  </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShareMenuOpen(false)
+                    shareFacebook()
+                  }}
+                >
+                  Facebook
+                </button>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setExportMenuOpen(false)
-                      exportPdf()
-                    }}
-                  >
-                    PDF
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setExportMenuOpen(false)
-                      void downloadPlanningJpeg()
-                    }}
-                  >
-                    JPEG
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setExportMenuOpen(false)
-                      window.print()
-                    }}
-                  >
-                    Imprimer
-                  </button>
-                </div>
-              )}
-            </div>
-
-            <div className="actionDropdown">
-              <button
-                className="btn"
-                onClick={() => {
-                  setShareMenuOpen(open => !open)
-                  setExportMenuOpen(false)
-                }}
-              >
-                Partager ▾
-              </button>
-
-              {shareMenuOpen && (
-                <div className="actionDropdownMenu right">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShareMenuOpen(false)
-                      shareWhatsApp()
-                    }}
-                  >
-                    WhatsApp
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShareMenuOpen(false)
-                      shareFacebook()
-                    }}
-                  >
-                    Facebook
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShareMenuOpen(false)
-                      void shareNative()
-                    }}
-                  >
-                    Partage système
-                  </button>
-                </div>
-              )}
-            </div>
-            </>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShareMenuOpen(false)
+                    void shareNative()
+                  }}
+                >
+                  Partage système
+                </button>
+              </div>
             )}
           </div>
         </div>
-
+      )}
+    </div>
   )
 
   const mobileManagerActionsNode = (
@@ -5647,6 +5601,200 @@ function BarPlanningPage() {
       )}
 
       <style jsx>{`
+        .planningCommandBar {
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:12px;
+          width:100%;
+          padding:7px;
+          border:1px solid #e4e7ec;
+          border-radius:16px;
+          background:rgba(255,255,255,.96);
+          box-shadow:0 8px 24px rgba(16,24,40,.06);
+        }
+
+        .planningCommandNav,
+        .planningCommandActions {
+          display:flex;
+          align-items:center;
+          gap:6px;
+          min-width:0;
+        }
+
+        .planningCommandNav {
+          padding:3px;
+          border-radius:12px;
+          background:#f2f4f7;
+        }
+
+        .commandNavButton,
+        .commandButton {
+          min-height:38px;
+          border:1px solid transparent;
+          border-radius:10px;
+          font-family:inherit;
+          font-size:11px;
+          font-weight:850;
+          line-height:1;
+          cursor:pointer;
+          transition:
+            background .15s ease,
+            border-color .15s ease,
+            color .15s ease,
+            box-shadow .15s ease,
+            transform .12s ease;
+        }
+
+        .commandNavButton {
+          display:flex;
+          align-items:center;
+          gap:7px;
+          padding:0 12px;
+          background:transparent;
+          color:#475467;
+        }
+
+        .commandNavButton:hover {
+          background:#fff;
+          color:#101828;
+        }
+
+        .commandNavButton.active {
+          border-color:#101828;
+          background:#101828;
+          color:#fff;
+          box-shadow:0 3px 10px rgba(16,24,40,.16);
+        }
+
+        .commandCount {
+          display:grid;
+          min-width:20px;
+          height:20px;
+          place-items:center;
+          padding:0 5px;
+          border-radius:999px;
+          background:#fff;
+          color:#344054;
+          font-size:9px;
+          font-weight:900;
+        }
+
+        .commandNavButton.active .commandCount {
+          background:rgba(255,255,255,.18);
+          color:#fff;
+        }
+
+        .commandButton {
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          gap:7px;
+          padding:0 12px;
+          border-color:#d0d5dd;
+          background:#fff;
+          color:#344054;
+          box-shadow:0 1px 2px rgba(16,24,40,.04);
+        }
+
+        .commandButton:hover,
+        .commandButton.open {
+          border-color:#98a2b3;
+          background:#f9fafb;
+          color:#101828;
+        }
+
+        .commandButton:active,
+        .commandNavButton:active {
+          transform:translateY(1px);
+        }
+
+        .commandPrimary {
+          border-color:#101828;
+          background:#101828;
+          color:#fff;
+          box-shadow:0 4px 12px rgba(16,24,40,.15);
+        }
+
+        .commandPrimary:hover {
+          border-color:#1d2939;
+          background:#1d2939;
+          color:#fff;
+        }
+
+        .commandIcon {
+          display:inline-grid;
+          min-width:16px;
+          place-items:center;
+          font-size:13px;
+          font-weight:900;
+        }
+
+        .commandChevron {
+          margin-left:1px;
+          color:#667085;
+          font-size:10px;
+        }
+
+        .managementMenu {
+          min-width:230px !important;
+        }
+
+        .menuLabel {
+          padding:7px 10px 5px;
+          color:#98a2b3;
+          font-size:8px;
+          font-weight:900;
+          letter-spacing:.1em;
+        }
+
+        .menuSeparator {
+          height:1px;
+          margin:5px 4px;
+          background:#eaecf0;
+        }
+
+        .actionDropdownMenu button {
+          display:flex;
+          align-items:center;
+          gap:8px;
+        }
+
+        .actionDropdownMenu button:disabled {
+          opacity:.38;
+          cursor:not-allowed;
+        }
+
+        .actionDropdownMenu .menuDanger {
+          color:#b42318;
+        }
+
+        .actionDropdownMenu .menuDanger:hover:not(:disabled) {
+          background:#fef3f2;
+        }
+
+        @media (max-width:1180px) {
+          .planningCommandBar {
+            align-items:stretch;
+            flex-direction:column;
+          }
+
+          .planningCommandNav,
+          .planningCommandActions {
+            width:100%;
+          }
+
+          .planningCommandActions {
+            justify-content:flex-end;
+          }
+        }
+
+        @media (max-width:760px) {
+          .planningCommandBar {
+            display:none;
+          }
+        }
+
         .topActions { display:flex; align-items:center; justify-content:flex-end; gap:10px; flex-wrap:wrap; }
 
         .mobileManagerBar {
