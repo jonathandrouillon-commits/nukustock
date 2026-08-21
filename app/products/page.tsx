@@ -1190,6 +1190,126 @@ export default function Products() {
     )
   }
 
+  const getPrimaryStorageLocation = () => {
+    const firstEntry = expiryEntries[0]
+    const firstAllocation = firstEntry?.allocations?.[0]
+
+    if (!firstAllocation?.location) {
+      return ''
+    }
+
+    return isCaveAJusLocation(firstAllocation.location)
+      ? CAVE_A_JUS
+      : firstAllocation.location
+  }
+
+  const getPrimaryCaveZone = () => {
+    const firstEntry = expiryEntries[0]
+    const firstAllocation = firstEntry?.allocations?.[0]
+
+    if (!firstAllocation?.location) {
+      return ''
+    }
+
+    return getCaveAJusZone(firstAllocation.location)
+  }
+
+  const setPrimaryStorageLocation = (
+    nextLocation: string
+  ) => {
+    setExpiryEntries((current) => {
+      if (!current.length) {
+        return [
+          createExpiryEntry(
+            nextLocation,
+            productHasExpiry
+          ),
+        ]
+      }
+
+      return current.map(
+        (entry, entryIndex) => {
+          if (entryIndex !== 0) {
+            return entry
+          }
+
+          const allocations =
+            entry.allocations.length
+              ? entry.allocations.map(
+                  (allocation, allocationIndex) =>
+                    allocationIndex === 0
+                      ? {
+                          ...allocation,
+                          location:
+                            isCaveAJusLocation(
+                              nextLocation
+                            )
+                              ? CAVE_A_JUS
+                              : nextLocation,
+                        }
+                      : allocation
+                )
+              : [
+                  createAllocation(
+                    isCaveAJusLocation(
+                      nextLocation
+                    )
+                      ? CAVE_A_JUS
+                      : nextLocation
+                  ),
+                ]
+
+          return {
+            ...entry,
+            allocations,
+          }
+        }
+      )
+    })
+  }
+
+  const setPrimaryCaveZone = (
+    zone: string
+  ) => {
+    setExpiryEntries((current) =>
+      current.map(
+        (entry, entryIndex) => {
+          if (entryIndex !== 0) {
+            return entry
+          }
+
+          const allocations =
+            entry.allocations.length
+              ? entry.allocations.map(
+                  (allocation, allocationIndex) =>
+                    allocationIndex === 0
+                      ? {
+                          ...allocation,
+                          location:
+                            buildCaveAJusLocation(
+                              zone
+                            ),
+                        }
+                      : allocation
+                )
+              : [
+                  createAllocation(
+                    buildCaveAJusLocation(
+                      zone
+                    )
+                  ),
+                ]
+
+          return {
+            ...entry,
+            allocations,
+          }
+        }
+      )
+    )
+  }
+
+
   const validateStockEntry = () => {
     const hasAnyStockData =
       globalQuantity > 0 ||
@@ -2984,7 +3104,7 @@ export default function Products() {
                 </div>
               </details>
 
-              <details className="productAccordion stockAccordion">
+              <details className="productAccordion stockAccordion" open>
                 <summary>
                   <span className="accordionNumber">4</span>
                   <span>
@@ -2995,6 +3115,118 @@ export default function Products() {
                 </summary>
 
                 <div className="productStockAccordionContent">
+
+                  <div
+                    style={{
+                      display: 'grid',
+                      gap: 12,
+                      marginBottom: 18,
+                      padding: 14,
+                      borderRadius: 12,
+                      border:
+                        '1px solid rgba(255,255,255,.12)',
+                      background:
+                        'rgba(255,255,255,.04)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 14,
+                        fontWeight: 900,
+                        color: '#fff',
+                      }}
+                    >
+                      Lieu de stockage
+                    </div>
+
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns:
+                          'repeat(auto-fit,minmax(220px,1fr))',
+                        gap: 10,
+                      }}
+                    >
+                      <div style={fieldWrapStyle}>
+                        <label style={fieldLabelStyle}>
+                          Lieu principal
+                        </label>
+
+                        <select
+                          className="input"
+                          value={
+                            getPrimaryStorageLocation()
+                          }
+                          onChange={(e) =>
+                            setPrimaryStorageLocation(
+                              e.target.value
+                            )
+                          }
+                        >
+                          <option value="">
+                            Choisir un lieu de stockage
+                          </option>
+
+                          {locationChoices.map(
+                            (location) => (
+                              <option
+                                key={location}
+                                value={location}
+                              >
+                                {location}
+                              </option>
+                            )
+                          )}
+                        </select>
+                      </div>
+
+                      {getPrimaryStorageLocation() ===
+                        CAVE_A_JUS && (
+                        <div style={fieldWrapStyle}>
+                          <label style={fieldLabelStyle}>
+                            Zone Cave à jus
+                          </label>
+
+                          <select
+                            className="input"
+                            value={
+                              getPrimaryCaveZone()
+                            }
+                            onChange={(e) =>
+                              setPrimaryCaveZone(
+                                e.target.value
+                              )
+                            }
+                          >
+                            <option value="">
+                              Choisir la zone
+                            </option>
+
+                            {CAVE_A_JUS_ZONES.map(
+                              (zone) => (
+                                <option
+                                  key={zone}
+                                  value={zone}
+                                >
+                                  {zone}
+                                </option>
+                              )
+                            )}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: '#98a2b3',
+                      }}
+                    >
+                      Tu peux ensuite répartir le même lot
+                      sur plusieurs lieux avec « Ajouter un lieu ».
+                    </div>
+                  </div>
 
             <div
               style={{
