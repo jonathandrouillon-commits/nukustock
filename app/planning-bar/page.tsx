@@ -5605,76 +5605,104 @@ function BarPlanningPage() {
           display:flex;
           align-items:center;
           justify-content:space-between;
-          gap:12px;
+          gap:16px;
           width:100%;
-          padding:7px;
+          padding:12px;
           border:1px solid #e4e7ec;
-          border-radius:16px;
-          background:rgba(255,255,255,.96);
-          box-shadow:0 8px 24px rgba(16,24,40,.06);
+          border-radius:22px;
+          background:#fff;
+          box-shadow:0 10px 30px rgba(16,24,40,.08);
         }
 
         .planningCommandNav,
         .planningCommandActions {
           display:flex;
           align-items:center;
-          gap:6px;
+          gap:9px;
           min-width:0;
         }
 
         .planningCommandNav {
-          padding:3px;
-          border-radius:12px;
-          background:#f2f4f7;
+          padding:0;
+          background:transparent;
         }
 
         .commandNavButton,
         .commandButton {
-          min-height:38px;
-          border:1px solid transparent;
-          border-radius:10px;
+          min-height:48px;
+          padding:0 18px;
+          border:1px solid #d0d5dd;
+          border-radius:14px;
+          background:#fff;
+          color:#1d2939;
           font-family:inherit;
-          font-size:11px;
-          font-weight:850;
+          font-size:12px;
+          font-weight:900;
           line-height:1;
           cursor:pointer;
-          transition:
-            background .15s ease,
-            border-color .15s ease,
-            color .15s ease,
-            box-shadow .15s ease,
-            transform .12s ease;
+          box-shadow:0 2px 5px rgba(16,24,40,.06);
+          transition:transform .15s ease, box-shadow .15s ease, border-color .15s ease, background .15s ease, color .15s ease;
         }
 
         .commandNavButton {
           display:flex;
           align-items:center;
-          gap:7px;
-          padding:0 12px;
-          background:transparent;
-          color:#475467;
+          justify-content:center;
+          gap:8px;
         }
 
-        .commandNavButton:hover {
-          background:#fff;
+        .commandNavButton:hover,
+        .commandButton:hover {
+          border-color:#98a2b3;
+          background:#f9fafb;
           color:#101828;
+          transform:translateY(-1px);
+          box-shadow:0 6px 14px rgba(16,24,40,.10);
         }
 
-        .commandNavButton.active {
+        .commandNavButton.active,
+        .commandPrimary {
           border-color:#101828;
           background:#101828;
           color:#fff;
-          box-shadow:0 3px 10px rgba(16,24,40,.16);
+          box-shadow:0 7px 18px rgba(16,24,40,.20);
+        }
+
+        .commandNavButton.active:hover,
+        .commandPrimary:hover {
+          border-color:#1d2939;
+          background:#1d2939;
+          color:#fff;
+        }
+
+        .commandButton {
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          gap:8px;
+        }
+
+        .commandButton.open {
+          border-color:#101828;
+          background:#f2f4f7;
+          color:#101828;
+          box-shadow:0 5px 14px rgba(16,24,40,.09);
+        }
+
+        .commandButton:active,
+        .commandNavButton:active {
+          transform:translateY(1px);
+          box-shadow:0 2px 5px rgba(16,24,40,.08);
         }
 
         .commandCount {
           display:grid;
-          min-width:20px;
-          height:20px;
+          min-width:22px;
+          height:22px;
           place-items:center;
-          padding:0 5px;
+          padding:0 6px;
           border-radius:999px;
-          background:#fff;
+          background:#f2f4f7;
           color:#344054;
           font-size:9px;
           font-weight:900;
@@ -5685,79 +5713,67 @@ function BarPlanningPage() {
           color:#fff;
         }
 
-        .commandButton {
-          display:flex;
-          align-items:center;
-          justify-content:center;
-          gap:7px;
-          padding:0 12px;
-          border-color:#d0d5dd;
-          background:#fff;
-          color:#344054;
-          box-shadow:0 1px 2px rgba(16,24,40,.04);
-        }
-
-        .commandButton:hover,
-        .commandButton.open {
-          border-color:#98a2b3;
-          background:#f9fafb;
-          color:#101828;
-        }
-
-        .commandButton:active,
-        .commandNavButton:active {
-          transform:translateY(1px);
-        }
-
-        .commandPrimary {
-          border-color:#101828;
-          background:#101828;
-          color:#fff;
-          box-shadow:0 4px 12px rgba(16,24,40,.15);
-        }
-
-        .commandPrimary:hover {
-          border-color:#1d2939;
-          background:#1d2939;
-          color:#fff;
-        }
-
         .commandIcon {
           display:inline-grid;
-          min-width:16px;
+          width:25px;
+          height:25px;
           place-items:center;
+          border-radius:8px;
+          background:#f2f4f7;
+          color:#344054;
           font-size:13px;
           font-weight:900;
         }
 
+        .commandNavButton.active .commandIcon,
+        .commandPrimary .commandIcon {
+          background:rgba(255,255,255,.16);
+          color:#fff;
+        }
+
         .commandChevron {
-          margin-left:1px;
+          margin-left:2px;
           color:#667085;
           font-size:10px;
         }
 
+        .commandPrimary .commandChevron { color:#fff; }
+
         .managementMenu {
-          min-width:230px !important;
+          min-width:250px !important;
         }
 
         .menuLabel {
-          padding:7px 10px 5px;
+          padding:9px 12px 6px;
           color:#98a2b3;
           font-size:8px;
           font-weight:900;
-          letter-spacing:.1em;
+          letter-spacing:.12em;
         }
 
         .menuSeparator {
           height:1px;
-          margin:5px 4px;
+          margin:6px 5px;
           background:#eaecf0;
+        }
+
+        .actionDropdownMenu {
+          padding:7px !important;
+          border-radius:15px !important;
+          box-shadow:0 14px 32px rgba(16,24,40,.14) !important;
         }
 
         .actionDropdownMenu button {
           display:flex;
           align-items:center;
-          gap:8px;
+          gap:9px;
+          min-height:42px;
+          border-radius:10px !important;
+          font-weight:800 !important;
+        }
+
+        .actionDropdownMenu button:hover:not(:disabled) {
+          background:#f2f4f7;
         }
 
         .actionDropdownMenu button:disabled {
@@ -5815,10 +5831,10 @@ function BarPlanningPage() {
 
         .mobileManagerTab {
           min-width:0;
-          min-height:34px;
-          padding:0 7px;
+          min-height:42px;
+          padding:0 9px;
           border:1px solid #d0d5dd;
-          border-radius:9px;
+          border-radius:12px;
           background:#fff;
           color:#344054;
           font-size:9px;
@@ -5860,8 +5876,8 @@ function BarPlanningPage() {
 
         .mobileQuickPrimary,
         .mobileManageToggle {
-          min-height:38px;
-          border-radius:9px;
+          min-height:44px;
+          border-radius:12px;
           font-size:10px;
           font-weight:900;
           cursor:pointer;
@@ -5892,10 +5908,10 @@ function BarPlanningPage() {
         }
 
         .mobilePanelButton {
-          min-height:36px;
-          padding:0 10px;
+          min-height:42px;
+          padding:0 12px;
           border:1px solid #d0d5dd;
-          border-radius:9px;
+          border-radius:12px;
           background:#fff;
           color:#344054;
           text-align:left;
