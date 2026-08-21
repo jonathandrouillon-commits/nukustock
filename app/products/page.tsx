@@ -517,10 +517,13 @@ const createAllocation = (defaultLocation = ''): AllocationRow => ({
   quantity: 0,
 })
 
-const createExpiryEntry = (defaultLocation = ''): ExpiryEntry => ({
+const createExpiryEntry = (
+  defaultLocation = '',
+  hasExpiry = true
+): ExpiryEntry => ({
   id: crypto.randomUUID(),
   lotNumber: '',
-  hasExpiry: true,
+  hasExpiry,
   expiry: '',
   quantity: 0,
   allocations: [createAllocation(defaultLocation)],
@@ -1107,7 +1110,13 @@ export default function Products() {
   }
 
   const addExpiryEntry = () => {
-    setExpiryEntries((current) => [...current, createExpiryEntry(locationChoices[0] || '')])
+    setExpiryEntries((current) => [
+      ...current,
+      createExpiryEntry(
+        locationChoices[0] || '',
+        productHasExpiry
+      ),
+    ])
   }
 
   const removeExpiryEntry = (entryId: string) => {
@@ -3161,25 +3170,36 @@ export default function Products() {
                         >
                           <input
                             type="checkbox"
-                            checked={
-                              productHasExpiry &&
-                              entry.hasExpiry
-                            }
-                            disabled={
-                              !productHasExpiry
-                            }
-                            onChange={(e) =>
-                              updateExpiryEntry(entry.id, {
-                                hasExpiry: e.target.checked,
-                                expiry: e.target.checked
-                                  ? entry.expiry
-                                  : '',
-                              })
-                            }
+                            checked={entry.hasExpiry}
+                            onChange={(e) => {
+                              const checked =
+                                e.target.checked
+
+                              // Si on coche une DLUO sur un lot,
+                              // le produit devient automatiquement
+                              // un produit géré avec DLUO / DLC.
+                              if (
+                                checked &&
+                                !productHasExpiry
+                              ) {
+                                setProductHasExpiry(true)
+                              }
+
+                              updateExpiryEntry(
+                                entry.id,
+                                {
+                                  hasExpiry: checked,
+                                  expiry: checked
+                                    ? entry.expiry
+                                    : '',
+                                }
+                              )
+                            }}
                             style={{
                               width: 18,
                               height: 18,
                               flexShrink: 0,
+                              cursor: 'pointer',
                             }}
                           />
 
@@ -3189,9 +3209,9 @@ export default function Products() {
                               fontWeight: 700,
                             }}
                           >
-                            {productHasExpiry
+                            {entry.hasExpiry
                               ? 'Ce lot possède une DLUO / DLC'
-                              : 'Produit défini sans DLUO / DLC'}
+                              : 'Ce lot est sans DLUO / DLC'}
                           </span>
                         </label>
 
