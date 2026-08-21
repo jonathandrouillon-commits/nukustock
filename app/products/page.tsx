@@ -1534,17 +1534,37 @@ export default function Products() {
           generateAutomaticLotNumber(lots.length, entryIndex)
 
         entry.allocations.forEach((allocation) => {
+          const effectiveExpiry =
+            productHasExpiry && entry.hasExpiry
+              ? entry.expiry
+              : ''
+
           const existing = lots.find(
-            (lot) =>
-              lot.lotNumber === effectiveLotNumber &&
-              lot.expiry ===
-                (productHasExpiry && entry.hasExpiry
-                  ? entry.expiry
-                  : '') &&
-              lot.location === allocation.location
+            (lot) => {
+              const sameLot =
+                lot.lotNumber === effectiveLotNumber &&
+                lot.expiry === effectiveExpiry
+
+              if (!sameLot) {
+                return false
+              }
+
+              if (lot.location === allocation.location) {
+                return true
+              }
+
+              // Si on change uniquement la sous-zone de la Cave à jus,
+              // on considère qu'il s'agit du même lot.
+              return (
+                isCaveAJusLocation(lot.location) &&
+                isCaveAJusLocation(allocation.location)
+              )
+            }
           )
 
           if (existing) {
+            // Important : enregistrer aussi le nouveau lieu.
+            existing.location = allocation.location
             existing.quantity += allocation.quantity
           } else {
             lots.push({
