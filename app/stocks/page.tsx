@@ -49,6 +49,50 @@ type SortKey =
 
 type SortDirection = 'asc' | 'desc'
 
+type ExportSortMode =
+  | 'category-subcategory-location-product'
+  | 'location-category-subcategory-product'
+  | 'category-subcategory-product'
+  | 'location-product'
+  | 'product'
+
+const EXPORT_SORT_OPTIONS: {
+  value: ExportSortMode
+  label: string
+}[] = [
+  {
+    value: 'category-subcategory-location-product',
+    label: 'Catégorie → Sous-catégorie → Lieu → Produit A-Z',
+  },
+  {
+    value: 'location-category-subcategory-product',
+    label: 'Lieu → Catégorie → Sous-catégorie → Produit A-Z',
+  },
+  {
+    value: 'category-subcategory-product',
+    label: 'Catégorie → Sous-catégorie → Produit A-Z',
+  },
+  {
+    value: 'location-product',
+    label: 'Lieu → Produit A-Z',
+  },
+  {
+    value: 'product',
+    label: 'Produit A-Z',
+  },
+]
+
+function compareText(a: unknown, b: unknown) {
+  return String(a || '').localeCompare(
+    String(b || ''),
+    'fr',
+    {
+      numeric: true,
+      sensitivity: 'base',
+    }
+  )
+}
+
 type StockRow = {
   product: any
   lot: any
@@ -283,6 +327,11 @@ export default function Stocks() {
   const [stockPrintColumns, setStockPrintColumns] =
     useState<StockPrintColumnKey[]>(
       DEFAULT_STOCK_PRINT_COLUMNS
+    )
+
+  const [exportSortMode, setExportSortMode] =
+    useState<ExportSortMode>(
+      'category-subcategory-location-product'
     )
 
   const [quickEntryOpen, setQuickEntryOpen] =
@@ -1128,8 +1177,88 @@ export default function Stocks() {
         : ' ▼'
       : ''
 
+  const getSortedExportRows = () => {
+    const rows = [...filteredRows]
+
+    const compareRow = (
+      a: StockRow,
+      b: StockRow
+    ) => {
+      const byProduct = () =>
+        compareText(
+          a.product.name,
+          b.product.name
+        )
+
+      const byCategory = () =>
+        compareText(
+          a.product.category,
+          b.product.category
+        )
+
+      const bySubcategory = () =>
+        compareText(
+          a.product.subcategory,
+          b.product.subcategory
+        )
+
+      const byLocation = () =>
+        compareText(
+          a.lot.location,
+          b.lot.location
+        )
+
+      const chain = (
+        comparators: Array<() => number>
+      ) => {
+        for (const comparator of comparators) {
+          const result = comparator()
+          if (result !== 0) return result
+        }
+        return 0
+      }
+
+      switch (exportSortMode) {
+        case 'location-category-subcategory-product':
+          return chain([
+            byLocation,
+            byCategory,
+            bySubcategory,
+            byProduct,
+          ])
+
+        case 'category-subcategory-product':
+          return chain([
+            byCategory,
+            bySubcategory,
+            byProduct,
+          ])
+
+        case 'location-product':
+          return chain([
+            byLocation,
+            byProduct,
+          ])
+
+        case 'product':
+          return byProduct()
+
+        case 'category-subcategory-location-product':
+        default:
+          return chain([
+            byCategory,
+            bySubcategory,
+            byLocation,
+            byProduct,
+          ])
+      }
+    }
+
+    return rows.sort(compareRow)
+  }
+
   const getExportRows = () =>
-    filteredRows.map(
+    getSortedExportRows().map(
       ({
         product,
         lot,
@@ -1266,7 +1395,7 @@ export default function Stocks() {
         ],
       ],
 
-      body: filteredRows.map(
+      body: getSortedExportRows().map(
         ({
           product,
           lot,
@@ -1398,7 +1527,7 @@ export default function Stocks() {
       .join('')
 
     const rows = await Promise.all(
-      filteredRows.map((row) => {
+      getSortedExportRows().map((row) => {
         return Promise.all(
           selectedDefinitions.map(async (column) => {
             const value = getStockPrintValue(
@@ -1572,6 +1701,42 @@ export default function Stocks() {
           >
             + Entrée rapide
           </button>
+
+          <label
+            style={{
+              display: 'grid',
+              gap: 3,
+              minWidth: 260,
+              fontSize: 9,
+              fontWeight: 800,
+              color: '#667085',
+            }}
+          >
+            TRI EXPORT / IMPRESSION
+            <select
+              className="input"
+              value={exportSortMode}
+              onChange={(event) =>
+                setExportSortMode(
+                  event.target.value as ExportSortMode
+                )
+              }
+              style={{
+                minHeight: 40,
+                padding: '0 10px',
+                fontSize: 11,
+              }}
+            >
+              {EXPORT_SORT_OPTIONS.map((option) => (
+                <option
+                  key={option.value}
+                  value={option.value}
+                >
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
 
           <button
             className="button secondary"
@@ -2450,6 +2615,45 @@ export default function Stocks() {
             >
               Coche uniquement les informations que tu veux voir sur l&apos;impression du stock.
             </p>
+
+            <div
+              style={{
+                marginBottom: 18,
+              }}
+            >
+              <label
+                style={{
+                  display: 'block',
+                  marginBottom: 7,
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}
+              >
+                Ordre de tri
+              </label>
+
+              <select
+                className="input"
+                value={exportSortMode}
+                onChange={(event) =>
+                  setExportSortMode(
+                    event.target.value as ExportSortMode
+                  )
+                }
+                style={{
+                  width: '100%',
+                }}
+              >
+                {EXPORT_SORT_OPTIONS.map((option) => (
+                  <option
+                    key={option.value}
+                    value={option.value}
+                  >
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
 
             <div
               style={{

@@ -1,1945 +1,3219 @@
 'use client'
 
-import {
-  useEffect,
-  useMemo,
-  useState,
-} from 'react'
+import { useMemo, useState, type CSSProperties } from 'react'
+import { Page, Card, Badge } from '@/components/ui'
+import { useMasterData, useProducts, useStockMovements } from '@/lib/store'
+import * as XLSX from 'xlsx'
+import { jsPDF } from 'jspdf'
+import { autoTable } from 'jspdf-autotable'
+import { QRCodeSVG } from 'qrcode.react'
+import QRCode from 'qrcode'
+import { ColumnVisibility, useColumnVisibility } from '@/components/column-visibility'
+import type { StockMovement } from '@/lib/types'
 
-import { supabase } from '@/lib/supabase'
+type QuantityFilter =
+  | 'Tous'
+  | 'Rupture'
+  | '1-10'
+  | '11-50'
+  | '51-100'
+  | '100+'
+  | 'Sous minimum'
 
-type ChecklistTask = {
-  id: string
+type ExpiryFilter =
+  | 'Toutes'
+  | 'Périmé'
+  | "Moins d'un mois"
+  | 'De 1 à 3 mois'
+  | 'De 3 à 6 mois'
+  | 'De 6 mois à 1 an'
+  | "+ d'un an"
+  | 'Sans DLUO'
+
+type ZoneFilter =
+  | 'All'
+  | 'Beverage'
+  | 'Food'
+  | 'Matériel & Accessoires'
+
+type SortKey =
+  | 'product'
+  | 'category'
+  | 'subcategory'
+  | 'supplier'
+  | 'location'
+  | 'expiry'
+  | 'quantity'
+  | 'price'
+  | 'value'
+
+type SortDirection = 'asc' | 'desc'
+
+type ExportSortMode =
+  | 'category-subcategory-location-product'
+  | 'location-category-subcategory-product'
+  | 'category-subcategory-product'
+  | 'location-product'
+  | 'product'
+
+const EXPORT_SORT_OPTIONS: {
+  value: ExportSortMode
   label: string
-  section:
-    | 'Contrôles'
-    | 'Ouverture'
-    | 'Préparations'
-    | 'Mise en place'
-}
-
-type DailyChecklist = {
-  date: string
-  userId: string
-  userName: string
-  checked: Record<string, boolean>
-  completedCount: number
-  totalCount: number
-  percent: number
-  finishedAt: string | null
-  updatedAt: string
-}
-
-type Tab =
-  | 'opening'
-  | 'setup'
-  | 'history'
-
-const CHECKLIST_NAME = 'Ouverture Bar'
-
-const STORAGE_KEY =
-  'barnuku_opening_checklists_v1'
-
-const TASKS: ChecklistTask[] = [
+}[] = [
   {
-    id: 'check-fitness',
-    label: 'Check Fitness',
-    section: 'Contrôles',
+    value: 'category-subcategory-location-product',
+    label: 'Catégorie → Sous-catégorie → Lieu → Produit A-Z',
   },
   {
-    id: 'check-spa-1',
-    label: 'Check Spa 1',
-    section: 'Contrôles',
+    value: 'location-category-subcategory-product',
+    label: 'Lieu → Catégorie → Sous-catégorie → Produit A-Z',
   },
   {
-    id: 'check-spa-2',
-    label: 'Check Spa 2',
-    section: 'Contrôles',
+    value: 'category-subcategory-product',
+    label: 'Catégorie → Sous-catégorie → Produit A-Z',
   },
   {
-    id: 'check-business-center',
-    label: 'Check Business Center',
-    section: 'Contrôles',
+    value: 'location-product',
+    label: 'Lieu → Produit A-Z',
   },
   {
-    id: 'check-game-room',
-    label: 'Check Game Room',
-    section: 'Contrôles',
-  },
-
-  {
-    id: 'music',
-    label: 'Allumage de la musique',
-    section: 'Ouverture',
-  },
-  {
-    id: 'lights',
-    label: 'Allumage des lumières',
-    section: 'Ouverture',
-  },
-  {
-    id: 'glass-machine',
-    label: 'Allumage machine à verres',
-    section: 'Ouverture',
-  },
-
-  {
-    id: 'flavoured-water',
-    label: 'Préparation eau parfumée',
-    section: 'Préparations',
-  },
-  {
-    id: 'lemonade',
-    label: 'Préparation citronnade',
-    section: 'Préparations',
-  },
-  {
-    id: 'fill-locations',
-    label: 'Remplissage lieu',
-    section: 'Préparations',
-  },
-  {
-    id: 'fill-ice',
-    label: 'Remplissage glace',
-    section: 'Préparations',
-  },
-
-  {
-    id: 'lemon',
-    label: 'Citron',
-    section: 'Mise en place',
-  },
-  {
-    id: 'orange',
-    label: 'Orange',
-    section: 'Mise en place',
-  },
-  {
-    id: 'mint',
-    label: 'Menthe',
-    section: 'Mise en place',
-  },
-  {
-    id: 'basil',
-    label: 'Basilic',
-    section: 'Mise en place',
-  },
-  {
-    id: 'coconut-cream',
-    label: 'Crème de coco',
-    section: 'Mise en place',
-  },
-  {
-    id: 'house-syrup',
-    label: 'Sirop maison',
-    section: 'Mise en place',
-  },
-  {
-    id: 'guy-lemonade',
-    label: 'Citronnade Guy',
-    section: 'Mise en place',
-  },
-  {
-    id: 'guy-orange-juice',
-    label: "Jus d'orange Guy",
-    section: 'Mise en place',
-  },
-  {
-    id: 'green-juice',
-    label: 'Jus vert',
-    section: 'Mise en place',
-  },
-  {
-    id: 'red-juice',
-    label: 'Jus rouge',
-    section: 'Mise en place',
+    value: 'product',
+    label: 'Produit A-Z',
   },
 ]
 
-const SECTIONS: ChecklistTask['section'][] = [
-  'Contrôles',
-  'Ouverture',
-  'Préparations',
-  'Mise en place',
-]
-
-function pad(value: number) {
-  return String(value).padStart(2, '0')
-}
-
-function localDateKey(date = new Date()) {
-  return [
-    date.getFullYear(),
-    pad(date.getMonth() + 1),
-    pad(date.getDate()),
-  ].join('-')
-}
-
-function formatDateFr(value: string) {
-  const date = new Date(
-    `${value}T12:00:00`
-  )
-
-  return new Intl.DateTimeFormat(
-    'fr-FR',
+function compareText(a: unknown, b: unknown) {
+  return String(a || '').localeCompare(
+    String(b || ''),
+    'fr',
     {
-      weekday: 'long',
-      day: '2-digit',
-      month: 'long',
-      year: 'numeric',
+      numeric: true,
+      sensitivity: 'base',
     }
-  ).format(date)
+  )
 }
 
-function formatTime(value?: string | null) {
-  if (!value) {
+type StockRow = {
+  product: any
+  lot: any
+  quantity: number
+  value: number
+  expiryPriority: string
+}
+
+type StockPrintColumnKey =
+  | 'qrProduct'
+  | 'qrCategory'
+  | 'qrSubcategory'
+  | 'qrLocation'
+  | 'reference'
+  | 'product'
+  | 'category'
+  | 'subcategory'
+  | 'supplier'
+  | 'location'
+  | 'lot'
+  | 'expiry'
+  | 'quantity'
+  | 'unit'
+  | 'price'
+  | 'value'
+
+const STOCK_PRINT_COLUMNS: {
+  key: StockPrintColumnKey
+  label: string
+}[] = [
+  { key: 'qrProduct', label: 'QR Produit' },
+  { key: 'qrCategory', label: 'QR Catégorie' },
+  { key: 'qrSubcategory', label: 'QR Sous-catégorie' },
+  { key: 'qrLocation', label: 'QR Lieu' },
+  { key: 'reference', label: 'Référence' },
+  { key: 'product', label: 'Produit' },
+  { key: 'category', label: 'Catégorie' },
+  { key: 'subcategory', label: 'Sous-catégorie' },
+  { key: 'supplier', label: 'Fournisseur' },
+  { key: 'location', label: 'Lieu' },
+  { key: 'lot', label: 'Lot' },
+  { key: 'expiry', label: 'DLUO / DLC' },
+  { key: 'quantity', label: 'Quantité disponible' },
+  { key: 'unit', label: 'Unité' },
+  { key: 'price', label: 'Prix unitaire' },
+  { key: 'value', label: 'Valeur' },
+]
+
+const DEFAULT_STOCK_PRINT_COLUMNS: StockPrintColumnKey[] = [
+  'reference',
+  'product',
+  'location',
+  'expiry',
+  'quantity',
+  'unit',
+]
+
+const STOCK_SCREEN_COLUMNS = [
+  { key: 'reference', label: 'Référence' },
+  { key: 'photo', label: 'Photo' },
+  { key: 'qrProduct', label: 'QR Produit', qr: true },
+  { key: 'product', label: 'Produit' },
+  { key: 'zone', label: 'Zone' },
+  { key: 'category', label: 'Catégorie' },
+  { key: 'qrCategory', label: 'QR Catégorie', qr: true },
+  { key: 'subcategory', label: 'Sous-catégorie' },
+  { key: 'qrSubcategory', label: 'QR Sous-catégorie', qr: true },
+  { key: 'location', label: 'Lieu' },
+  { key: 'qrLocation', label: 'QR Lieu', qr: true },
+  { key: 'lot', label: 'Lot' },
+  { key: 'expiry', label: 'DLUO / DLC' },
+  { key: 'quantity', label: 'Disponible' },
+  { key: 'price', label: 'Prix' },
+  { key: 'value', label: 'Valeur' },
+  { key: 'unitWeight', label: 'Poids unitaire' },
+  { key: 'caseWeight', label: 'Poids conditionnement' },
+  { key: 'totalWeight', label: 'Poids total stock' },
+  { key: 'transfer', label: 'Transfert' },
+]
+
+const STOCK_SCREEN_ESSENTIAL = [
+  'reference',
+  'photo',
+  'qrProduct',
+  'product',
+  'category',
+  'subcategory',
+  'location',
+  'expiry',
+  'quantity',
+]
+
+function formatWeightKg(value: number | null | undefined) {
+  const numeric = Number(value || 0)
+
+  if (!Number.isFinite(numeric) || numeric <= 0) {
     return '—'
   }
 
-  const date = new Date(value)
-
-  return new Intl.DateTimeFormat(
-    'fr-FR',
-    {
-      hour: '2-digit',
-      minute: '2-digit',
-    }
-  ).format(date)
+  return `${numeric.toLocaleString('fr-FR', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 3,
+  })} kg`
 }
 
-function getStoredHistory():
-  DailyChecklist[] {
+function normalizeZoneText(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+}
+
+function detectProductZone(product: any): ZoneFilter {
+  const explicitZone = String(
+    product.zone ||
+      product.family ||
+      product.inventoryScope ||
+      ''
+  ).trim()
+
   if (
-    typeof window === 'undefined'
+    explicitZone === 'Beverage' ||
+    explicitZone === 'Food' ||
+    explicitZone === 'Matériel & Accessoires'
   ) {
-    return []
+    return explicitZone
   }
 
-  try {
-    const raw =
-      window.localStorage.getItem(
-        STORAGE_KEY
-      )
+  const text = normalizeZoneText(
+    `${product.category || ''} ${product.subcategory || ''} ${
+      product.name || ''
+    }`
+  )
 
-    if (!raw) {
-      return []
-    }
+  const foodWords = [
+    'food',
+    'aliment',
+    'epicerie',
+    'fruit',
+    'legume',
+    'viande',
+    'poisson',
+    'produit frais',
+    'surgele',
+    'cuisine',
+  ]
 
-    const parsed =
-      JSON.parse(raw)
+  const materialWords = [
+    'materiel',
+    'accessoire',
+    'verrerie',
+    'verre',
+    'equipement',
+    'ustensile',
+    'barware',
+    'assiette',
+    'couvert',
+  ]
 
-    if (!Array.isArray(parsed)) {
-      return []
-    }
-
-    return parsed
-  } catch {
-    return []
-  }
-}
-
-function saveStoredHistory(
-  history: DailyChecklist[]
-) {
   if (
-    typeof window === 'undefined'
+    foodWords.some((word) =>
+      text.includes(word)
+    )
   ) {
-    return
+    return 'Food'
   }
 
-  window.localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify(history)
+  if (
+    materialWords.some((word) =>
+      text.includes(word)
+    )
+  ) {
+    return 'Matériel & Accessoires'
+  }
+
+  return 'Beverage'
+}
+
+function getProductPhoto(product: any) {
+  return (
+    product.photoUrl ||
+    product.photo_url ||
+    product.photo ||
+    product.imageUrl ||
+    product.image_url ||
+    ''
   )
 }
 
-function emptyChecked() {
-  return TASKS.reduce<
-    Record<string, boolean>
-  >(
-    (acc, task) => {
-      acc[task.id] = false
-      return acc
-    },
-    {}
-  )
-}
+export default function Stocks() {
+  const { items, save: saveProducts } = useProducts()
+  const { items: masterData } = useMasterData()
+  const {
+    items: stockMovements,
+    save: saveStockMovements,
+  } = useStockMovements()
 
-export default function ChecklistSetupPage() {
-  const [tab, setTab] =
-    useState<Tab>('opening')
+  const [search, setSearch] = useState('')
+  const [categoryFilter, setCategoryFilter] =
+    useState('Toutes')
+  const [subcategoryFilter, setSubcategoryFilter] =
+    useState('Toutes')
+  const [supplierFilter, setSupplierFilter] =
+    useState('Tous')
+  const [locationFilter, setLocationFilter] =
+    useState('Tous')
 
-  const [today] =
-    useState(() => localDateKey())
+  const [zoneFilter, setZoneFilter] =
+    useState<ZoneFilter>('All')
 
-  const [
-    userId,
-    setUserId,
-  ] = useState('')
+  const [quantityFilter, setQuantityFilter] =
+    useState<QuantityFilter>('Tous')
 
-  const [
-    userName,
-    setUserName,
-  ] = useState('Utilisateur')
+  const [expiryFilter, setExpiryFilter] =
+    useState<ExpiryFilter>('Toutes')
 
-  const [
-    checked,
-    setChecked,
-  ] = useState<
-    Record<string, boolean>
-  >(emptyChecked)
+  const [sortKey, setSortKey] =
+    useState<SortKey>('product')
 
-  const [
-    finishedAt,
-    setFinishedAt,
-  ] = useState<string | null>(
-    null
+  const [sortDirection, setSortDirection] =
+    useState<SortDirection>('asc')
+
+  const stockDisplay = useColumnVisibility(
+    'nukustock_display_stocks_v1',
+    STOCK_SCREEN_ESSENTIAL
   )
 
-  const [
-    history,
-    setHistory,
-  ] = useState<DailyChecklist[]>(
-    []
-  )
+  const [printColumnsOpen, setPrintColumnsOpen] =
+    useState(false)
 
-  const [
-    loaded,
-    setLoaded,
-  ] = useState(false)
-
-  const completedCount =
-    useMemo(
-      () =>
-        TASKS.filter(
-          (task) =>
-            checked[task.id]
-        ).length,
-      [checked]
+  const [stockPrintColumns, setStockPrintColumns] =
+    useState<StockPrintColumnKey[]>(
+      DEFAULT_STOCK_PRINT_COLUMNS
     )
 
-  const percent =
-    Math.round(
-      (completedCount /
-        TASKS.length) *
-        100
+  const [exportSortMode, setExportSortMode] =
+    useState<ExportSortMode>(
+      'category-subcategory-location-product'
     )
 
-  const isComplete =
-    completedCount === TASKS.length
+  const [quickEntryOpen, setQuickEntryOpen] =
+    useState(false)
+  const [quickProductId, setQuickProductId] =
+    useState('')
+  const [quickQuantity, setQuickQuantity] =
+    useState(1)
+  const [quickLocation, setQuickLocation] =
+    useState('')
+  const [quickLotNumber, setQuickLotNumber] =
+    useState('')
+  const [quickExpiry, setQuickExpiry] =
+    useState('')
+  const [quickNeedsRegularization, setQuickNeedsRegularization] =
+    useState(true)
+  const [quickNote, setQuickNote] =
+    useState('')
 
-  useEffect(() => {
-    const load = async () => {
-      const stored =
-        getStoredHistory()
+  const [transferOpen, setTransferOpen] = useState(false)
+  const [transferProductId, setTransferProductId] = useState('')
+  const [transferLotId, setTransferLotId] = useState('')
+  const [transferFromLocation, setTransferFromLocation] = useState('')
+  const [transferToLocation, setTransferToLocation] = useState('')
+  const [transferQuantity, setTransferQuantity] = useState(1)
 
-      setHistory(stored)
 
-      try {
-        const {
-          data: {
-            session,
-          },
-        } =
-          await supabase.auth.getSession()
+  const toggleStockPrintColumn = (
+    key: StockPrintColumnKey
+  ) => {
+    setStockPrintColumns((current) =>
+      current.includes(key)
+        ? current.filter((item) => item !== key)
+        : [...current, key]
+    )
+  }
 
-        const user =
-          session?.user
+  const getExpiryPriority = (
+    expiryDate: string
+  ) => {
+    if (!expiryDate) {
+      return 'Sans DLUO'
+    }
 
-        const nextUserId =
-          user?.id || 'local'
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
 
-        const metadata =
-          user?.user_metadata || {}
+    const target = new Date(
+      `${expiryDate}T00:00:00`
+    )
+    target.setHours(0, 0, 0, 0)
 
-        const appMetadata =
-          user?.app_metadata || {}
+    const days =
+      (target.getTime() -
+        today.getTime()) /
+      (1000 * 60 * 60 * 24)
 
-        const nextUserName =
-          String(
-            metadata.full_name ||
-              metadata.first_name ||
-              appMetadata.employee_name ||
-              metadata.email ||
-              user?.email ||
-              'Utilisateur'
+    if (days < 0) return 'Périmé'
+    if (days < 30) {
+      return "Moins d'un mois"
+    }
+    if (days < 90) {
+      return 'De 1 à 3 mois'
+    }
+    if (days < 180) {
+      return 'De 3 à 6 mois'
+    }
+    if (days < 365) {
+      return 'De 6 mois à 1 an'
+    }
+
+    return "+ d'un an"
+  }
+
+  const getExpiryTone = (
+    expiryDate: string
+  ):
+    | 'danger'
+    | 'warn'
+    | 'good'
+    | 'neutral'
+    | 'info' => {
+    const priority =
+      getExpiryPriority(expiryDate)
+
+    if (
+      priority === 'Périmé' ||
+      priority === "Moins d'un mois"
+    ) {
+      return 'danger'
+    }
+
+    if (
+      priority === 'De 1 à 3 mois' ||
+      priority === 'De 3 à 6 mois'
+    ) {
+      return 'warn'
+    }
+
+    if (
+      priority === 'De 6 mois à 1 an'
+    ) {
+      return 'info'
+    }
+
+    if (priority === "+ d'un an") {
+      return 'good'
+    }
+
+    return 'neutral'
+  }
+
+  const categories = useMemo(
+    () =>
+      [
+        ...new Set(
+          items
+            .map((product) =>
+              product.category
+            )
+            .filter(Boolean)
+        ),
+      ].sort((a, b) =>
+        a.localeCompare(b, 'fr')
+      ),
+    [items]
+  )
+
+  const subcategories = useMemo(
+    () =>
+      [
+        ...new Set(
+          items
+            .filter(
+              (product) =>
+                categoryFilter ===
+                  'Toutes' ||
+                product.category ===
+                  categoryFilter
+            )
+            .map((product) =>
+              product.subcategory
+            )
+            .filter(Boolean)
+        ),
+      ].sort((a, b) =>
+        a.localeCompare(b, 'fr')
+      ),
+    [items, categoryFilter]
+  )
+
+  const suppliers = useMemo(
+    () =>
+      [
+        ...new Set(
+          items
+            .map((product) =>
+              product.mainSupplier
+            )
+            .filter(Boolean)
+        ),
+      ].sort((a, b) =>
+        a.localeCompare(b, 'fr')
+      ),
+    [items]
+  )
+
+
+  const locations = useMemo(
+    () =>
+      [
+        ...new Set(
+          items.flatMap((product) =>
+            product.lots
+              .map((lot) => lot.location)
+              .filter(Boolean)
           )
-            .trim()
-            .toUpperCase()
+        ),
+      ].sort((a, b) =>
+        a.localeCompare(b, 'fr')
+      ),
+    [items]
+  )
 
-        setUserId(nextUserId)
-        setUserName(nextUserName)
+  const allRows =
+    useMemo<StockRow[]>(() => {
+      return items.flatMap(
+        (product) => {
+          /*
+           * Même si un produit n'a aucun lot,
+           * on l'affiche avec un stock à zéro.
+           */
+          if (!product.lots.length) {
+            return [
+              {
+                product,
+                lot: {
+                  id: `empty-${product.id}`,
+                  lotNumber: '',
+                  expiry: '',
+                  location: '',
+                  quantity: 0,
+                },
+                quantity: 0,
+                value: 0,
+                expiryPriority:
+                  'Sans DLUO',
+              },
+            ]
+          }
 
-        const current =
-          stored.find(
-            (item) =>
-              item.date === today &&
-              item.userId ===
-                nextUserId
-          )
+          return product.lots.map(
+            (lot) => {
+              const quantity = Math.max(
+                0,
+                Number(
+                  lot.quantity
+                ) || 0
+              )
 
-        if (current) {
-          setChecked({
-            ...emptyChecked(),
-            ...current.checked,
-          })
-
-          setFinishedAt(
-            current.finishedAt ||
-              null
+              return {
+                product,
+                lot,
+                quantity,
+                value:
+                  quantity *
+                  Math.max(
+                    0,
+                    Number(
+                      product.purchasePrice
+                    ) || 0
+                  ),
+                expiryPriority:
+                  getExpiryPriority(
+                    lot.expiry
+                  ),
+              }
+            }
           )
         }
-      } finally {
-        setLoaded(true)
-      }
+      )
+    }, [items])
+
+  const matchesQuantityFilter = (
+    quantity: number,
+    minStock: number
+  ) => {
+    switch (quantityFilter) {
+      case 'Rupture':
+        return quantity === 0
+
+      case '1-10':
+        return (
+          quantity >= 1 &&
+          quantity <= 10
+        )
+
+      case '11-50':
+        return (
+          quantity >= 11 &&
+          quantity <= 50
+        )
+
+      case '51-100':
+        return (
+          quantity >= 51 &&
+          quantity <= 100
+        )
+
+      case '100+':
+        return quantity > 100
+
+      case 'Sous minimum':
+        return quantity < minStock
+
+      default:
+        return true
     }
+  }
 
-    void load()
-  }, [today])
+  const filteredRows = useMemo(
+    () => {
+      const query = search
+        .trim()
+        .toLowerCase()
 
-  useEffect(() => {
-    if (!loaded) {
+      const rows = allRows.filter(
+        ({
+          product,
+          lot,
+          quantity,
+          expiryPriority,
+        }) => {
+          const haystack =
+            `${product.internalRef || ''} ${
+              product.name || ''
+            } ${
+              product.category || ''
+            } ${
+              product.subcategory || ''
+            } ${
+              product.mainSupplier || ''
+            } ${lot.location || ''} ${
+              lot.lotNumber || ''
+            }`
+              .toLowerCase()
+
+          if (
+            query &&
+            !haystack.includes(query)
+          ) {
+            return false
+          }
+
+          if (
+            zoneFilter !== 'All' &&
+            detectProductZone(product) !== zoneFilter
+          ) {
+            return false
+          }
+
+          if (
+            categoryFilter !==
+              'Toutes' &&
+            product.category !==
+              categoryFilter
+          ) {
+            return false
+          }
+
+          if (
+            subcategoryFilter !==
+              'Toutes' &&
+            product.subcategory !==
+              subcategoryFilter
+          ) {
+            return false
+          }
+
+          if (
+            supplierFilter !==
+              'Tous' &&
+            product.mainSupplier !==
+              supplierFilter
+          ) {
+            return false
+          }
+
+          if (
+            locationFilter !==
+              'Tous' &&
+            lot.location !==
+              locationFilter
+          ) {
+            return false
+          }
+
+          if (
+            expiryFilter !==
+              'Toutes' &&
+            expiryPriority !==
+              expiryFilter
+          ) {
+            return false
+          }
+
+          if (
+            !matchesQuantityFilter(
+              quantity,
+              Math.max(
+                0,
+                Number(
+                  product.minStock
+                ) || 0
+              )
+            )
+          ) {
+            return false
+          }
+
+          return true
+        }
+      )
+
+      return [...rows].sort(
+        (a, b) => {
+          const getValue = (
+            row: StockRow
+          ) => {
+            switch (sortKey) {
+              case 'category':
+                return (
+                  row.product
+                    .category || ''
+                )
+
+              case 'subcategory':
+                return (
+                  row.product
+                    .subcategory || ''
+                )
+
+              case 'supplier':
+                return (
+                  row.product
+                    .mainSupplier || ''
+                )
+
+              case 'location':
+                return (
+                  row.lot.location || ''
+                )
+
+              case 'expiry':
+                return (
+                  row.lot.expiry ||
+                  '9999-12-31'
+                )
+
+              case 'quantity':
+                return row.quantity
+
+              case 'price':
+                return (
+                  Number(
+                    row.product
+                      .purchasePrice
+                  ) || 0
+                )
+
+              case 'value':
+                return row.value
+
+              case 'product':
+              default:
+                return (
+                  row.product.name ||
+                  ''
+                )
+            }
+          }
+
+          const av = getValue(a)
+          const bv = getValue(b)
+
+          const result =
+            typeof av === 'number' &&
+            typeof bv === 'number'
+              ? av - bv
+              : String(
+                  av
+                ).localeCompare(
+                  String(bv),
+                  'fr'
+                )
+
+          return sortDirection ===
+            'asc'
+            ? result
+            : -result
+        }
+      )
+    },
+    [
+      allRows,
+      search,
+      zoneFilter,
+      categoryFilter,
+      subcategoryFilter,
+      supplierFilter,
+      locationFilter,
+      quantityFilter,
+      expiryFilter,
+      sortKey,
+      sortDirection,
+    ]
+  )
+
+  const filteredProductIds =
+    useMemo(
+      () =>
+        new Set(
+          filteredRows.map(
+            (row) =>
+              row.product.id
+          )
+        ),
+      [filteredRows]
+    )
+
+  const totalQty =
+    filteredRows.reduce(
+      (sum, row) =>
+        sum + row.quantity,
+      0
+    )
+
+  const totalValue =
+    filteredRows.reduce(
+      (sum, row) =>
+        sum + row.value,
+      0
+    )
+
+  const expiredCount =
+    filteredRows.filter(
+      (row) =>
+        row.expiryPriority ===
+        'Périmé'
+    ).length
+
+  const underOneMonthCount =
+    filteredRows.filter(
+      (row) =>
+        row.expiryPriority ===
+        "Moins d'un mois"
+    ).length
+
+  const quickEntryLocations = useMemo(
+    () =>
+      masterData
+        .filter(
+          (item) =>
+            item.type === 'location' &&
+            item.active !== false
+        )
+        .map((item) => item.name)
+        .sort((a, b) =>
+          a.localeCompare(b, 'fr', {
+            numeric: true,
+            sensitivity: 'base',
+          })
+        ),
+    [masterData]
+  )
+
+  const resetQuickEntry = () => {
+    setQuickProductId('')
+    setQuickQuantity(1)
+    setQuickLocation('')
+    setQuickLotNumber('')
+    setQuickExpiry('')
+    setQuickNeedsRegularization(true)
+    setQuickNote('')
+  }
+
+  const saveQuickEntry = () => {
+    const product = items.find(
+      (item) => item.id === quickProductId
+    )
+
+    if (!product) {
+      window.alert('Choisis un produit.')
       return
     }
 
-    const now =
+    const quantity = Math.max(
+      0,
+      Number(quickQuantity) || 0
+    )
+
+    if (quantity <= 0) {
+      window.alert(
+        'La quantité doit être supérieure à 0.'
+      )
+      return
+    }
+
+    if (!quickLocation) {
+      window.alert('Choisis un lieu de stockage.')
+      return
+    }
+
+    const sameLotIndex = product.lots.findIndex(
+      (lot) =>
+        lot.location === quickLocation &&
+        (lot.lotNumber || '') ===
+          quickLotNumber.trim() &&
+        (lot.expiry || '') === quickExpiry
+    )
+
+    const nextLots = product.lots.map(
+      (lot) => ({ ...lot })
+    )
+
+    if (sameLotIndex >= 0) {
+      nextLots[sameLotIndex] = {
+        ...nextLots[sameLotIndex],
+        quantity:
+          Math.max(
+            0,
+            Number(
+              nextLots[sameLotIndex].quantity
+            ) || 0
+          ) + quantity,
+      }
+    } else {
+      nextLots.push({
+        id: crypto.randomUUID(),
+        lotNumber: quickLotNumber.trim(),
+        expiry: quickExpiry,
+        location: quickLocation,
+        quantity,
+      })
+    }
+
+    saveProducts(
+      items.map((item) =>
+        item.id === product.id
+          ? {
+              ...item,
+              lots: nextLots,
+            }
+          : item
+      )
+    )
+
+    const now = new Date().toISOString()
+
+    const movement: StockMovement = {
+      id: crypto.randomUUID(),
+      createdAt: now,
+      type: 'ENTREE_PRODUIT',
+      productId: product.id,
+      productName: product.name,
+      internalRef: product.internalRef,
+      quantity,
+      toLocation: quickLocation,
+      lotNumber:
+        quickLotNumber.trim() || undefined,
+      expiry: quickExpiry || undefined,
+      referenceType: 'product',
+      referenceId: `RAP-${Date.now()
+        .toString()
+        .slice(-8)}`,
+      note:
+        quickNote.trim() ||
+        'Entrée rapide de stock',
+      specialNote:
+        quickNote.trim() || undefined,
+      regularizationStatus:
+        quickNeedsRegularization
+          ? 'A_REGULARISER'
+          : 'NON_REQUIS',
+    }
+
+    saveStockMovements([
+      movement,
+      ...stockMovements,
+    ])
+
+    setQuickEntryOpen(false)
+    resetQuickEntry()
+
+    window.alert(
+      quickNeedsRegularization
+        ? `Entrée ajoutée : +${quantity} ${product.unit} de ${product.name} dans ${quickLocation}. Mouvement marqué À régulariser.`
+        : `Entrée ajoutée : +${quantity} ${product.unit} de ${product.name} dans ${quickLocation}.`
+    )
+  }
+
+  const openTransfer = (product: any, lot: any, quantity: number) => {
+    if (!lot.location) {
+      window.alert('Ce stock n’a pas de lieu source.')
+      return
+    }
+    if (quantity <= 0) {
+      window.alert('Aucun stock disponible à transférer.')
+      return
+    }
+
+    setTransferProductId(product.id)
+    setTransferLotId(lot.id)
+    setTransferFromLocation(lot.location)
+    setTransferToLocation('')
+    setTransferQuantity(1)
+    setTransferOpen(true)
+  }
+
+  const saveTransfer = () => {
+    const product = items.find((item) => item.id === transferProductId)
+    if (!product) {
+      window.alert('Produit introuvable.')
+      return
+    }
+
+    const sourceIndex = product.lots.findIndex(
+      (lot) => lot.id === transferLotId
+    )
+    if (sourceIndex < 0) {
+      window.alert('Lot source introuvable.')
+      return
+    }
+
+    const sourceLot = product.lots[sourceIndex]
+    const available = Math.max(0, Number(sourceLot.quantity) || 0)
+    const quantity = Math.max(0, Number(transferQuantity) || 0)
+
+    if (!transferToLocation) {
+      window.alert('Choisis le lieu de destination.')
+      return
+    }
+    if (transferToLocation === transferFromLocation) {
+      window.alert('Le lieu de destination doit être différent du lieu source.')
+      return
+    }
+    if (quantity <= 0) {
+      window.alert('La quantité doit être supérieure à 0.')
+      return
+    }
+    if (quantity > available) {
+      window.alert(`Stock insuffisant. Disponible : ${available} ${product.unit || ''}.`)
+      return
+    }
+
+    const nextLots = product.lots.map((lot) => ({ ...lot }))
+    nextLots[sourceIndex] = {
+      ...nextLots[sourceIndex],
+      quantity: available - quantity,
+    }
+
+    const destinationIndex = nextLots.findIndex(
+      (lot, index) =>
+        index !== sourceIndex &&
+        lot.location === transferToLocation &&
+        (lot.lotNumber || '') === (sourceLot.lotNumber || '') &&
+        (lot.expiry || '') === (sourceLot.expiry || '')
+    )
+
+    if (destinationIndex >= 0) {
+      nextLots[destinationIndex] = {
+        ...nextLots[destinationIndex],
+        quantity:
+          Math.max(0, Number(nextLots[destinationIndex].quantity) || 0) +
+          quantity,
+      }
+    } else {
+      nextLots.push({
+        id: crypto.randomUUID(),
+        lotNumber: sourceLot.lotNumber || '',
+        expiry: sourceLot.expiry || '',
+        location: transferToLocation,
+        quantity,
+      })
+    }
+
+    saveProducts(
+      items.map((item) =>
+        item.id === product.id
+          ? { ...item, lots: nextLots }
+          : item
+      )
+    )
+
+    const transferReference =
+      `TRF-${Date.now().toString().slice(-8)}`
+
+    const createdAt =
       new Date().toISOString()
 
-    const record:
-      DailyChecklist = {
-      date: today,
-      userId:
-        userId || 'local',
-      userName,
-      checked,
-      completedCount,
-      totalCount:
-        TASKS.length,
-      percent,
-      finishedAt,
-      updatedAt: now,
-    }
+    const movements: StockMovement[] = [
+      {
+        id: crypto.randomUUID(),
+        createdAt,
+        type: 'TRANSFERT_SORTIE',
+        productId: product.id,
+        productName: product.name,
+        internalRef: product.internalRef,
+        quantity: -quantity,
+        fromLocation: transferFromLocation,
+        toLocation: transferToLocation,
+        lotNumber: sourceLot.lotNumber || undefined,
+        expiry: sourceLot.expiry || undefined,
+        referenceType: 'transfer',
+        referenceId: transferReference,
+        note: `Transfert de ${transferFromLocation} vers ${transferToLocation}`,
+        regularizationStatus: 'NON_REQUIS',
+      },
+      {
+        id: crypto.randomUUID(),
+        createdAt,
+        type: 'TRANSFERT_ENTREE',
+        productId: product.id,
+        productName: product.name,
+        internalRef: product.internalRef,
+        quantity,
+        fromLocation: transferFromLocation,
+        toLocation: transferToLocation,
+        lotNumber: sourceLot.lotNumber || undefined,
+        expiry: sourceLot.expiry || undefined,
+        referenceType: 'transfer',
+        referenceId: transferReference,
+        note: `Transfert de ${transferFromLocation} vers ${transferToLocation}`,
+        regularizationStatus: 'NON_REQUIS',
+      },
+    ]
 
-    setHistory(
-      (current) => {
-        const withoutToday =
-          current.filter(
-            (item) =>
-              !(
-                item.date ===
-                  today &&
-                item.userId ===
-                  record.userId
-              )
-          )
+    saveStockMovements([
+      ...movements,
+      ...stockMovements,
+    ])
 
-        const next = [
-          record,
-          ...withoutToday,
-        ].sort(
-          (a, b) =>
-            b.date.localeCompare(
-              a.date
-            ) ||
-            b.updatedAt.localeCompare(
-              a.updatedAt
-            )
-        )
-
-        saveStoredHistory(
-          next
-        )
-
-        return next
-      }
+    setTransferOpen(false)
+    window.alert(
+      `Transfert effectué : ${quantity} ${product.unit || ''} de ${product.name} vers ${transferToLocation}.`
     )
-  }, [
-    checked,
-    completedCount,
-    finishedAt,
-    loaded,
-    percent,
-    today,
-    userId,
-    userName,
-  ])
+  }
 
-  const toggleTask = (
-    taskId: string
+  const resetFilters = () => {
+    setSearch('')
+    setCategoryFilter('Toutes')
+    setSubcategoryFilter('Toutes')
+    setSupplierFilter('Tous')
+    setLocationFilter('Tous')
+    setZoneFilter('All')
+    setQuantityFilter('Tous')
+    setExpiryFilter('Toutes')
+  }
+
+  const toggleSort = (
+    key: SortKey
   ) => {
-    if (finishedAt) {
+    if (sortKey === key) {
+      setSortDirection(
+        (current) =>
+          current === 'asc'
+            ? 'desc'
+            : 'asc'
+      )
       return
     }
 
-    setChecked(
-      (current) => ({
-        ...current,
-        [taskId]:
-          !current[taskId],
+    setSortKey(key)
+    setSortDirection('asc')
+  }
+
+  const sortIndicator = (
+    key: SortKey
+  ) =>
+    sortKey === key
+      ? sortDirection === 'asc'
+        ? ' ▲'
+        : ' ▼'
+      : ''
+
+  const getSortedExportRows = () => {
+    const rows = [...filteredRows]
+
+    const compareRow = (
+      a: StockRow,
+      b: StockRow
+    ) => {
+      const byProduct = () =>
+        compareText(
+          a.product.name,
+          b.product.name
+        )
+
+      const byCategory = () =>
+        compareText(
+          a.product.category,
+          b.product.category
+        )
+
+      const bySubcategory = () =>
+        compareText(
+          a.product.subcategory,
+          b.product.subcategory
+        )
+
+      const byLocation = () =>
+        compareText(
+          a.lot.location,
+          b.lot.location
+        )
+
+      const chain = (
+        comparators: Array<() => number>
+      ) => {
+        for (const comparator of comparators) {
+          const result = comparator()
+          if (result !== 0) return result
+        }
+        return 0
+      }
+
+      switch (exportSortMode) {
+        case 'location-category-subcategory-product':
+          return chain([
+            byLocation,
+            byCategory,
+            bySubcategory,
+            byProduct,
+          ])
+
+        case 'category-subcategory-product':
+          return chain([
+            byCategory,
+            bySubcategory,
+            byProduct,
+          ])
+
+        case 'location-product':
+          return chain([
+            byLocation,
+            byProduct,
+          ])
+
+        case 'product':
+          return byProduct()
+
+        case 'category-subcategory-location-product':
+        default:
+          return chain([
+            byCategory,
+            bySubcategory,
+            byLocation,
+            byProduct,
+          ])
+      }
+    }
+
+    return rows.sort(compareRow)
+  }
+
+  const getExportRows = () =>
+    getSortedExportRows().map(
+      ({
+        product,
+        lot,
+        quantity,
+        value,
+      }) => ({
+        Référence:
+          product.internalRef || '',
+        Produit: product.name || '',
+        Zone:
+          detectProductZone(product),
+        Catégorie:
+          product.category || '',
+        'Sous-catégorie':
+          product.subcategory || '',
+        Marque:
+          product.brand || '',
+        Fournisseur:
+          product.mainSupplier || '',
+        Lieu:
+          lot.location || '',
+        Lot:
+          lot.lotNumber || '',
+        'DLUO / DLC':
+          lot.expiry
+            ? new Date(
+                `${lot.expiry}T00:00:00`
+              ).toLocaleDateString(
+                'fr-FR'
+              )
+            : 'Sans DLUO',
+        Disponible: quantity,
+        Unité:
+          product.unit || '',
+        'Prix unitaire XPF':
+          Math.max(
+            0,
+            Number(
+              product.purchasePrice
+            ) || 0
+          ),
+        'Valeur XPF': value,
       })
     )
-  }
 
-  const finishOpening = () => {
-    if (!isComplete) {
-      return
-    }
+  const exportExcel = () => {
+    const rows = getExportRows()
 
-    setFinishedAt(
-      new Date().toISOString()
+    const worksheet =
+      XLSX.utils.json_to_sheet(
+        rows
+      )
+
+    worksheet['!cols'] = [
+      { wch: 20 },
+      { wch: 32 },
+      { wch: 24 },
+      { wch: 20 },
+      { wch: 22 },
+      { wch: 18 },
+      { wch: 24 },
+      { wch: 22 },
+      { wch: 18 },
+      { wch: 16 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 18 },
+      { wch: 18 },
+    ]
+
+    const workbook =
+      XLSX.utils.book_new()
+
+    XLSX.utils.book_append_sheet(
+      workbook,
+      worksheet,
+      'Stock disponible'
+    )
+
+    XLSX.writeFile(
+      workbook,
+      `NukuStock-Stock-${new Date()
+        .toISOString()
+        .slice(0, 10)}.xlsx`
     )
   }
 
-  const reopenToday = () => {
-    const confirmed =
-      window.confirm(
-        "Réouvrir la check list d'aujourd'hui pour la modifier ?"
-      )
+  const exportPdf = () => {
+    const doc = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: 'a4',
+    })
 
-    if (!confirmed) {
-      return
-    }
-
-    setFinishedAt(null)
-  }
-
-  const resetToday = () => {
-    const confirmed =
-      window.confirm(
-        "Réinitialiser toutes les cases de la check list d'aujourd'hui ?"
-      )
-
-    if (!confirmed) {
-      return
-    }
-
-    setChecked(
-      emptyChecked()
+    doc.setFontSize(17)
+    doc.text(
+      'NUKUTEPIPI - NukuStock',
+      12,
+      13
     )
-    setFinishedAt(null)
+
+    doc.setFontSize(12)
+    doc.text(
+      `État du stock disponible - Zone : ${zoneFilter}`,
+      12,
+      19
+    )
+
+    doc.setFontSize(8)
+    doc.text(
+      `Édité le ${new Date().toLocaleDateString(
+        'fr-FR'
+      )} - ${filteredProductIds.size} référence(s) - ${totalQty.toLocaleString(
+        'fr-FR'
+      )} unité(s)`,
+      12,
+      24
+    )
+
+    autoTable(doc, {
+      startY: 29,
+
+      head: [
+        [
+          'Référence',
+          'Produit',
+          'Catégorie',
+          'Sous-cat.',
+          'Lieu',
+          'DLUO/DLC',
+          'Disponible',
+          'Prix XPF',
+          'Valeur XPF',
+        ],
+      ],
+
+      body: getSortedExportRows().map(
+        ({
+          product,
+          lot,
+          quantity,
+          value,
+        }) => [
+          product.internalRef ||
+            '',
+          product.name || '',
+          product.category ||
+            '',
+          product.subcategory ||
+            '',
+          lot.location ||
+            'Non affecté',
+          lot.expiry
+            ? new Date(
+                `${lot.expiry}T00:00:00`
+              ).toLocaleDateString(
+                'fr-FR'
+              )
+            : 'Sans DLUO',
+          `${quantity} ${
+            product.unit || ''
+          }`,
+          Math.max(
+            0,
+            Number(
+              product.purchasePrice
+            ) || 0
+          ).toLocaleString(
+            'fr-FR'
+          ),
+          value.toLocaleString(
+            'fr-FR'
+          ),
+        ]
+      ),
+
+      styles: {
+        fontSize: 6.5,
+        cellPadding: 1.5,
+        overflow: 'linebreak',
+      },
+
+      headStyles: {
+        fontStyle: 'bold',
+      },
+
+      margin: {
+        left: 7,
+        right: 7,
+      },
+    })
+
+    doc.save(
+      `NukuStock-Stock-${new Date()
+        .toISOString()
+        .slice(0, 10)}.pdf`
+    )
   }
 
-  const printChecklist = () => {
-    window.print()
-  }
-
-  const sectionProgress = (
-    section:
-      ChecklistTask['section']
+  const getStockPrintValue = (
+    key: StockPrintColumnKey,
+    row: StockRow
   ) => {
-    const tasks =
-      TASKS.filter(
-        (task) =>
-          task.section === section
+    const { product, lot, quantity, value } = row
+
+    switch (key) {
+      case 'qrProduct':
+        return `NUKUSTOCK|PRODUCT|${product.internalRef || product.id}`
+      case 'qrCategory':
+        return `NUKUSTOCK|CATEGORY|${product.category || 'Sans catégorie'}`
+      case 'qrSubcategory':
+        return `NUKUSTOCK|SUBCATEGORY|${product.subcategory || 'Sans sous-catégorie'}`
+      case 'qrLocation':
+        return `NUKUSTOCK|LOCATION|${lot.location || 'Non affecté'}`
+      case 'reference':
+        return product.internalRef || ''
+      case 'product':
+        return product.name || ''
+      case 'category':
+        return product.category || ''
+      case 'subcategory':
+        return product.subcategory || ''
+      case 'supplier':
+        return product.mainSupplier || ''
+      case 'location':
+        return lot.location || 'Non affecté'
+      case 'lot':
+        return lot.lotNumber || ''
+      case 'expiry':
+        return lot.expiry
+          ? new Date(
+              `${lot.expiry}T00:00:00`
+            ).toLocaleDateString('fr-FR')
+          : 'Sans DLUO'
+      case 'quantity':
+        return quantity.toLocaleString('fr-FR')
+      case 'unit':
+        return product.unit || ''
+      case 'price':
+        return Math.max(
+          0,
+          Number(product.purchasePrice) || 0
+        ).toLocaleString('fr-FR')
+      case 'value':
+        return value.toLocaleString('fr-FR')
+      default:
+        return ''
+    }
+  }
+
+  const printStock = async () => {
+    if (stockPrintColumns.length === 0) {
+      window.alert(
+        'Sélectionne au moins une colonne à imprimer.'
+      )
+      return
+    }
+
+    const selectedDefinitions =
+      STOCK_PRINT_COLUMNS.filter((column) =>
+        stockPrintColumns.includes(column.key)
       )
 
-    const done =
-      tasks.filter(
-        (task) =>
-          checked[task.id]
-      ).length
+    const headers = selectedDefinitions
+      .map((column) => `<th>${column.label}</th>`)
+      .join('')
 
-    return {
-      done,
-      total: tasks.length,
+    const rows = await Promise.all(
+      getSortedExportRows().map((row) => {
+        return Promise.all(
+          selectedDefinitions.map(async (column) => {
+            const value = getStockPrintValue(
+              column.key,
+              row
+            )
+
+            if (column.key.startsWith('qr')) {
+              const qr = await QRCode.toDataURL(value, {
+                width: 90,
+                margin: 1,
+                errorCorrectionLevel: 'M',
+              })
+              return `<td class="qrCell"><img src="${qr}" alt="${column.label}" /><div>${value.split('|').pop() || ''}</div></td>`
+            }
+
+            return `<td>${value}</td>`
+          })
+        ).then(
+          (cells) => `<tr>${cells.join('')}</tr>`
+        )
+      })
+    ).then((items) => items.join(''))
+
+    const printWindow = window.open(
+      '',
+      '_blank',
+      'width=1200,height=900'
+    )
+
+    if (!printWindow) {
+      window.alert(
+        "Impossible d'ouvrir la fenêtre d'impression."
+      )
+      return
     }
+
+    printWindow.document.write(`
+      <!doctype html>
+      <html lang="fr">
+        <head>
+          <meta charset="utf-8" />
+          <title>NukuStock - Stock disponible</title>
+          <style>
+            @page {
+              size: A4 landscape;
+              margin: 10mm;
+            }
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              font-family: Arial, Helvetica, sans-serif;
+              color: #111;
+              background: #fff;
+            }
+            .header { margin-bottom: 8mm; }
+            .brand { font-size: 18px; font-weight: 800; }
+            .title {
+              margin-top: 3px;
+              font-size: 13px;
+              font-weight: 700;
+            }
+            .meta { margin-top: 5px; font-size: 9px; }
+            .zone {
+              margin-top: 6px;
+              padding: 5px 0;
+              border-top: 1px solid #111;
+              border-bottom: 1px solid #111;
+              text-align: center;
+              font-size: 11px;
+              font-weight: 800;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              table-layout: auto;
+              font-size: 7px;
+            }
+            th, td {
+              border: 1px solid #999;
+              padding: 3px 4px;
+              vertical-align: middle;
+              overflow-wrap: anywhere;
+            }
+            th {
+              background: #f2f2f2;
+              font-weight: 700;
+              white-space: nowrap;
+            }
+            tr { break-inside: avoid; }
+            .qrCell { text-align: center; min-width: 24mm; }
+            .qrCell img { width: 20mm; height: 20mm; display: block; margin: 0 auto 1mm; }
+            .qrCell div { font-size: 5.5px; font-weight: 700; overflow-wrap: anywhere; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="brand">NUKUTEPIPI - NukuStock</div>
+            <div class="title">État du stock disponible</div>
+            <div class="meta">
+              Édité le ${new Date().toLocaleDateString('fr-FR')} -
+              ${filteredProductIds.size} référence(s) -
+              ${totalQty.toLocaleString('fr-FR')} unité(s)
+            </div>
+            <div class="zone">ZONE : ${zoneFilter}</div>
+          </div>
+          <table>
+            <thead><tr>${headers}</tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <script>
+            window.onload = () => {
+              window.print()
+              window.onafterprint = () => window.close()
+            }
+          </script>
+        </body>
+      </html>
+    `)
+
+    printWindow.document.close()
+    setPrintColumnsOpen(false)
+  }
+
+  const statBox: CSSProperties = {
+    padding: 14,
+    borderRadius: 13,
+    background: '#ffffff',
+    border:
+      '1px solid #e5e7eb',
+  }
+
+  const thButton: CSSProperties = {
+    border: 0,
+    background: 'transparent',
+    font: 'inherit',
+    fontWeight: 700,
+    cursor: 'pointer',
+    padding: 0,
+    color: 'inherit',
+    textAlign: 'left',
   }
 
   return (
-    <main className="checklistPage">
-      <section className="pageHeader noPrint">
-        <div>
-          <span className="eyebrow">
-            BAR TEAM
-          </span>
-
-          <h1>
-            Check List & Set Up
-          </h1>
-
-          <p>
-            Contrôle quotidien de
-            l'ouverture du bar et
-            suivi des mises en place.
-          </p>
-        </div>
-      </section>
-
-      <nav className="tabs noPrint">
-        <button
-          type="button"
-          className={
-            tab === 'opening'
-              ? 'active'
-              : ''
-          }
-          onClick={() =>
-            setTab('opening')
-          }
-        >
-          ✓ Ouverture Bar
-        </button>
-
-        <button
-          type="button"
-          className={
-            tab === 'setup'
-              ? 'active'
-              : ''
-          }
-          onClick={() =>
-            setTab('setup')
-          }
-        >
-          ▣ SET UP
-        </button>
-
-        <button
-          type="button"
-          className={
-            tab === 'history'
-              ? 'active'
-              : ''
-          }
-          onClick={() =>
-            setTab('history')
-          }
-        >
-          ↺ Historique
-        </button>
-      </nav>
-
-      {tab === 'opening' && (
+    <Page
+      title="Stocks"
+      subtitle="Consultation du stock disponible — les modifications se font uniquement dans Produits"
+      action={
         <div
-          className="printSheet"
-          id="opening-checklist-print"
+          className="screenOnly"
+          style={{
+            display: 'flex',
+            gap: 8,
+            flexWrap: 'wrap',
+          }}
         >
-          <section className="openingHero">
-            <div>
-              <div className="heroTop">
-                <span className="heroEyebrow">
-                  NUKUTEPIPI
-                </span>
+          <ColumnVisibility
+            columns={STOCK_SCREEN_COLUMNS}
+            visible={stockDisplay.visible}
+            onChange={stockDisplay.setVisible}
+            essential={STOCK_SCREEN_ESSENTIAL}
+          />
 
-                <span
-                  className={`statusBadge ${
-                    finishedAt
-                      ? 'done'
-                      : isComplete
-                        ? 'ready'
-                        : 'progress'
-                  }`}
+          <button
+            className="button"
+            type="button"
+            onClick={() => {
+              resetQuickEntry()
+              setQuickEntryOpen(true)
+            }}
+          >
+            + Entrée rapide
+          </button>
+
+          <label
+            style={{
+              display: 'grid',
+              gap: 3,
+              minWidth: 260,
+              fontSize: 9,
+              fontWeight: 800,
+              color: '#667085',
+            }}
+          >
+            TRI EXPORT / IMPRESSION
+            <select
+              className="input"
+              value={exportSortMode}
+              onChange={(event) =>
+                setExportSortMode(
+                  event.target.value as ExportSortMode
+                )
+              }
+              style={{
+                minHeight: 40,
+                padding: '0 10px',
+                fontSize: 11,
+              }}
+            >
+              {EXPORT_SORT_OPTIONS.map((option) => (
+                <option
+                  key={option.value}
+                  value={option.value}
                 >
-                  {finishedAt
-                    ? 'TERMINÉE'
-                    : isComplete
-                      ? 'PRÊTE À VALIDER'
-                      : 'EN COURS'}
-                </span>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <button
+            className="button secondary"
+            type="button"
+            onClick={exportExcel}
+          >
+            Exporter Excel
+          </button>
+
+          <button
+            className="button secondary"
+            type="button"
+            onClick={exportPdf}
+          >
+            Exporter PDF
+          </button>
+
+          <button
+            className="button"
+            type="button"
+            onClick={() =>
+              setPrintColumnsOpen(true)
+            }
+          >
+            Imprimer le stock
+          </button>
+        </div>
+      }
+    >
+      <div
+        className="printOnly"
+        style={{
+          display: 'none',
+        }}
+      >
+        <div
+          style={{
+            textAlign: 'center',
+            marginBottom: 10,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 16,
+              fontWeight: 900,
+            }}
+          >
+            NUKUTEPIPI · NUKUSTOCK
+          </div>
+
+          <div
+            style={{
+              marginTop: 3,
+              fontSize: 12,
+              fontWeight: 700,
+            }}
+          >
+            État du stock disponible
+          </div>
+
+          <div
+            style={{
+              marginTop: 4,
+              fontSize: 9,
+            }}
+          >
+            Date d'impression :{' '}
+            {new Date().toLocaleDateString('fr-FR')}{' '}
+            {new Date().toLocaleTimeString('fr-FR', {
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: 8,
+            marginBottom: 10,
+            fontSize: 9,
+          }}
+        >
+          <div
+            style={{
+              gridColumn: '1 / -1',
+              textAlign: 'center',
+              fontSize: 11,
+              fontWeight: 900,
+              padding: '5px 0',
+              borderTop: '1px solid #000',
+              borderBottom: '1px solid #000',
+            }}
+          >
+            ZONE : {zoneFilter}
+          </div>
+
+          <div>
+            <strong>Références :</strong>{' '}
+            {filteredProductIds.size}
+          </div>
+
+          <div>
+            <strong>Stock total :</strong>{' '}
+            {totalQty.toLocaleString('fr-FR')}
+          </div>
+        </div>
+
+        <div
+          style={{
+            marginBottom: 8,
+            fontSize: 8,
+            textAlign: 'center',
+          }}
+        >
+          Impression simplifiée : la zone est indiquée en en-tête et les numéros de lot ne sont pas imprimés.
+        </div>
+      </div>
+
+      <div
+        style={{
+          padding: 12,
+          borderRadius: 12,
+          marginBottom: 16,
+          background:
+            'rgba(59,130,246,.08)',
+          border:
+            '1px solid rgba(59,130,246,.18)',
+          fontSize: 12,
+          lineHeight: 1.5,
+        }}
+      >
+        <strong>
+          Consultation uniquement.
+        </strong>{' '}
+        Les quantités, DLUO/DLC,
+        lots et lieux de stockage ne
+        peuvent pas être modifiés ici.
+        Pour effectuer une entrée ou
+        modifier le stock, utilise
+        l&apos;onglet{' '}
+        <strong>Produits</strong>.
+      </div>
+
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns:
+            'repeat(auto-fit,minmax(170px,1fr))',
+          gap: 12,
+          marginBottom: 16,
+        }}
+      >
+        <div style={statBox}>
+          <div
+            style={{
+              fontSize: 11,
+              color: '#667085',
+            }}
+          >
+            Références affichées
+          </div>
+
+          <div
+            style={{
+              fontSize: 24,
+              fontWeight: 800,
+              marginTop: 4,
+            }}
+          >
+            {filteredProductIds.size}
+          </div>
+        </div>
+
+        <div style={statBox}>
+          <div
+            style={{
+              fontSize: 11,
+              color: '#667085',
+            }}
+          >
+            Stock disponible
+          </div>
+
+          <div
+            style={{
+              fontSize: 24,
+              fontWeight: 800,
+              marginTop: 4,
+            }}
+          >
+            {totalQty.toLocaleString(
+              'fr-FR'
+            )}
+          </div>
+        </div>
+
+        <div style={statBox}>
+          <div
+            style={{
+              fontSize: 11,
+              color: '#667085',
+            }}
+          >
+            Valeur du stock
+          </div>
+
+          <div
+            style={{
+              fontSize: 20,
+              fontWeight: 800,
+              marginTop: 4,
+            }}
+          >
+            {totalValue.toLocaleString(
+              'fr-FR'
+            )}{' '}
+            XPF
+          </div>
+        </div>
+
+        <div style={statBox}>
+          <div
+            style={{
+              fontSize: 11,
+              color: '#667085',
+            }}
+          >
+            Lots périmés
+          </div>
+
+          <div
+            style={{
+              fontSize: 24,
+              fontWeight: 800,
+              marginTop: 4,
+            }}
+          >
+            {expiredCount}
+          </div>
+        </div>
+
+        <div style={statBox}>
+          <div
+            style={{
+              fontSize: 11,
+              color: '#667085',
+            }}
+          >
+            DLUO &lt; 1 mois
+          </div>
+
+          <div
+            style={{
+              fontSize: 24,
+              fontWeight: 800,
+              marginTop: 4,
+            }}
+          >
+            {underOneMonthCount}
+          </div>
+        </div>
+      </div>
+
+      <Card>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns:
+              'repeat(auto-fit,minmax(180px,1fr))',
+            gap: 10,
+          }}
+        >
+          <input
+            className="input"
+            placeholder="Rechercher..."
+            value={search}
+            onChange={(event) =>
+              setSearch(
+                event.target.value
+              )
+            }
+          />
+
+          <select
+            className="select"
+            value={zoneFilter}
+            onChange={(event) =>
+              setZoneFilter(
+                event.target.value as ZoneFilter
+              )
+            }
+          >
+            <option value="All">
+              Toutes les zones
+            </option>
+            <option value="Beverage">
+              Beverage
+            </option>
+            <option value="Food">
+              Food
+            </option>
+            <option value="Matériel & Accessoires">
+              Matériel & Accessoires
+            </option>
+          </select>
+
+          <select
+            className="select"
+            value={categoryFilter}
+            onChange={(event) => {
+              setCategoryFilter(
+                event.target.value
+              )
+              setSubcategoryFilter(
+                'Toutes'
+              )
+            }}
+          >
+            <option value="Toutes">
+              Toutes les catégories
+            </option>
+
+            {categories.map(
+              (category) => (
+                <option
+                  key={category}
+                  value={category}
+                >
+                  {category}
+                </option>
+              )
+            )}
+          </select>
+
+          <select
+            className="select"
+            value={
+              subcategoryFilter
+            }
+            onChange={(event) =>
+              setSubcategoryFilter(
+                event.target.value
+              )
+            }
+          >
+            <option value="Toutes">
+              Toutes les
+              sous-catégories
+            </option>
+
+            {subcategories.map(
+              (subcategory) => (
+                <option
+                  key={subcategory}
+                  value={subcategory}
+                >
+                  {subcategory}
+                </option>
+              )
+            )}
+          </select>
+
+          <select
+            className="select"
+            value={supplierFilter}
+            onChange={(event) =>
+              setSupplierFilter(
+                event.target.value
+              )
+            }
+          >
+            <option value="Tous">
+              Tous les fournisseurs
+            </option>
+
+            {suppliers.map(
+              (supplier) => (
+                <option
+                  key={supplier}
+                  value={supplier}
+                >
+                  {supplier}
+                </option>
+              )
+            )}
+          </select>
+
+
+          <select
+            className="select"
+            value={locationFilter}
+            onChange={(event) =>
+              setLocationFilter(
+                event.target.value
+              )
+            }
+          >
+            <option value="Tous">
+              Tous les lieux
+            </option>
+
+            {locations.map(
+              (location) => (
+                <option
+                  key={location}
+                  value={location}
+                >
+                  {location}
+                </option>
+              )
+            )}
+          </select>
+
+          <select
+            className="select"
+            value={quantityFilter}
+            onChange={(event) =>
+              setQuantityFilter(
+                event.target
+                  .value as QuantityFilter
+              )
+            }
+          >
+            <option value="Tous">
+              Toutes les quantités
+            </option>
+            <option value="Rupture">
+              Stock = 0
+            </option>
+            <option value="1-10">
+              1 à 10
+            </option>
+            <option value="11-50">
+              11 à 50
+            </option>
+            <option value="51-100">
+              51 à 100
+            </option>
+            <option value="100+">
+              Plus de 100
+            </option>
+            <option value="Sous minimum">
+              Sous stock minimum
+            </option>
+          </select>
+
+          <select
+            className="select"
+            value={expiryFilter}
+            onChange={(event) =>
+              setExpiryFilter(
+                event.target
+                  .value as ExpiryFilter
+              )
+            }
+          >
+            <option value="Toutes">
+              Toutes les DLUO/DLC
+            </option>
+            <option value="Périmé">
+              Périmé
+            </option>
+            <option value="Moins d'un mois">
+              Moins d&apos;un mois
+            </option>
+            <option value="De 1 à 3 mois">
+              1 à 3 mois
+            </option>
+            <option value="De 3 à 6 mois">
+              3 à 6 mois
+            </option>
+            <option value="De 6 mois à 1 an">
+              6 mois à 1 an
+            </option>
+            <option value="+ d'un an">
+              Plus d&apos;un an
+            </option>
+            <option value="Sans DLUO">
+              Sans DLUO
+            </option>
+          </select>
+
+          <button
+            className="button secondary"
+            type="button"
+            onClick={resetFilters}
+          >
+            Réinitialiser filtres
+          </button>
+        </div>
+      </Card>
+
+      <Card>
+        <div style={{ overflowX: 'auto' }}>
+          {(() => {
+            const cols = [
+              stockDisplay.isVisible('reference') && '150px',
+              stockDisplay.isVisible('photo') && '76px',
+              stockDisplay.isVisible('qrProduct') && '76px',
+              stockDisplay.isVisible('product') && 'minmax(230px,2fr)',
+              stockDisplay.isVisible('zone') && '135px',
+              stockDisplay.isVisible('category') && '150px',
+              stockDisplay.isVisible('qrCategory') && '76px',
+              stockDisplay.isVisible('subcategory') && '165px',
+              stockDisplay.isVisible('qrSubcategory') && '76px',
+              stockDisplay.isVisible('location') && '160px',
+              stockDisplay.isVisible('qrLocation') && '76px',
+              stockDisplay.isVisible('lot') && '145px',
+              stockDisplay.isVisible('expiry') && '135px',
+              stockDisplay.isVisible('quantity') && '120px',
+              stockDisplay.isVisible('price') && '120px',
+              stockDisplay.isVisible('value') && '120px',
+              stockDisplay.isVisible('unitWeight') && '125px',
+              stockDisplay.isVisible('caseWeight') && '165px',
+              stockDisplay.isVisible('totalWeight') && '145px',
+              '120px',
+            ].filter(Boolean).join(' ')
+
+            const minWidth = Math.max(
+              850,
+              stockDisplay.visible.length * 105
+            )
+
+            const qrBox = (
+              value: string,
+              title: string
+            ) => (
+              <div
+                className="screenOnly"
+                title={title}
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 10,
+                  background: '#fff',
+                  border: '1px solid #e5e7eb',
+                  display: 'grid',
+                  placeItems: 'center',
+                  padding: 4,
+                }}
+              >
+                <QRCodeSVG
+                  value={value}
+                  size={54}
+                  level="M"
+                  marginSize={0}
+                  title={title}
+                />
               </div>
+            )
 
-              <h2>
-                {CHECKLIST_NAME}
-              </h2>
+            return (
+              <div style={{ minWidth }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: cols,
+                    gap: 12,
+                    padding: '0 0 12px',
+                    fontWeight: 700,
+                    alignItems: 'center',
+                  }}
+                >
+                  {stockDisplay.isVisible('reference') && <div>Référence</div>}
+                  {stockDisplay.isVisible('photo') && <div>Photo</div>}
+                  {stockDisplay.isVisible('qrProduct') && <div>QR Produit</div>}
+                  {stockDisplay.isVisible('product') && (
+                    <button style={thButton} onClick={() => toggleSort('product')}>
+                      Produit{sortIndicator('product')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('zone') && <div>Zone</div>}
+                  {stockDisplay.isVisible('category') && (
+                    <button style={thButton} onClick={() => toggleSort('category')}>
+                      Catégorie{sortIndicator('category')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('qrCategory') && <div>QR Cat.</div>}
+                  {stockDisplay.isVisible('subcategory') && (
+                    <button style={thButton} onClick={() => toggleSort('subcategory')}>
+                      Sous-catégorie{sortIndicator('subcategory')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('qrSubcategory') && <div>QR Sous-cat.</div>}
+                  {stockDisplay.isVisible('location') && (
+                    <button style={thButton} onClick={() => toggleSort('location')}>
+                      Lieu{sortIndicator('location')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('qrLocation') && <div>QR Lieu</div>}
+                  {stockDisplay.isVisible('lot') && <div>Lot</div>}
+                  {stockDisplay.isVisible('expiry') && (
+                    <button style={thButton} onClick={() => toggleSort('expiry')}>
+                      DLUO / DLC{sortIndicator('expiry')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('quantity') && (
+                    <button style={thButton} onClick={() => toggleSort('quantity')}>
+                      Disponible{sortIndicator('quantity')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('price') && (
+                    <button style={thButton} onClick={() => toggleSort('price')}>
+                      Prix{sortIndicator('price')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('value') && (
+                    <button style={thButton} onClick={() => toggleSort('value')}>
+                      Valeur{sortIndicator('value')}
+                    </button>
+                  )}
+                  {stockDisplay.isVisible('unitWeight') && <div>Poids unitaire</div>}
+                  {stockDisplay.isVisible('caseWeight') && <div>Poids conditionnement</div>}
+                  {stockDisplay.isVisible('totalWeight') && <div>Poids total stock</div>}
+                  <div className="screenOnly">Action</div>
+                </div>
 
-              <div className="metaGrid">
-                <div>
-                  <span>
-                    Date
-                  </span>
-                  <strong>
-                    {formatDateFr(
-                      today
+                {filteredRows.map(({ product, lot, quantity, value }, index) => (
+                  <div
+                    key={`${product.id}-${lot.id}-${index}`}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: cols,
+                      gap: 12,
+                      padding: '13px 0',
+                      borderTop: '1px solid rgba(255,255,255,.08)',
+                      alignItems: 'center',
+                    }}
+                  >
+                    {stockDisplay.isVisible('reference') && (
+                      <strong style={{ fontSize: 11, letterSpacing: '.03em' }}>
+                        {product.internalRef || '—'}
+                      </strong>
                     )}
-                  </strong>
-                </div>
 
-                <div>
-                  <span>
-                    Réalisé par
-                  </span>
-                  <strong>
-                    {userName}
-                  </strong>
-                </div>
+                    {stockDisplay.isVisible('photo') && (
+                      <div className="screenOnly">
+                        {getProductPhoto(product) ? (
+                          <div
+                            style={{
+                              width: 64,
+                              height: 64,
+                              borderRadius: 10,
+                              background: '#fff',
+                              border: '1px solid #e5e7eb',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              overflow: 'hidden',
+                              padding: 4,
+                            }}
+                          >
+                            <img
+                              src={getProductPhoto(product)}
+                              alt={product.name || 'Produit'}
+                              loading="lazy"
+                              style={{
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'contain',
+                                display: 'block',
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <div
+                            style={{
+                              width: 64,
+                              height: 64,
+                              borderRadius: 10,
+                              border: '1px dashed #cbd5e1',
+                              display: 'grid',
+                              placeItems: 'center',
+                              fontSize: 10,
+                              opacity: 0.5,
+                            }}
+                          >
+                            PHOTO
+                          </div>
+                        )}
+                      </div>
+                    )}
 
-                <div>
-                  <span>
-                    Validation
-                  </span>
-                  <strong>
-                    {finishedAt
-                      ? formatTime(
-                          finishedAt
-                        )
-                      : 'En attente'}
-                  </strong>
-                </div>
+                    {stockDisplay.isVisible('qrProduct') &&
+                      qrBox(
+                        `NUKUSTOCK|PRODUCT|${product.internalRef || product.id}`,
+                        `QR Produit ${product.internalRef || product.name}`
+                      )}
+
+                    {stockDisplay.isVisible('product') && (
+                      <div>
+                        <div style={{ fontWeight: 800 }}>{product.name}</div>
+                        <div style={{ marginTop: 3, fontSize: 11, opacity: 0.65 }}>
+                          {[product.packaging].filter(Boolean).join(' · ')}
+                        </div>
+                      </div>
+                    )}
+
+                    {stockDisplay.isVisible('zone') && (
+                      <div><Badge tone="info">{detectProductZone(product)}</Badge></div>
+                    )}
+
+                    {stockDisplay.isVisible('category') && (
+                      <div>{product.category || '—'}</div>
+                    )}
+
+                    {stockDisplay.isVisible('qrCategory') &&
+                      qrBox(
+                        `NUKUSTOCK|CATEGORY|${product.category || 'Sans catégorie'}`,
+                        `QR Catégorie ${product.category || ''}`
+                      )}
+
+                    {stockDisplay.isVisible('subcategory') && (
+                      <div>{product.subcategory || '—'}</div>
+                    )}
+
+                    {stockDisplay.isVisible('qrSubcategory') &&
+                      qrBox(
+                        `NUKUSTOCK|SUBCATEGORY|${product.subcategory || 'Sans sous-catégorie'}`,
+                        `QR Sous-catégorie ${product.subcategory || ''}`
+                      )}
+
+                    {stockDisplay.isVisible('location') && (
+                      <div>{lot.location || 'Non affecté'}</div>
+                    )}
+
+                    {stockDisplay.isVisible('qrLocation') &&
+                      qrBox(
+                        `NUKUSTOCK|LOCATION|${lot.location || 'Non affecté'}`,
+                        `QR Lieu ${lot.location || 'Non affecté'}`
+                      )}
+
+                    {stockDisplay.isVisible('lot') && (
+                      <div>{lot.lotNumber || '—'}</div>
+                    )}
+
+                    {stockDisplay.isVisible('expiry') && (
+                      <div>
+                        {lot.expiry ? (
+                          <Badge tone={getExpiryTone(lot.expiry)}>
+                            {new Date(`${lot.expiry}T00:00:00`).toLocaleDateString('fr-FR')}
+                          </Badge>
+                        ) : (
+                          <span style={{ opacity: 0.5, fontSize: 12 }}>Sans DLUO</span>
+                        )}
+                      </div>
+                    )}
+
+                    {stockDisplay.isVisible('quantity') && (
+                      <div>
+                        <Badge
+                          tone={
+                            quantity <= 0
+                              ? 'danger'
+                              : quantity < Math.max(0, Number(product.minStock) || 0)
+                              ? 'warn'
+                              : 'good'
+                          }
+                        >
+                          {quantity} {product.unit}
+                        </Badge>
+                      </div>
+                    )}
+
+                    {stockDisplay.isVisible('price') && (
+                      <div>
+                        {Math.max(0, Number(product.purchasePrice) || 0).toLocaleString('fr-FR')} XPF
+                      </div>
+                    )}
+
+                    {stockDisplay.isVisible('value') && (
+                      <div>{value.toLocaleString('fr-FR')} XPF</div>
+                    )}
+
+                    {stockDisplay.isVisible('unitWeight') && (
+                      <div style={{ fontWeight: 700 }}>
+                        {formatWeightKg(product.netUnitWeightKg)}
+                      </div>
+                    )}
+
+                    {stockDisplay.isVisible('caseWeight') && (
+                      <div style={{ fontWeight: 700 }}>
+                        {formatWeightKg(product.caseWeightKg)}
+                      </div>
+                    )}
+
+                    {stockDisplay.isVisible('totalWeight') && (
+                      <div>
+                        <strong>
+                          {formatWeightKg(
+                            quantity * Number(product.netUnitWeightKg || 0)
+                          )}
+                        </strong>
+                        {quantity > 0 && Number(product.netUnitWeightKg || 0) > 0 && (
+                          <div
+                            style={{
+                              marginTop: 3,
+                              fontSize: 10,
+                              opacity: 0.6,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {quantity} × {formatWeightKg(product.netUnitWeightKg)}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="screenOnly">
+                      <button
+                        className="button small"
+                        type="button"
+                        disabled={quantity <= 0 || !lot.location}
+                        onClick={() => openTransfer(product, lot, quantity)}
+                      >
+                        Transférer
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
+            )
+          })()}
+        </div>
+      </Card>
+
+      <style jsx global>{`
+        @media print {
+          @page {
+            size: A4 landscape;
+            margin: 10mm;
+          }
+        }
+      `}</style>
+
+      {printColumnsOpen && (
+        <div
+          className="screenOnly"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            background: 'rgba(15,23,42,.58)',
+            display: 'grid',
+            placeItems: 'center',
+            padding: 18,
+          }}
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) {
+              setPrintColumnsOpen(false)
+            }
+          }}
+        >
+          <div
+            style={{
+              width: 'min(620px, 100%)',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              background: '#fff',
+              borderRadius: 18,
+              padding: 22,
+              boxShadow: '0 24px 70px rgba(15,23,42,.25)',
+            }}
+          >
+            <h2 style={{ margin: 0 }}>
+              Colonnes à imprimer
+            </h2>
+            <p
+              style={{
+                margin: '6px 0 18px',
+                color: '#667085',
+                fontSize: 13,
+              }}
+            >
+              Coche uniquement les informations que tu veux voir sur l&apos;impression du stock.
+            </p>
+
+            <div
+              style={{
+                marginBottom: 18,
+              }}
+            >
+              <label
+                style={{
+                  display: 'block',
+                  marginBottom: 7,
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}
+              >
+                Ordre de tri
+              </label>
+
+              <select
+                className="input"
+                value={exportSortMode}
+                onChange={(event) =>
+                  setExportSortMode(
+                    event.target.value as ExportSortMode
+                  )
+                }
+                style={{
+                  width: '100%',
+                }}
+              >
+                {EXPORT_SORT_OPTIONS.map((option) => (
+                  <option
+                    key={option.value}
+                    value={option.value}
+                  >
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </div>
 
-            <div className="progressCard">
-              <div className="progressTop">
-                <span>
-                  % de l'ouverture
-                </span>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns:
+                  'repeat(auto-fit,minmax(180px,1fr))',
+                gap: 9,
+              }}
+            >
+              {STOCK_PRINT_COLUMNS.map((column) => (
+                <label
+                  key={column.key}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 9,
+                    padding: '10px 12px',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: 11,
+                    cursor: 'pointer',
+                    fontSize: 13,
+                    fontWeight: 700,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={stockPrintColumns.includes(
+                      column.key
+                    )}
+                    onChange={() =>
+                      toggleStockPrintColumn(
+                        column.key
+                      )
+                    }
+                  />
+                  {column.label}
+                </label>
+              ))}
+            </div>
 
-                <strong>
-                  {percent}%
-                </strong>
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+                flexWrap: 'wrap',
+                marginTop: 16,
+              }}
+            >
+              <button
+                className="button secondary small"
+                type="button"
+                onClick={() =>
+                  setStockPrintColumns(
+                    STOCK_PRINT_COLUMNS.map(
+                      (column) => column.key
+                    )
+                  )
+                }
+              >
+                Tout sélectionner
+              </button>
+              <button
+                className="button secondary small"
+                type="button"
+                onClick={() =>
+                  setStockPrintColumns(
+                    DEFAULT_STOCK_PRINT_COLUMNS
+                  )
+                }
+              >
+                Réinitialiser
+              </button>
+              <button
+                className="button secondary small"
+                type="button"
+                onClick={() =>
+                  setStockPrintColumns([])
+                }
+              >
+                Tout décocher
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: 9,
+                marginTop: 22,
+              }}
+            >
+              <button
+                className="button secondary"
+                type="button"
+                onClick={() =>
+                  setPrintColumnsOpen(false)
+                }
+              >
+                Annuler
+              </button>
+              <button
+                className="button"
+                type="button"
+                onClick={printStock}
+              >
+                Imprimer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {transferOpen && (() => {
+        const product = items.find((item) => item.id === transferProductId)
+        const sourceLot = product?.lots.find((lot) => lot.id === transferLotId)
+        const available = Math.max(0, Number(sourceLot?.quantity) || 0)
+
+        return (
+          <div
+            className="screenOnly"
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 1400,
+              background: 'rgba(15,23,42,.65)',
+              display: 'grid',
+              placeItems: 'center',
+              padding: 18,
+            }}
+            onMouseDown={(event) => {
+              if (event.currentTarget === event.target) setTransferOpen(false)
+            }}
+          >
+            <div
+              style={{
+                width: 'min(560px,100%)',
+                maxHeight: '92vh',
+                overflowY: 'auto',
+                background: '#fff',
+                color: '#101828',
+                borderRadius: 18,
+                padding: 24,
+                boxShadow: '0 25px 80px rgba(0,0,0,.30)',
+              }}
+            >
+              <h2 style={{ margin: 0 }}>Transférer le stock</h2>
+              <div style={{ marginTop: 6, color: '#667085', fontSize: 13 }}>
+                {product?.name || 'Produit'}
               </div>
 
-              <div className="progressTrack">
+              <div style={{ display: 'grid', gap: 14, marginTop: 20 }}>
+                <div style={{ padding: 12, borderRadius: 12, background: '#f8fafc', border: '1px solid #e5e7eb' }}>
+                  <strong>Lieu source :</strong> {transferFromLocation}<br />
+                  <strong>Disponible :</strong> {available} {product?.unit || ''}<br />
+                  <strong>DLUO / DLC :</strong>{' '}
+                  {sourceLot?.expiry
+                    ? new Date(`${sourceLot.expiry}T00:00:00`).toLocaleDateString('fr-FR')
+                    : 'Sans DLUO'}
+                  {sourceLot?.lotNumber ? <><br /><strong>Lot :</strong> {sourceLot.lotNumber}</> : null}
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: 6, fontSize: 12, fontWeight: 800 }}>
+                    Lieu destination
+                  </label>
+                  <select
+                    className="input"
+                    style={{ width: '100%' }}
+                    value={transferToLocation}
+                    onChange={(event) => setTransferToLocation(event.target.value)}
+                  >
+                    <option value="">Choisir un lieu</option>
+                    {quickEntryLocations
+                      .filter((location) => location !== transferFromLocation)
+                      .map((location) => (
+                        <option key={location} value={location}>{location}</option>
+                      ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: 6, fontSize: 12, fontWeight: 800 }}>
+                    Quantité à transférer
+                  </label>
+                  <input
+                    className="input"
+                    style={{ width: '100%' }}
+                    type="number"
+                    min="0.01"
+                    max={available}
+                    step="0.01"
+                    value={transferQuantity}
+                    onChange={(event) =>
+                      setTransferQuantity(Math.max(0, Number(event.target.value) || 0))
+                    }
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 22 }}>
+                <button className="button secondary" type="button" onClick={() => setTransferOpen(false)}>
+                  Annuler
+                </button>
+                <button className="button" type="button" onClick={saveTransfer}>
+                  Confirmer le transfert
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {quickEntryOpen && (
+        <div
+          className="screenOnly"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1300,
+            background: 'rgba(15,23,42,.65)',
+            display: 'grid',
+            placeItems: 'center',
+            padding: 18,
+          }}
+          onMouseDown={(event) => {
+            if (
+              event.currentTarget ===
+              event.target
+            ) {
+              setQuickEntryOpen(false)
+            }
+          }}
+        >
+          <div
+            style={{
+              width: 'min(720px,100%)',
+              maxHeight: '92vh',
+              overflowY: 'auto',
+              background: '#fff',
+              color: '#101828',
+              borderRadius: 18,
+              padding: 24,
+              boxShadow:
+                '0 25px 80px rgba(0,0,0,.30)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent:
+                  'space-between',
+                gap: 14,
+                alignItems: 'flex-start',
+              }}
+            >
+              <div>
+                <h2 style={{ margin: 0 }}>
+                  Entrée rapide de stock
+                </h2>
                 <div
-                  className="progressFill"
                   style={{
-                    width:
-                      `${percent}%`,
+                    marginTop: 5,
+                    color: '#667085',
+                    fontSize: 12,
                   }}
+                >
+                  Ajoute immédiatement le stock sans créer de commande fournisseur.
+                </div>
+              </div>
+
+              <button
+                className="button secondary small"
+                type="button"
+                onClick={() =>
+                  setQuickEntryOpen(false)
+                }
+              >
+                Fermer
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns:
+                  'repeat(2,minmax(0,1fr))',
+                gap: 14,
+                marginTop: 20,
+              }}
+            >
+              <div
+                style={{
+                  gridColumn: '1 / -1',
+                }}
+              >
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  Produit
+                </label>
+                <select
+                  className="input"
+                  style={{ width: '100%' }}
+                  value={quickProductId}
+                  onChange={(event) =>
+                    setQuickProductId(
+                      event.target.value
+                    )
+                  }
+                >
+                  <option value="">
+                    Choisir un produit
+                  </option>
+                  {[...items]
+                    .sort((a, b) =>
+                      a.name.localeCompare(
+                        b.name,
+                        'fr'
+                      )
+                    )
+                    .map((product) => (
+                      <option
+                        key={product.id}
+                        value={product.id}
+                      >
+                        {product.internalRef
+                          ? `${product.internalRef} · `
+                          : ''}
+                        {product.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  Quantité
+                </label>
+                <input
+                  className="input"
+                  style={{ width: '100%' }}
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={quickQuantity}
+                  onChange={(event) =>
+                    setQuickQuantity(
+                      Math.max(
+                        0,
+                        Number(
+                          event.target.value
+                        ) || 0
+                      )
+                    )
+                  }
                 />
               </div>
 
-              <div className="progressBottom">
-                <span>
-                  {completedCount} /{' '}
-                  {TASKS.length}{' '}
-                  tâches réalisées
-                </span>
-
-                {percent === 100 && (
-                  <b>
-                    ✓ Complet
-                  </b>
-                )}
+              <div>
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  Lieu de stockage
+                </label>
+                <select
+                  className="input"
+                  style={{ width: '100%' }}
+                  value={quickLocation}
+                  onChange={(event) =>
+                    setQuickLocation(
+                      event.target.value
+                    )
+                  }
+                >
+                  <option value="">
+                    Choisir un lieu
+                  </option>
+                  {quickEntryLocations.map(
+                    (location) => (
+                      <option
+                        key={location}
+                        value={location}
+                      >
+                        {location}
+                      </option>
+                    )
+                  )}
+                </select>
               </div>
-            </div>
-          </section>
 
-          <section className="actionsBar noPrint">
-            <button
-              type="button"
-              className="secondaryButton"
-              onClick={
-                printChecklist
-              }
-            >
-              🖨 Imprimer la Check List
-            </button>
+              <div>
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  Lot (facultatif)
+                </label>
+                <input
+                  className="input"
+                  style={{ width: '100%' }}
+                  value={quickLotNumber}
+                  onChange={(event) =>
+                    setQuickLotNumber(
+                      event.target.value
+                    )
+                  }
+                  placeholder="Ex. LOT-2408"
+                />
+              </div>
 
-            <button
-              type="button"
-              className="ghostButton"
-              onClick={resetToday}
-            >
-              Réinitialiser
-            </button>
+              <div>
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  DLUO / DLC (facultatif)
+                </label>
+                <input
+                  className="input"
+                  style={{ width: '100%' }}
+                  type="date"
+                  value={quickExpiry}
+                  onChange={(event) =>
+                    setQuickExpiry(
+                      event.target.value
+                    )
+                  }
+                />
+              </div>
 
-            {finishedAt ? (
-              <button
-                type="button"
-                className="secondaryButton"
-                onClick={
-                  reopenToday
-                }
+              <div
+                style={{
+                  gridColumn: '1 / -1',
+                }}
               >
-                Réouvrir
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="primaryButton"
-                disabled={!isComplete}
-                onClick={
-                  finishOpening
-                }
+                <label style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  color: '#344054',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  Note spéciale
+                </label>
+                <textarea
+                  className="input"
+                  style={{
+                    width: '100%',
+                    minHeight: 90,
+                    paddingTop: 10,
+                    resize: 'vertical',
+                  }}
+                  value={quickNote}
+                  onChange={(event) =>
+                    setQuickNote(
+                      event.target.value
+                    )
+                  }
+                  placeholder="Ex. Livraison urgente, facture à récupérer demain."
+                />
+              </div>
+
+              <label
+                style={{
+                  gridColumn: '1 / -1',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 10,
+                  padding: 13,
+                  borderRadius: 12,
+                  background: '#fff7e6',
+                  border:
+                    '1px solid #f4c56a',
+                  cursor: 'pointer',
+                }}
               >
-                ✓ Terminer l'ouverture
-              </button>
-            )}
-          </section>
-
-          <div className="sectionGrid">
-            {SECTIONS.map(
-              (section) => {
-                const sectionTasks =
-                  TASKS.filter(
-                    (task) =>
-                      task.section ===
-                      section
-                  )
-
-                const progress =
-                  sectionProgress(
-                    section
-                  )
-
-                return (
-                  <section
-                    className="taskSection"
-                    key={section}
+                <input
+                  type="checkbox"
+                  checked={
+                    quickNeedsRegularization
+                  }
+                  onChange={(event) =>
+                    setQuickNeedsRegularization(
+                      event.target.checked
+                    )
+                  }
+                  style={{ marginTop: 3 }}
+                />
+                <span>
+                  <strong>
+                    À régulariser
+                  </strong>
+                  <span
+                    style={{
+                      display: 'block',
+                      marginTop: 3,
+                      color: '#667085',
+                      fontSize: 11,
+                      lineHeight: 1.45,
+                    }}
                   >
-                    <header>
-                      <div>
-                        <span className="sectionLabel">
-                          {section}
-                        </span>
+                    Le stock est ajouté tout de suite. Les documents, fournisseur, facture, BC et prix pourront être complétés plus tard dans Mouvements.
+                  </span>
+                </span>
+              </label>
+            </div>
 
-                        <strong>
-                          {
-                            progress.done
-                          }{' '}
-                          /{' '}
-                          {
-                            progress.total
-                          }
-                        </strong>
-                      </div>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent:
+                  'flex-end',
+                gap: 10,
+                marginTop: 22,
+              }}
+            >
+              <button
+                className="button secondary"
+                type="button"
+                onClick={() =>
+                  setQuickEntryOpen(false)
+                }
+              >
+                Annuler
+              </button>
 
-                      <div className="sectionTrack">
-                        <div
-                          style={{
-                            width: `${
-                              progress.total
-                                ? Math.round(
-                                    (progress.done /
-                                      progress.total) *
-                                      100
-                                  )
-                                : 0
-                            }%`,
-                          }}
-                        />
-                      </div>
-                    </header>
-
-                    <div className="taskList">
-                      {sectionTasks.map(
-                        (task) => {
-                          const done =
-                            Boolean(
-                              checked[
-                                task.id
-                              ]
-                            )
-
-                          return (
-                            <label
-                              className={`taskRow ${
-                                done
-                                  ? 'checked'
-                                  : ''
-                              } ${
-                                finishedAt
-                                  ? 'locked'
-                                  : ''
-                              }`}
-                              key={
-                                task.id
-                              }
-                            >
-                              <input
-                                type="checkbox"
-                                checked={
-                                  done
-                                }
-                                disabled={
-                                  Boolean(
-                                    finishedAt
-                                  )
-                                }
-                                onChange={() =>
-                                  toggleTask(
-                                    task.id
-                                  )
-                                }
-                              />
-
-                              <span className="visualCheckbox">
-                                {done
-                                  ? '✓'
-                                  : ''}
-                              </span>
-
-                              <span className="taskText">
-                                {
-                                  task.label
-                                }
-                              </span>
-                            </label>
-                          )
-                        }
-                      )}
-                    </div>
-                  </section>
-                )
-              }
-            )}
+              <button
+                className="button"
+                type="button"
+                onClick={saveQuickEntry}
+              >
+                Valider l&apos;entrée
+              </button>
+            </div>
           </div>
 
-          <footer className="printFooter">
-            <div>
-              <span>
-                Progression finale
-              </span>
-              <strong>
-                {percent}%
-              </strong>
-            </div>
-
-            <div>
-              <span>
-                Tâches réalisées
-              </span>
-              <strong>
-                {completedCount} /{' '}
-                {TASKS.length}
-              </strong>
-            </div>
-
-            <div>
-              <span>
-                Heure de validation
-              </span>
-              <strong>
-                {finishedAt
-                  ? formatTime(
-                      finishedAt
-                    )
-                  : '—'}
-              </strong>
-            </div>
-          </footer>
         </div>
       )}
 
-      {tab === 'setup' && (
-        <section className="setupPlaceholder noPrint">
-          <div className="placeholderIcon">
-            ▣
-          </div>
-
-          <h2>SET UP</h2>
-
-          <p>
-            Cette zone reste dédiée
-            aux fiches et photos de
-            mise en place du bar.
-          </p>
-        </section>
-      )}
-
-      {tab === 'history' && (
-        <section className="historyPanel noPrint">
-          <div className="historyHeader">
-            <div>
-              <span className="eyebrow">
-                HISTORIQUE
-              </span>
-
-              <h2>
-                Ouvertures Bar
-              </h2>
-            </div>
-          </div>
-
-          <div className="historyTableWrap">
-            <table className="historyTable">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Personne</th>
-                  <th>Progression</th>
-                  <th>Statut</th>
-                  <th>Validation</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {history.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={5}
-                      className="emptyCell"
-                    >
-                      Aucun historique.
-                    </td>
-                  </tr>
-                ) : (
-                  history.map(
-                    (item) => (
-                      <tr
-                        key={`${item.date}-${item.userId}`}
-                      >
-                        <td>
-                          {formatDateFr(
-                            item.date
-                          )}
-                        </td>
-
-                        <td>
-                          {
-                            item.userName
-                          }
-                        </td>
-
-                        <td>
-                          <div className="historyProgress">
-                            <div>
-                              <span
-                                style={{
-                                  width: `${item.percent}%`,
-                                }}
-                              />
-                            </div>
-
-                            <strong>
-                              {
-                                item.percent
-                              }
-                              %
-                            </strong>
-                          </div>
-                        </td>
-
-                        <td>
-                          <span
-                            className={`historyStatus ${
-                              item.finishedAt
-                                ? 'done'
-                                : ''
-                            }`}
-                          >
-                            {item.finishedAt
-                              ? 'Terminée'
-                              : 'En cours'}
-                          </span>
-                        </td>
-
-                        <td>
-                          {item.finishedAt
-                            ? formatTime(
-                                item.finishedAt
-                              )
-                            : '—'}
-                        </td>
-                      </tr>
-                    )
-                  )
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-
-      <style jsx>{`
-        .checklistPage {
-          min-height: 100vh;
-          padding: 28px;
-          background: #f4f6f9;
-          color: #101828;
-        }
-
-        .pageHeader {
-          display: flex;
-          justify-content: space-between;
-          gap: 20px;
-          margin-bottom: 18px;
-        }
-
-        .eyebrow,
-        .heroEyebrow,
-        .sectionLabel {
-          color: #7f56d9;
-          font-size: 10px;
-          font-weight: 900;
-          letter-spacing: .12em;
-          text-transform: uppercase;
-        }
-
-        .pageHeader h1,
-        .historyHeader h2 {
-          margin: 5px 0 0;
-          font-size: 30px;
-          line-height: 1.05;
-        }
-
-        .pageHeader p {
-          max-width: 680px;
-          margin: 8px 0 0;
-          color: #667085;
-          font-size: 13px;
-          line-height: 1.5;
-        }
-
-        .tabs {
-          display: inline-flex;
-          gap: 6px;
-          margin-bottom: 18px;
-          padding: 6px;
-          border: 1px solid #e4e7ec;
-          border-radius: 15px;
-          background: #fff;
-          box-shadow: 0 8px 24px rgba(16,24,40,.05);
-        }
-
-        .tabs button {
-          min-height: 40px;
-          padding: 0 15px;
-          border: 0;
-          border-radius: 10px;
-          background: transparent;
-          color: #667085;
-          cursor: pointer;
-          font-size: 12px;
-          font-weight: 850;
-        }
-
-        .tabs button.active {
-          background: #101828;
-          color: #fff;
-        }
-
-        .printSheet {
-          max-width: 1250px;
-          margin: 0 auto;
-        }
-
-        .openingHero {
-          display: grid;
-          grid-template-columns: minmax(0,1fr) 340px;
-          gap: 20px;
-          padding: 24px;
-          border: 1px solid #e4e7ec;
-          border-radius: 22px;
-          background: #fff;
-          box-shadow: 0 12px 36px rgba(16,24,40,.06);
-        }
-
-        .heroTop {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-
-        .openingHero h2 {
-          margin: 8px 0 18px;
-          font-size: 31px;
-          letter-spacing: -.03em;
-        }
-
-        .statusBadge {
-          display: inline-flex;
-          min-height: 28px;
-          align-items: center;
-          padding: 0 10px;
-          border-radius: 999px;
-          background: #f2f4f7;
-          color: #475467;
-          font-size: 9px;
-          font-weight: 900;
-        }
-
-        .statusBadge.ready {
-          background: #ecfdf3;
-          color: #027a48;
-        }
-
-        .statusBadge.done {
-          background: #e8f8ef;
-          color: #067647;
-        }
-
-        .metaGrid {
-          display: grid;
-          grid-template-columns: repeat(3,minmax(0,1fr));
-          gap: 12px;
-        }
-
-        .metaGrid > div {
-          padding: 12px 14px;
-          border-radius: 12px;
-          background: #f8fafc;
-        }
-
-        .metaGrid span,
-        .printFooter span {
-          display: block;
-          color: #98a2b3;
-          font-size: 9px;
-          font-weight: 800;
-          text-transform: uppercase;
-          letter-spacing: .06em;
-        }
-
-        .metaGrid strong,
-        .printFooter strong {
-          display: block;
-          margin-top: 4px;
-          color: #101828;
-          font-size: 12px;
-        }
-
-        .progressCard {
-          display: flex;
-          flex-direction: column;
-          justify-content: center;
-          padding: 20px;
-          border-radius: 18px;
-          background: #101828;
-          color: #fff;
-        }
-
-        .progressTop {
-          display: flex;
-          align-items: end;
-          justify-content: space-between;
-          gap: 12px;
-        }
-
-        .progressTop span {
-          color: #cbd5e1;
-          font-size: 11px;
-          font-weight: 800;
-        }
-
-        .progressTop strong {
-          font-size: 42px;
-          line-height: .95;
-          letter-spacing: -.05em;
-        }
-
-        .progressTrack {
-          height: 10px;
-          margin-top: 18px;
-          overflow: hidden;
-          border-radius: 999px;
-          background: rgba(255,255,255,.14);
-        }
-
-        .progressFill {
-          height: 100%;
-          border-radius: inherit;
-          background: #fff;
-          transition: width .2s ease;
-        }
-
-        .progressBottom {
-          display: flex;
-          justify-content: space-between;
-          gap: 10px;
-          margin-top: 9px;
-          color: #cbd5e1;
-          font-size: 10px;
-        }
-
-        .progressBottom b {
-          color: #fff;
-        }
-
-        .actionsBar {
-          display: flex;
-          justify-content: flex-end;
-          gap: 9px;
-          margin: 14px 0;
-          flex-wrap: wrap;
-        }
-
-        .actionsBar button {
-          min-height: 44px;
-          padding: 0 16px;
-          border-radius: 12px;
-          cursor: pointer;
-          font-size: 11px;
-          font-weight: 900;
-        }
-
-        .primaryButton {
-          border: 1px solid #101828;
-          background: #101828;
-          color: #fff;
-        }
-
-        .primaryButton:disabled {
-          cursor: not-allowed;
-          opacity: .35;
-        }
-
-        .secondaryButton {
-          border: 1px solid #d0d5dd;
-          background: #fff;
-          color: #101828;
-        }
-
-        .ghostButton {
-          border: 1px solid transparent;
-          background: transparent;
-          color: #667085;
-        }
-
-        .sectionGrid {
-          display: grid;
-          grid-template-columns: repeat(2,minmax(0,1fr));
-          gap: 14px;
-        }
-
-        .taskSection {
-          overflow: hidden;
-          border: 1px solid #e4e7ec;
-          border-radius: 18px;
-          background: #fff;
-          box-shadow: 0 8px 26px rgba(16,24,40,.045);
-        }
-
-        .taskSection header {
-          display: grid;
-          grid-template-columns: minmax(0,1fr) 120px;
-          gap: 14px;
-          align-items: center;
-          padding: 16px 18px;
-          border-bottom: 1px solid #eef2f6;
-          background: #fbfcfd;
-        }
-
-        .taskSection header > div:first-child {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 10px;
-        }
-
-        .taskSection header strong {
-          color: #667085;
-          font-size: 10px;
-        }
-
-        .sectionTrack {
-          height: 7px;
-          overflow: hidden;
-          border-radius: 999px;
-          background: #eaecf0;
-        }
-
-        .sectionTrack div {
-          height: 100%;
-          border-radius: inherit;
-          background: #101828;
-          transition: width .2s ease;
-        }
-
-        .taskList {
-          display: grid;
-          padding: 8px;
-        }
-
-        .taskRow {
-          position: relative;
-          display: grid;
-          grid-template-columns: 28px minmax(0,1fr);
-          gap: 10px;
-          align-items: center;
-          min-height: 52px;
-          padding: 8px 10px;
-          border-radius: 11px;
-          cursor: pointer;
-          transition: background .15s ease;
-        }
-
-        .taskRow:hover {
-          background: #f8fafc;
-        }
-
-        .taskRow.checked {
-          background: #f0fdf4;
-        }
-
-        .taskRow.locked {
-          cursor: default;
-        }
-
-        .taskRow input {
-          position: absolute;
-          opacity: 0;
-          pointer-events: none;
-        }
-
-        .visualCheckbox {
-          display: grid;
-          width: 26px;
-          height: 26px;
-          place-items: center;
-          border: 2px solid #cfd4dc;
-          border-radius: 8px;
-          background: #fff;
-          color: #fff;
-          font-size: 14px;
-          font-weight: 900;
-        }
-
-        .taskRow.checked .visualCheckbox {
-          border-color: #067647;
-          background: #067647;
-        }
-
-        .taskText {
-          color: #344054;
-          font-size: 12px;
-          font-weight: 750;
-        }
-
-        .taskRow.checked .taskText {
-          color: #067647;
-        }
-
-        .printFooter {
-          display: grid;
-          grid-template-columns: repeat(3,minmax(0,1fr));
-          gap: 10px;
-          margin-top: 14px;
-          padding: 16px 18px;
-          border: 1px solid #e4e7ec;
-          border-radius: 16px;
-          background: #fff;
-        }
-
-        .setupPlaceholder {
-          min-height: 430px;
-          display: grid;
-          place-items: center;
-          align-content: center;
-          padding: 40px;
-          border: 1px solid #e4e7ec;
-          border-radius: 20px;
-          background: #fff;
-          text-align: center;
-        }
-
-        .placeholderIcon {
-          display: grid;
-          width: 64px;
-          height: 64px;
-          place-items: center;
-          border-radius: 18px;
-          background: #f2f4f7;
-          color: #101828;
-          font-size: 24px;
-        }
-
-        .setupPlaceholder h2 {
-          margin: 14px 0 4px;
-        }
-
-        .setupPlaceholder p {
-          max-width: 420px;
-          color: #667085;
-          line-height: 1.55;
-        }
-
-        .historyPanel {
-          overflow: hidden;
-          border: 1px solid #e4e7ec;
-          border-radius: 20px;
-          background: #fff;
-        }
-
-        .historyHeader {
-          padding: 20px 22px;
-          border-bottom: 1px solid #eef2f6;
-        }
-
-        .historyTableWrap {
-          overflow-x: auto;
-        }
-
-        .historyTable {
-          width: 100%;
-          border-collapse: collapse;
-        }
-
-        .historyTable th,
-        .historyTable td {
-          padding: 13px 16px;
-          border-bottom: 1px solid #f0f2f5;
-          text-align: left;
-          white-space: nowrap;
-          font-size: 11px;
-        }
-
-        .historyTable th {
-          color: #667085;
-          background: #fafbfc;
-          font-size: 9px;
-          text-transform: uppercase;
-          letter-spacing: .06em;
-        }
-
-        .historyProgress {
-          display: flex;
-          align-items: center;
-          gap: 9px;
-        }
-
-        .historyProgress > div {
-          width: 100px;
-          height: 7px;
-          overflow: hidden;
-          border-radius: 999px;
-          background: #eaecf0;
-        }
-
-        .historyProgress span {
-          display: block;
-          height: 100%;
-          background: #101828;
-        }
-
-        .historyProgress strong {
-          font-size: 10px;
-        }
-
-        .historyStatus {
-          display: inline-flex;
-          padding: 5px 8px;
-          border-radius: 999px;
-          background: #fff4e5;
-          color: #b54708;
-          font-size: 9px;
-          font-weight: 900;
-        }
-
-        .historyStatus.done {
-          background: #ecfdf3;
-          color: #027a48;
-        }
-
-        .emptyCell {
-          padding: 40px !important;
-          text-align: center !important;
-          color: #98a2b3;
-        }
-
-        @media (max-width: 900px) {
-          .checklistPage {
-            padding: 18px;
-          }
-
-          .openingHero {
-            grid-template-columns: 1fr;
-          }
-
-          .sectionGrid {
-            grid-template-columns: 1fr;
-          }
-        }
-
-        @media (max-width: 600px) {
-          .checklistPage {
-            padding: 12px;
-          }
-
-          .pageHeader h1 {
-            font-size: 24px;
-          }
-
-          .tabs {
-            width: 100%;
-            display: grid;
-            grid-template-columns: 1fr;
-          }
-
-          .tabs button {
-            width: 100%;
-          }
-
-          .openingHero {
-            padding: 16px;
-            border-radius: 16px;
-          }
-
-          .openingHero h2 {
-            font-size: 25px;
-          }
-
-          .metaGrid,
-          .printFooter {
-            grid-template-columns: 1fr;
-          }
-
-          .actionsBar {
-            display: grid;
-            grid-template-columns: 1fr;
-          }
-
-          .actionsBar button {
-            width: 100%;
-          }
-
-          .taskSection header {
-            grid-template-columns: 1fr;
-          }
-
-          .taskRow {
-            min-height: 56px;
-          }
-        }
-
-        @media print {
-          @page {
-            size: A4 portrait;
-            margin: 10mm;
-          }
-
-          :global(body) {
-            background: #fff !important;
-          }
-
-          :global(.nskSidebar),
-          :global(.nskTopbar),
-          :global(.nskMobileNav),
-          :global(.noPrint) {
-            display: none !important;
-          }
-
-          :global(.nskMain) {
-            margin: 0 !important;
-          }
-
-          :global(.nskViewStage),
-          :global(.nskViewCanvas) {
-            width: 100% !important;
-            max-width: none !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            overflow: visible !important;
-            box-shadow: none !important;
-          }
-
-          .checklistPage {
-            min-height: auto;
-            padding: 0;
-            background: #fff;
-          }
-
-          .printSheet {
-            width: 100%;
-            max-width: none;
-          }
-
-          .openingHero {
-            grid-template-columns: 1fr 230px;
-            gap: 10px;
-            padding: 12px;
-            border-radius: 10px;
-            box-shadow: none;
-            break-inside: avoid;
-          }
-
-          .openingHero h2 {
-            margin: 4px 0 10px;
-            font-size: 21px;
-          }
-
-          .metaGrid {
-            gap: 5px;
-          }
-
-          .metaGrid > div {
-            padding: 6px 7px;
-          }
-
-          .progressCard {
-            padding: 10px;
-            border-radius: 10px;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-          }
-
-          .progressTop strong {
-            font-size: 28px;
-          }
-
-          .sectionGrid {
-            grid-template-columns: repeat(2,minmax(0,1fr));
-            gap: 7px;
-            margin-top: 8px;
-          }
-
-          .taskSection {
-            border-radius: 9px;
-            box-shadow: none;
-            break-inside: avoid;
-          }
-
-          .taskSection header {
-            grid-template-columns: 1fr;
-            padding: 7px 9px;
-          }
-
-          .sectionTrack {
-            display: none;
-          }
-
-          .taskList {
-            padding: 3px;
-          }
-
-          .taskRow {
-            min-height: 27px;
-            grid-template-columns: 18px minmax(0,1fr);
-            gap: 6px;
-            padding: 2px 5px;
-          }
-
-          .visualCheckbox {
-            width: 16px;
-            height: 16px;
-            border-width: 1px;
-            border-radius: 3px;
-            font-size: 9px;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-          }
-
-          .taskText {
-            font-size: 9px;
-          }
-
-          .printFooter {
-            gap: 5px;
-            margin-top: 7px;
-            padding: 8px 10px;
-            border-radius: 8px;
-            break-inside: avoid;
-          }
-
-          .printFooter span {
-            font-size: 7px;
-          }
-
-          .printFooter strong {
-            font-size: 9px;
-          }
-        }
-      `}</style>
-
-      <style jsx global>{`
-        .view-phone .checklistPage {
-          width: 100% !important;
-          max-width: 430px !important;
-          min-width: 0 !important;
-          margin: 0 auto !important;
-          padding: 10px 10px 92px !important;
-          overflow-x: hidden !important;
-          background: #f4f6f9 !important;
-        }
-
-        .view-phone .checklistPage .pageHeader {
-          display: block !important;
-          margin: 0 0 10px !important;
-          padding: 4px 2px 0 !important;
-        }
-
-        .view-phone .checklistPage .pageHeader h1 {
-          margin-top: 3px !important;
-          font-size: 23px !important;
-          line-height: 1.05 !important;
-        }
-
-        .view-phone .checklistPage .pageHeader p {
-          margin-top: 5px !important;
-          font-size: 11px !important;
-          line-height: 1.4 !important;
-        }
-
-        .view-phone .checklistPage .tabs {
-          width: 100% !important;
-          display: grid !important;
-          grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-          gap: 4px !important;
-          margin: 0 0 10px !important;
-          padding: 4px !important;
-          border-radius: 13px !important;
-        }
-
-        .view-phone .checklistPage .tabs button {
-          width: 100% !important;
-          min-width: 0 !important;
-          min-height: 42px !important;
-          padding: 5px 4px !important;
-          border-radius: 9px !important;
-          font-size: 10px !important;
-          line-height: 1.15 !important;
-          white-space: normal !important;
-        }
-
-        .view-phone .checklistPage .printSheet {
-          width: 100% !important;
-          max-width: 100% !important;
-          min-width: 0 !important;
-          margin: 0 !important;
-        }
-
-        .view-phone .checklistPage .openingHero {
-          width: 100% !important;
-          display: grid !important;
-          grid-template-columns: 1fr !important;
-          gap: 10px !important;
-          padding: 14px !important;
-          border-radius: 17px !important;
-          box-shadow: 0 7px 22px rgba(16,24,40,.06) !important;
-        }
-
-        .view-phone .checklistPage .heroTop {
-          justify-content: space-between !important;
-          gap: 8px !important;
-        }
-
-        .view-phone .checklistPage .openingHero h2 {
-          margin: 6px 0 11px !important;
-          font-size: 25px !important;
-          line-height: 1.05 !important;
-        }
-
-        .view-phone .checklistPage .metaGrid {
-          display: grid !important;
-          grid-template-columns: 1fr 1fr !important;
-          gap: 6px !important;
-        }
-
-        .view-phone .checklistPage .metaGrid > div {
-          min-width: 0 !important;
-          padding: 9px 10px !important;
-          border-radius: 10px !important;
-        }
-
-        .view-phone .checklistPage .metaGrid > div:first-child {
-          grid-column: 1 / -1 !important;
-        }
-
-        .view-phone .checklistPage .metaGrid strong {
-          overflow: hidden !important;
-          text-overflow: ellipsis !important;
-          font-size: 11px !important;
-          white-space: nowrap !important;
-        }
-
-        .view-phone .checklistPage .progressCard {
-          padding: 14px !important;
-          border-radius: 14px !important;
-        }
-
-        .view-phone .checklistPage .progressTop strong {
-          font-size: 34px !important;
-        }
-
-        .view-phone .checklistPage .progressTrack {
-          height: 8px !important;
-          margin-top: 12px !important;
-        }
-
-        .view-phone .checklistPage .actionsBar {
-          display: grid !important;
-          grid-template-columns: 1fr 1fr !important;
-          gap: 7px !important;
-          width: 100% !important;
-          margin: 9px 0 !important;
-        }
-
-        .view-phone .checklistPage .actionsBar button {
-          width: 100% !important;
-          min-width: 0 !important;
-          min-height: 44px !important;
-          padding: 7px 8px !important;
-          border-radius: 11px !important;
-          font-size: 10px !important;
-          white-space: normal !important;
-        }
-
-        .view-phone .checklistPage .actionsBar .primaryButton,
-        .view-phone .checklistPage .actionsBar .secondaryButton:last-child {
-          grid-column: 1 / -1 !important;
-        }
-
-        .view-phone .checklistPage .sectionGrid {
-          width: 100% !important;
-          display: grid !important;
-          grid-template-columns: 1fr !important;
-          gap: 9px !important;
-        }
-
-        .view-phone .checklistPage .taskSection {
-          width: 100% !important;
-          min-width: 0 !important;
-          border-radius: 15px !important;
-          box-shadow: 0 5px 16px rgba(16,24,40,.04) !important;
-        }
-
-        .view-phone .checklistPage .taskSection header {
-          width: 100% !important;
-          display: grid !important;
-          grid-template-columns: 1fr 88px !important;
-          gap: 8px !important;
-          padding: 11px 12px !important;
-        }
-
-        .view-phone .checklistPage .taskList {
-          width: 100% !important;
-          padding: 5px !important;
-        }
-
-        .view-phone .checklistPage .taskRow {
-          width: 100% !important;
-          min-width: 0 !important;
-          min-height: 52px !important;
-          grid-template-columns: 30px minmax(0,1fr) !important;
-          gap: 9px !important;
-          padding: 7px 8px !important;
-          border-radius: 10px !important;
-        }
-
-        .view-phone .checklistPage .visualCheckbox {
-          width: 28px !important;
-          height: 28px !important;
-          border-radius: 8px !important;
-        }
-
-        .view-phone .checklistPage .taskText {
-          min-width: 0 !important;
-          font-size: 13px !important;
-          line-height: 1.25 !important;
-        }
-
-        .view-phone .checklistPage .printFooter {
-          display: grid !important;
-          grid-template-columns: 1fr 1fr !important;
-          gap: 6px !important;
-          width: 100% !important;
-          margin-top: 9px !important;
-          padding: 10px !important;
-          border-radius: 13px !important;
-        }
-
-        .view-phone .checklistPage .printFooter > div:first-child {
-          grid-column: 1 / -1 !important;
-        }
-
-        .view-phone .checklistPage .setupPlaceholder,
-        .view-phone .checklistPage .historyPanel {
-          width: 100% !important;
-          max-width: 100% !important;
-          border-radius: 16px !important;
-        }
-
-        .view-phone .checklistPage .historyTableWrap {
-          width: 100% !important;
-          overflow-x: auto !important;
-          -webkit-overflow-scrolling: touch !important;
-        }
-
-        .view-phone .checklistPage .historyTable {
-          min-width: 650px !important;
-        }
-      `}</style>
-    </main>
+    </Page>
   )
 }
