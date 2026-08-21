@@ -7043,6 +7043,238 @@ function BarPlanningPage() {
         }
       `}
 </style>
+
+      <style jsx global>{`
+        .planningCommandBar {
+          display:flex !important;
+          align-items:center !important;
+          justify-content:space-between !important;
+          gap:16px !important;
+          width:100% !important;
+          padding:12px !important;
+          border:1px solid #e4e7ec !important;
+          border-radius:20px !important;
+          background:#fff !important;
+          box-shadow:0 10px 30px rgba(16,24,40,.08) !important;
+          box-sizing:border-box !important;
+        }
+
+        .planningCommandNav,
+        .planningCommandActions {
+          display:flex !important;
+          align-items:center !important;
+          gap:9px !important;
+          min-width:0 !important;
+          flex-wrap:wrap !important;
+        }
+
+        .planningCommandActions {
+          justify-content:flex-end !important;
+        }
+
+        .planningCommandBar .commandNavButton,
+        .planningCommandBar .commandButton {
+          appearance:none !important;
+          -webkit-appearance:none !important;
+          display:inline-flex !important;
+          align-items:center !important;
+          justify-content:center !important;
+          gap:8px !important;
+          min-height:48px !important;
+          padding:0 18px !important;
+          border:1px solid #d0d5dd !important;
+          border-radius:14px !important;
+          background:#fff !important;
+          color:#1d2939 !important;
+          font-family:inherit !important;
+          font-size:12px !important;
+          font-weight:900 !important;
+          line-height:1 !important;
+          cursor:pointer !important;
+          box-shadow:0 2px 5px rgba(16,24,40,.06) !important;
+          transition:
+            transform .15s ease,
+            box-shadow .15s ease,
+            border-color .15s ease,
+            background .15s ease,
+            color .15s ease !important;
+          white-space:nowrap !important;
+        }
+
+        .planningCommandBar .commandNavButton:hover,
+        .planningCommandBar .commandButton:hover {
+          border-color:#98a2b3 !important;
+          background:#f9fafb !important;
+          color:#101828 !important;
+          transform:translateY(-1px) !important;
+          box-shadow:0 6px 14px rgba(16,24,40,.10) !important;
+        }
+
+        .planningCommandBar .commandNavButton.active,
+        .planningCommandBar .commandPrimary {
+          border-color:#101828 !important;
+          background:#101828 !important;
+          color:#fff !important;
+          box-shadow:0 7px 18px rgba(16,24,40,.18) !important;
+        }
+
+        .planningCommandBar .commandNavButton.active:hover,
+        .planningCommandBar .commandPrimary:hover {
+          border-color:#1d2939 !important;
+          background:#1d2939 !important;
+          color:#fff !important;
+        }
+
+        .planningCommandBar .commandButton.open {
+          border-color:#98a2b3 !important;
+          background:#f2f4f7 !important;
+          color:#101828 !important;
+        }
+
+        .planningCommandBar .commandIcon {
+          display:inline-grid !important;
+          width:25px !important;
+          height:25px !important;
+          flex:0 0 25px !important;
+          place-items:center !important;
+          border-radius:8px !important;
+          background:#f2f4f7 !important;
+          color:#344054 !important;
+          font-size:13px !important;
+          font-weight:900 !important;
+        }
+
+        .planningCommandBar .commandNavButton.active .commandIcon,
+        .planningCommandBar .commandPrimary .commandIcon {
+          background:rgba(255,255,255,.16) !important;
+          color:#fff !important;
+        }
+
+        .planningCommandBar .commandCount {
+          display:grid !important;
+          min-width:22px !important;
+          height:22px !important;
+          place-items:center !important;
+          padding:0 6px !important;
+          border-radius:999px !important;
+          background:#f2f4f7 !important;
+          color:#344054 !important;
+          font-size:9px !important;
+          font-weight:900 !important;
+          box-sizing:border-box !important;
+        }
+
+        .planningCommandBar .commandNavButton.active .commandCount {
+          background:rgba(255,255,255,.18) !important;
+          color:#fff !important;
+        }
+
+        .planningCommandBar .commandChevron {
+          margin-left:1px !important;
+          color:#667085 !important;
+          font-size:10px !important;
+        }
+
+        .planningCommandBar .actionDropdown {
+          position:relative !important;
+        }
+
+        .planningCommandBar .actionDropdownMenu {
+          position:absolute !important;
+          top:calc(100% + 8px) !important;
+          left:0 !important;
+          z-index:9999 !important;
+          min-width:190px !important;
+          padding:7px !important;
+          border:1px solid #e4e7ec !important;
+          border-radius:15px !important;
+          background:#fff !important;
+          box-shadow:0 18px 40px rgba(16,24,40,.18) !important;
+        }
+
+        .planningCommandBar .actionDropdownMenu.right {
+          left:auto !important;
+          right:0 !important;
+        }
+
+        .planningCommandBar .managementMenu {
+          min-width:250px !important;
+        }
+
+        .planningCommandBar .actionDropdownMenu button {
+          appearance:none !important;
+          -webkit-appearance:none !important;
+          display:flex !important;
+          align-items:center !important;
+          gap:9px !important;
+          width:100% !important;
+          min-height:42px !important;
+          padding:0 11px !important;
+          border:0 !important;
+          border-radius:10px !important;
+          background:transparent !important;
+          color:#344054 !important;
+          font-family:inherit !important;
+          font-size:11px !important;
+          font-weight:800 !important;
+          text-align:left !important;
+          cursor:pointer !important;
+        }
+
+        .planningCommandBar .actionDropdownMenu button:hover:not(:disabled) {
+          background:#f2f4f7 !important;
+        }
+
+        .planningCommandBar .menuLabel {
+          padding:9px 11px 6px !important;
+          color:#98a2b3 !important;
+          font-size:8px !important;
+          font-weight:900 !important;
+          letter-spacing:.12em !important;
+        }
+
+        .planningCommandBar .menuSeparator {
+          height:1px !important;
+          margin:6px 5px !important;
+          background:#eaecf0 !important;
+        }
+
+        .planningCommandBar .actionDropdownMenu .menuDanger {
+          color:#b42318 !important;
+        }
+
+        .planningCommandBar .actionDropdownMenu .menuDanger:hover:not(:disabled) {
+          background:#fef3f2 !important;
+        }
+
+        .planningCommandBar .actionDropdownMenu button:disabled {
+          opacity:.4 !important;
+          cursor:not-allowed !important;
+        }
+
+        @media (max-width:1180px) {
+          .planningCommandBar {
+            align-items:stretch !important;
+            flex-direction:column !important;
+          }
+
+          .planningCommandNav,
+          .planningCommandActions {
+            width:100% !important;
+          }
+
+          .planningCommandActions {
+            justify-content:flex-end !important;
+          }
+        }
+
+        @media (max-width:760px) {
+          .planningCommandBar {
+            display:none !important;
+          }
+        }
+      `}</style>
+
     </Page>
   )
 }
