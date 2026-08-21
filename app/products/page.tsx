@@ -13,6 +13,62 @@ import { ColumnVisibility, useColumnVisibility } from '@/components/column-visib
 
 const PRODUCT_REF_COUNTER_KEY = 'nukustock_product_ref_counters_v1'
 
+const NUKUSTOCK_PUBLIC_URL =
+  'https://nukustock.fenuaprobartender.com'
+
+function buildProductQrUrl(product: Product) {
+  const params = new URLSearchParams()
+
+  params.set('type', 'product')
+  params.set('id', product.id)
+
+  if (product.internalRef) {
+    params.set(
+      'reference',
+      product.internalRef
+    )
+  }
+
+  return `${NUKUSTOCK_PUBLIC_URL}/scan?${params.toString()}`
+}
+
+function buildCategoryQrUrl(category: string) {
+  const params = new URLSearchParams()
+
+  params.set('type', 'category')
+  params.set(
+    'category',
+    category || 'Sans catégorie'
+  )
+
+  return `${NUKUSTOCK_PUBLIC_URL}/scan?${params.toString()}`
+}
+
+function buildSubcategoryQrUrl(
+  category: string,
+  subcategory: string
+) {
+  const params = new URLSearchParams()
+
+  params.set(
+    'type',
+    'subcategory'
+  )
+
+  params.set(
+    'category',
+    category || 'Sans catégorie'
+  )
+
+  params.set(
+    'subcategory',
+    subcategory ||
+      'Sans sous-catégorie'
+  )
+
+  return `${NUKUSTOCK_PUBLIC_URL}/scan?${params.toString()}`
+}
+
 const PRODUCT_SCREEN_COLUMNS = [
   { key: 'reference', label: 'Référence' },
   { key: 'qrProduct', label: 'QR Produit', qr: true },
@@ -1993,7 +2049,9 @@ export default function Products() {
                       )}
 
                       {productDisplay.isVisible('qrProduct') &&
-                        qrBox(`NUKUSTOCK|PRODUCT|${p.internalRef || p.id}`)}
+                        qrBox(
+                          buildProductQrUrl(p)
+                        )}
 
                       {productDisplay.isVisible('product') && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
@@ -2034,10 +2092,19 @@ export default function Products() {
 
                       {productDisplay.isVisible('category') && <div>{p.category || '—'}</div>}
                       {productDisplay.isVisible('qrCategory') &&
-                        qrBox(`NUKUSTOCK|CATEGORY|${p.category || 'Sans catégorie'}`)}
+                        qrBox(
+                          buildCategoryQrUrl(
+                            p.category
+                          )
+                        )}
                       {productDisplay.isVisible('subcategory') && <div>{p.subcategory || '—'}</div>}
                       {productDisplay.isVisible('qrSubcategory') &&
-                        qrBox(`NUKUSTOCK|SUBCATEGORY|${p.subcategory || 'Sans sous-catégorie'}`)}
+                        qrBox(
+                          buildSubcategoryQrUrl(
+                            p.category,
+                            p.subcategory
+                          )
+                        )}
 
                       {productDisplay.isVisible('supplier') && (
                         <div>
