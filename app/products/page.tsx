@@ -471,6 +471,25 @@ type ExpiryEntry = {
   allocations: AllocationRow[]
 }
 
+const CAVE_A_JUS = 'Cave à jus'
+const CAVE_A_JUS_ZONES = [
+  'Stock Mahana Resort',
+  'Stock Emile / Guy',
+] as const
+
+function isCaveAJusLocation(value: string) {
+  return value === CAVE_A_JUS || value.startsWith(`${CAVE_A_JUS} - `)
+}
+
+function getCaveAJusZone(value: string) {
+  if (!value.startsWith(`${CAVE_A_JUS} - `)) return ''
+  return value.slice(`${CAVE_A_JUS} - `.length)
+}
+
+function buildCaveAJusLocation(zone: string) {
+  return zone ? `${CAVE_A_JUS} - ${zone}` : CAVE_A_JUS
+}
+
 const createAllocation = (defaultLocation = ''): AllocationRow => ({
   id: crypto.randomUUID(),
   location: defaultLocation,
@@ -685,8 +704,18 @@ export default function Products() {
       [
         ...new Set(
           [
-            ...getMasterItems('location').map((item) => item.name),
-            ...form.lots.map((lot) => lot.location).filter(Boolean),
+            ...getMasterItems('location')
+              .map((item) => item.name)
+              .filter(
+                (name) => !name.startsWith(`${CAVE_A_JUS} - `)
+              ),
+            ...form.lots
+              .map((lot) =>
+                isCaveAJusLocation(lot.location)
+                  ? CAVE_A_JUS
+                  : lot.location
+              )
+              .filter(Boolean),
           ].filter((value): value is string => Boolean(value))
         ),
       ].sort((a, b) => a.localeCompare(b, 'fr')),
@@ -1208,6 +1237,13 @@ export default function Products() {
       const usedLocations = new Set<string>()
 
       for (const allocation of entry.allocations) {
+        if (allocation.location === CAVE_A_JUS) {
+          alert(
+            `Lot n°${index + 1} : pour « Cave à jus », choisis « Stock Mahana Resort » ou « Stock Emile / Guy ».`
+          )
+          return { ok: false as const, hasStock: true as const }
+        }
+
         if (usedLocations.has(allocation.location)) {
           alert(
             `Lot n°${index + 1} : le lieu "${allocation.location}" est présent plusieurs fois.`
@@ -3214,29 +3250,81 @@ export default function Products() {
                               <label style={fieldLabelStyle}>
                                 Lieu {allocationIndex + 1}
                               </label>
-                              <select
-                                className="input"
-                                value={allocation.location}
-                                onChange={(e) =>
-                                  updateAllocation(
-                                    entry.id,
-                                    allocation.id,
-                                    {
-                                      location: e.target.value,
-                                    }
-                                  )
-                                }
+                              <div
+                                style={{
+                                  display: 'grid',
+                                  gap: 8,
+                                }}
                               >
-                                <option value="">Choisir un lieu</option>
-                                {locationChoices.map((location) => (
-                                  <option
-                                    key={location}
-                                    value={location}
+                                <select
+                                  className="input"
+                                  value={
+                                    isCaveAJusLocation(allocation.location)
+                                      ? CAVE_A_JUS
+                                      : allocation.location
+                                  }
+                                  onChange={(e) => {
+                                    const nextLocation = e.target.value
+
+                                    updateAllocation(
+                                      entry.id,
+                                      allocation.id,
+                                      {
+                                        location:
+                                          nextLocation === CAVE_A_JUS
+                                            ? CAVE_A_JUS
+                                            : nextLocation,
+                                      }
+                                    )
+                                  }}
+                                >
+                                  <option value="">Choisir un lieu</option>
+                                  {locationChoices.map((location) => (
+                                    <option
+                                      key={location}
+                                      value={location}
+                                    >
+                                      {location}
+                                    </option>
+                                  ))}
+                                </select>
+
+                                {isCaveAJusLocation(
+                                  allocation.location
+                                ) && (
+                                  <select
+                                    className="input"
+                                    value={getCaveAJusZone(
+                                      allocation.location
+                                    )}
+                                    onChange={(e) =>
+                                      updateAllocation(
+                                        entry.id,
+                                        allocation.id,
+                                        {
+                                          location:
+                                            buildCaveAJusLocation(
+                                              e.target.value
+                                            ),
+                                        }
+                                      )
+                                    }
                                   >
-                                    {location}
-                                  </option>
-                                ))}
-                              </select>
+                                    <option value="">
+                                      Choisir la zone de la Cave à jus
+                                    </option>
+
+                                    {CAVE_A_JUS_ZONES.map((zone) => (
+                                      <option
+                                        key={zone}
+                                        value={zone}
+                                      >
+                                        {zone}
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
+                              </div>
 
                               <div
                                 style={{
