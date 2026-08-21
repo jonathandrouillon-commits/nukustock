@@ -98,6 +98,7 @@ export default function BarPage() {
   const {
     items: requests,
     save: saveRequests,
+    removeRequest,
   } = useRequests()
 
   const {
@@ -310,7 +311,7 @@ export default function BarPage() {
    * Supprime définitivement une réquisition.
    * Double confirmation pour éviter une suppression accidentelle.
    */
-  const deleteRequest = (
+  const deleteRequest = async (
     request: InternalRequest
   ) => {
     const firstConfirm =
@@ -322,35 +323,48 @@ export default function BarPage() {
 
     const secondConfirm =
       window.confirm(
-        `CONFIRMATION\n\nLa réquisition ${request.id} sera définitivement supprimée.\n\nContinuer ?`
+        `CONFIRMATION\n\nLa réquisition ${request.id} sera définitivement supprimée de Supabase.\n\nContinuer ?`
       )
 
     if (!secondConfirm) return
 
-    const updatedRequests =
-      requests.filter(
-        (item) =>
-          item.id !== request.id
-      )
-
-    saveRequests(updatedRequests)
-
-    if (treatingId === request.id) {
-      setTreatingId('')
-      setTreatmentOpen(false)
-      setTreatmentLines([])
-    }
-
     setError('')
     setModalError('')
     setMessage(
-      `Réquisition ${request.id} supprimée.`
+      `Suppression de ${request.id}...`
     )
+
+    try {
+      await removeRequest(
+        request.id
+      )
+
+      if (
+        treatingId ===
+        request.id
+      ) {
+        setTreatingId('')
+        setTreatmentOpen(false)
+        setTreatmentLines([])
+      }
+
+      setMessage(
+        `Réquisition ${request.id} supprimée définitivement.`
+      )
+    } catch (caughtError) {
+      console.error(
+        'Suppression réquisition:',
+        caughtError
+      )
+
+      setError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : `Impossible de supprimer la réquisition ${request.id}.`
+      )
+    }
   }
 
-  /*
-   * Ouvre la réquisition.
-   */
   const openTreatment = (
     request: InternalRequest
   ) => {
