@@ -270,7 +270,10 @@ export default function ScanPage() {
           const id =
             params.get('id') || ''
 
-          if (!id) {
+          const reference =
+            params.get('reference') || ''
+
+          if (!id && !reference) {
             throw new Error(
               'Produit non renseigné dans le QR code.'
             )
@@ -288,8 +291,22 @@ export default function ScanPage() {
           const product =
             (productRows || []).find(
               (row: any) =>
-                row.id === id ||
-                row.legacy_id === id
+                (id &&
+                  (
+                    row.id === id ||
+                    row.legacy_id === id
+                  )) ||
+                (
+                  reference &&
+                  String(
+                    row.internal_reference || ''
+                  )
+                    .trim()
+                    .toLowerCase() ===
+                    reference
+                      .trim()
+                      .toLowerCase()
+                )
             )
 
           if (!product) {
@@ -625,6 +642,102 @@ export default function ScanPage() {
       // Peut être un ancien QR JSON NukuStock.
     }
 
+    // Compatibilité avec les anciens QR déjà imprimés :
+    // NUKUSTOCK|PRODUCT|ALC-GIN-001
+    // NUKUSTOCK|CATEGORY|Alcools
+    // NUKUSTOCK|SUBCATEGORY|Gin
+    if (
+      value
+        .toUpperCase()
+        .startsWith('NUKUSTOCK|')
+    ) {
+      const parts =
+        value.split('|')
+
+      const legacyType =
+        String(parts[1] || '')
+          .trim()
+          .toLowerCase()
+
+      const legacyValue =
+        parts
+          .slice(2)
+          .join('|')
+          .trim()
+
+      const params =
+        new URLSearchParams()
+
+      if (
+        legacyType === 'product'
+      ) {
+        params.set(
+          'type',
+          'product'
+        )
+        params.set(
+          'reference',
+          legacyValue
+        )
+
+        window.location.href =
+          `/scan?${params.toString()}`
+        return
+      }
+
+      if (
+        legacyType === 'category'
+      ) {
+        params.set(
+          'type',
+          'category'
+        )
+        params.set(
+          'category',
+          legacyValue
+        )
+
+        window.location.href =
+          `/scan?${params.toString()}`
+        return
+      }
+
+      if (
+        legacyType ===
+        'subcategory'
+      ) {
+        params.set(
+          'type',
+          'subcategory'
+        )
+        params.set(
+          'subcategory',
+          legacyValue
+        )
+
+        window.location.href =
+          `/scan?${params.toString()}`
+        return
+      }
+
+      if (
+        legacyType === 'location'
+      ) {
+        params.set(
+          'type',
+          'location'
+        )
+        params.set(
+          'location',
+          legacyValue
+        )
+
+        window.location.href =
+          `/scan?${params.toString()}`
+        return
+      }
+    }
+
     try {
       const parsed =
         JSON.parse(value)
@@ -646,6 +759,19 @@ export default function ScanPage() {
           params.set(
             'id',
             String(parsed.id)
+          )
+        }
+
+        if (
+          parsed.reference ||
+          parsed.internal_reference
+        ) {
+          params.set(
+            'reference',
+            String(
+              parsed.reference ||
+              parsed.internal_reference
+            )
           )
         }
 
