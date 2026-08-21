@@ -7,6 +7,8 @@ import {
   useState,
 } from 'react'
 
+import { useSearchParams } from 'next/navigation'
+
 import { Card, Page } from '@/components/ui'
 import { supabase } from '@/lib/supabase'
 import { useProducts } from '@/lib/store'
@@ -61,6 +63,19 @@ function categoryOf(
 }
 
 export default function ProductSheetsPage() {
+  const searchParams =
+    useSearchParams()
+
+  const requestedProductId =
+    searchParams.get(
+      'productId'
+    ) || ''
+
+  const requestedEdit =
+    searchParams.get(
+      'edit'
+    ) === '1'
+
   const { items: products } =
     useProducts()
 
@@ -581,6 +596,72 @@ export default function ProductSheetsPage() {
 
     setEditing(true)
   }
+
+  useEffect(() => {
+    if (
+      !requestedProductId ||
+      !products.length
+    ) {
+      return
+    }
+
+    const product =
+      products.find(
+        (item: any) =>
+          item.id ===
+          requestedProductId
+      )
+
+    if (!product) {
+      return
+    }
+
+    if (
+      selectedId !==
+      requestedProductId
+    ) {
+      setSelectedId(
+        requestedProductId
+      )
+      setError('')
+      setMessage('')
+    }
+
+    if (
+      requestedEdit &&
+      canManage &&
+      selectedId ===
+        requestedProductId &&
+      !editing
+    ) {
+      setDraft(
+        selectedSheet || {
+          product_id:
+            productDbIds[
+              requestedProductId
+            ] ||
+            requestedProductId,
+          description: '',
+          history: '',
+          production_method: '',
+          aromatic_profile: '',
+          anecdote: '',
+          service_notes: '',
+        }
+      )
+
+      setEditing(true)
+    }
+  }, [
+    products,
+    requestedProductId,
+    requestedEdit,
+    selectedId,
+    selectedSheet,
+    productDbIds,
+    canManage,
+    editing,
+  ])
 
   const saveSheet =
     async () => {

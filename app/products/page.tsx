@@ -707,19 +707,6 @@ export default function Products() {
     [masterData, items, form.unit]
   )
 
-  const brandChoices = useMemo(
-    () =>
-      [
-        ...new Set(
-          [
-            ...getMasterItems('brand').map((item) => item.name),
-            form.brand,
-          ].filter((value): value is string => Boolean(value))
-        ),
-      ].sort((a, b) => a.localeCompare(b, 'fr')),
-    [masterData, items, form.brand]
-  )
-
   const locationChoices = useMemo(
     () =>
       [
@@ -2035,7 +2022,27 @@ export default function Products() {
                       )}
 
                       {productDisplay.isVisible('actions') && (
-                        <div>
+                        <div
+                          style={{
+                            display: 'flex',
+                            gap: 6,
+                            flexWrap: 'wrap',
+                          }}
+                        >
+                          <button
+                            className="button secondary small"
+                            type="button"
+                            title="Ouvrir la fiche produit Bar Team"
+                            onClick={() => {
+                              window.location.href =
+                                `/product-sheets?productId=${encodeURIComponent(
+                                  p.id
+                                )}&edit=1`
+                            }}
+                          >
+                            ℹ Info
+                          </button>
+
                           <button
                             className="button secondary small"
                             type="button"
@@ -2099,16 +2106,27 @@ export default function Products() {
               </button>
             </div>
 
-            <div style={sectionTitleStyle}>Informations produit</div>
+            <div className="productFormIntro">
+              <strong>
+                {form.id ? 'Modification du produit' : 'Création rapide'}
+              </strong>
+              <span>
+                Ouvre uniquement les sections dont tu as besoin.
+              </span>
+            </div>
 
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns:
-                  'repeat(auto-fit, minmax(250px, 1fr))',
-                gap: 18,
-              }}
-            >
+            <div className="productAccordionStack">
+              <details className="productAccordion" open>
+                <summary>
+                  <span className="accordionNumber">1</span>
+                  <span>
+                    <strong>Identification</strong>
+                    <small>Nom, photo et références</small>
+                  </span>
+                  <span className="accordionChevron">⌄</span>
+                </summary>
+
+                <div className="productAccordionGrid">
               <div
                 style={{
                   ...fieldWrapStyle,
@@ -2204,7 +2222,6 @@ export default function Products() {
                                 }}
                               >
                                 {[
-                                  product.brand,
                                   product.packaging,
                                   product.category,
                                   product.subcategory,
@@ -2405,7 +2422,21 @@ export default function Products() {
                 />
               </div>
 
-                            <div style={fieldWrapStyle}>
+                </div>
+              </details>
+
+              <details className="productAccordion" open>
+                <summary>
+                  <span className="accordionNumber">2</span>
+                  <span>
+                    <strong>Classement</strong>
+                    <small>Zone, catégorie puis sous-catégorie</small>
+                  </span>
+                  <span className="accordionChevron">⌄</span>
+                </summary>
+
+                <div className="productAccordionGrid">
+                  <div style={fieldWrapStyle}>
                 <label style={fieldLabelStyle}>Zone</label>
                 <select
                   className="input"
@@ -2559,6 +2590,20 @@ export default function Products() {
                 </button>
               </div>
 
+                </div>
+              </details>
+
+              <details className="productAccordion">
+                <summary>
+                  <span className="accordionNumber">3</span>
+                  <span>
+                    <strong>Achat & conditionnement</strong>
+                    <small>Conditionnement, prix, fournisseur et poids</small>
+                  </span>
+                  <span className="accordionChevron">⌄</span>
+                </summary>
+
+                <div className="productAccordionGrid">
               <div style={fieldWrapStyle}>
                 <label style={fieldLabelStyle}>Conditionnement</label>
                 <select
@@ -2927,15 +2972,20 @@ export default function Products() {
                   }
                 />
               </div>
-            </div>
+                </div>
+              </details>
 
-            <div
-              style={{
-                height: 1,
-                background: 'rgba(255,255,255,.12)',
-                margin: '30px 0',
-              }}
-            />
+              <details className="productAccordion stockAccordion">
+                <summary>
+                  <span className="accordionNumber">4</span>
+                  <span>
+                    <strong>Stock initial / nouvelle entrée</strong>
+                    <small>Quantité, DLUO/DLC et lieux de stockage</small>
+                  </span>
+                  <span className="accordionChevron">⌄</span>
+                </summary>
+
+                <div className="productStockAccordionContent">
 
             <div
               style={{
@@ -3567,15 +3617,44 @@ export default function Products() {
               quantités négatives sont bloquées.
             </div>
 
+                </div>
+              </details>
+            </div>
+
             <div
               style={{
                 display: 'flex',
-                justifyContent: 'flex-end',
+                justifyContent: 'space-between',
                 gap: 10,
-                marginTop: 30,
+                marginTop: 24,
                 flexWrap: 'wrap',
               }}
             >
+              {form.id && (
+                <button
+                  className="button secondary"
+                  type="button"
+                  onClick={() => {
+                    setOpen(false)
+                    window.location.href =
+                      `/product-sheets?productId=${encodeURIComponent(
+                        form.id
+                      )}&edit=1`
+                  }}
+                >
+                  ℹ Ouvrir la fiche produit
+                </button>
+              )}
+
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  gap: 10,
+                  flexWrap: 'wrap',
+                  marginLeft: 'auto',
+                }}
+              >
               {form.id && (
                 <>
                   <button
@@ -3616,10 +3695,129 @@ export default function Products() {
               <button className="button" onClick={submit}>
                 Enregistrer
               </button>
+              </div>
             </div>
           </div>
         </div>
       )}
+
+
+      <style jsx>{`
+        .productFormIntro {
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:12px;
+          margin-bottom:14px;
+          padding:12px 14px;
+          border:1px solid rgba(255,255,255,.10);
+          border-radius:12px;
+          background:rgba(255,255,255,.04);
+        }
+
+        .productFormIntro strong {
+          font-size:14px;
+          color:#fff;
+        }
+
+        .productFormIntro span {
+          font-size:11px;
+          color:#98a2b3;
+        }
+
+        .productAccordionStack {
+          display:grid;
+          gap:12px;
+        }
+
+        .productAccordion {
+          overflow:hidden;
+          border:1px solid rgba(255,255,255,.12);
+          border-radius:15px;
+          background:rgba(255,255,255,.035);
+        }
+
+        .productAccordion > summary {
+          list-style:none;
+          display:grid;
+          grid-template-columns:34px minmax(0,1fr) 24px;
+          gap:10px;
+          align-items:center;
+          min-height:64px;
+          padding:10px 14px;
+          cursor:pointer;
+          user-select:none;
+        }
+
+        .productAccordion > summary::-webkit-details-marker {
+          display:none;
+        }
+
+        .accordionNumber {
+          display:grid;
+          width:30px;
+          height:30px;
+          place-items:center;
+          border-radius:9px;
+          background:rgba(255,255,255,.10);
+          color:#fff;
+          font-size:12px;
+          font-weight:900;
+        }
+
+        .productAccordion summary strong {
+          display:block;
+          color:#fff;
+          font-size:14px;
+        }
+
+        .productAccordion summary small {
+          display:block;
+          margin-top:3px;
+          color:#98a2b3;
+          font-size:10px;
+        }
+
+        .accordionChevron {
+          color:#98a2b3;
+          font-size:15px;
+          transition:transform .15s ease;
+        }
+
+        .productAccordion[open] .accordionChevron {
+          transform:rotate(180deg);
+        }
+
+        .productAccordionGrid {
+          display:grid;
+          grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
+          gap:18px;
+          padding:0 14px 16px;
+          border-top:1px solid rgba(255,255,255,.08);
+          padding-top:16px;
+        }
+
+        .productStockAccordionContent {
+          padding:16px 14px 18px;
+          border-top:1px solid rgba(255,255,255,.08);
+        }
+
+        @media (max-width:640px) {
+          .productFormIntro {
+            align-items:flex-start;
+            flex-direction:column;
+          }
+
+          .productAccordionGrid {
+            grid-template-columns:1fr;
+          }
+
+          .productAccordion > summary {
+            grid-template-columns:30px minmax(0,1fr) 20px;
+            padding:10px;
+          }
+        }
+      `}</style>
 
       {supplierModalOpen && (
         <div
