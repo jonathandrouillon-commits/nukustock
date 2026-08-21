@@ -69,6 +69,16 @@ function buildSubcategoryQrUrl(
   return `${NUKUSTOCK_PUBLIC_URL}/scan?${params.toString()}`
 }
 
+
+function buildLocationQrUrl(location: string) {
+  const params = new URLSearchParams()
+
+  params.set('type', 'location')
+  params.set('location', location)
+
+  return `${NUKUSTOCK_PUBLIC_URL}/scan?${params.toString()}`
+}
+
 const PRODUCT_SCREEN_COLUMNS = [
   { key: 'reference', label: 'Référence' },
   { key: 'qrProduct', label: 'QR Produit', qr: true },
@@ -2161,11 +2171,59 @@ export default function Products() {
                           ) : (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                               {visibleLocations.map(([location, locationQty]) => (
-                                <div key={location} style={{ display: 'flex', gap: 6 }}>
-                                  <strong style={{ fontSize: 12 }}>{location}</strong>
-                                  <span style={{ fontSize: 11, opacity: 0.65 }}>
-                                    {locationQty} {p.unit}
-                                  </span>
+                                <div
+                                  key={location}
+                                  style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: '42px minmax(0,1fr)',
+                                    gap: 8,
+                                    alignItems: 'center',
+                                    padding: '5px 0',
+                                  }}
+                                >
+                                  <div
+                                    title={`QR lieu : ${location}`}
+                                    style={{
+                                      width: 42,
+                                      height: 42,
+                                      display: 'grid',
+                                      placeItems: 'center',
+                                      borderRadius: 8,
+                                      background: '#fff',
+                                      border: '1px solid #e5e7eb',
+                                      padding: 3,
+                                    }}
+                                  >
+                                    <QRCodeSVG
+                                      value={buildLocationQrUrl(location)}
+                                      size={34}
+                                      level="M"
+                                      marginSize={0}
+                                    />
+                                  </div>
+
+                                  <div style={{ minWidth: 0 }}>
+                                    <strong
+                                      style={{
+                                        display: 'block',
+                                        fontSize: 12,
+                                        lineHeight: 1.2,
+                                      }}
+                                    >
+                                      {location}
+                                    </strong>
+
+                                    <span
+                                      style={{
+                                        display: 'block',
+                                        marginTop: 2,
+                                        fontSize: 11,
+                                        opacity: 0.65,
+                                      }}
+                                    >
+                                      {locationQty} {p.unit}
+                                    </span>
+                                  </div>
                                 </div>
                               ))}
                               {remainingLocationCount > 0 && (
