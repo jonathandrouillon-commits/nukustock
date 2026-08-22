@@ -1187,15 +1187,31 @@ export default function Products() {
   const openEditProduct = (product: Product) => {
     setMsg('')
 
-    setProductHasExpiry(
+    const hasExpiry =
       product.hasExpiry ??
-        product.lots.some(
-          (lot) => Boolean(lot.expiry)
-        )
-    )
+      product.lots.some((lot) => Boolean(lot.expiry))
 
-    setForm(product)
-    resetStockEntry()
+    setProductHasExpiry(hasExpiry)
+
+    setForm({
+      ...product,
+      lots: [...product.lots],
+    })
+
+    // En modification, on conserve l'accès aux lieux de stockage existants.
+    // La zone de nouvelle entrée de stock reste à quantité 0 afin de ne pas
+    // modifier le stock actuel tant que l'utilisateur n'ajoute rien.
+    setGlobalQuantity(0)
+
+    const firstLot = product.lots[0]
+
+    setExpiryEntries([
+      createExpiryEntry(
+        firstLot?.location || '',
+        hasExpiry
+      ),
+    ])
+
     setDesignationFocused(false)
     setOpen(true)
   }
