@@ -195,6 +195,109 @@ async function syncProducts(products: Product[]) {
   }
 }
 
+async function syncSingleProduct(product: Product) {
+  const { data: existingRows, error: existingError } = await supabase
+    .from('products')
+    .select('id, legacy_id, internal_reference')
+    .or(
+      `legacy_id.eq.${product.id},internal_reference.eq.${product.internalRef}`
+    )
+    .limit(1)
+
+  if (existingError) throw existingError
+
+  const found: any = existingRows?.[0]
+  const dbId = found?.id || uuid()
+
+  const payload = {
+    id: dbId,
+    legacy_id: product.id,
+    internal_reference:
+      product.internalRef ||
+      `PRO-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+    supplier_reference: product.supplierRef || null,
+    name: product.name,
+    category: product.category || null,
+    subcategory: product.subcategory || null,
+    brand: product.brand || null,
+    packaging: product.packaging || null,
+    base_unit: product.unit || 'unité',
+    units_per_case: 1,
+    default_unit_cost: Math.max(0, Number(product.purchasePrice) || 0),
+    minimum_stock: Math.max(0, Number(product.minStock) || 0),
+    active: true,
+    photo_url: product.photo || null,
+    has_expiry: product.hasExpiry !== false,
+    product_type: product.productType || 'acheté',
+    price_updated_at: product.priceUpdatedAt || null,
+    main_supplier: product.mainSupplier || null,
+    zone: product.zone || null,
+    net_unit_weight_kg: Math.max(
+      0,
+      Number(product.netUnitWeightKg) || 0
+    ),
+    case_weight_kg: Math.max(
+      0,
+      Number(product.caseWeightKg) || 0
+    ),
+  }
+
+  const { error: productError } = await supabase
+    .from('products')
+    .upsert(payload, { onConflict: 'id' })
+
+  if (productError) throw productError
+
+  const { error: deleteLotsError } = await supabase
+    .from('product_lots')
+    .delete()
+    .eq('product_id', dbId)
+
+  if (deleteLotsError) throw deleteLotsError
+
+  if (product.lots.length) {
+    const { error: insertLotsError } = await supabase
+      .from('product_lots')
+      .insert(
+        product.lots.map((lot) => ({
+          id: uuid(),
+          legacy_id: lot.id,
+          product_id: dbId,
+          lot_number: lot.lotNumber || null,
+          expiry: lot.expiry || null,
+          location_name: lot.location || 'Non affecté',
+          quantity: Math.max(0, Number(lot.quantity) || 0),
+        }))
+      )
+
+    if (insertLotsError) throw insertLotsError
+  }
+}
+
+async function deactivateProducts(productIds: string[]) {
+  if (!productIds.length) return
+
+  const { data: existing, error: existingError } = await supabase
+    .from('products')
+    .select('id, legacy_id')
+    .in('legacy_id', productIds)
+
+  if (existingError) throw existingError
+
+  const dbIds = (existing || [])
+    .map((row: any) => row.id)
+    .filter(Boolean)
+
+  if (!dbIds.length) return
+
+  const { error } = await supabase
+    .from('products')
+    .update({ active: false })
+    .in('id', dbIds)
+
+  if (error) throw error
+}
+
 export function useUnifiedProducts() {
   const [items, setItems] = useState<Product[]>(() => readCache<Product[]>(PRODUCT_CACHE_KEY, []))
 
@@ -226,11 +329,47 @@ export function useUnifiedProducts() {
   }, [reload])
 
   const save = (next: Product[]) => {
+    const previous = items
+
     setItems(next)
     writeCache(PRODUCT_CACHE_KEY, next)
-    void syncProducts(next)
+
+    const previousById = new Map(
+      previous.map((product) => [product.id, product])
+    )
+
+    const nextIds = new Set(next.map((product) => product.id))
+
+    const changedProducts = next.filter((product) => {
+      const oldProduct = previousById.get(product.id)
+
+      return (
+        !oldProduct ||
+        JSON.stringify(oldProduct) !== JSON.stringify(product)
+      )
+    })
+
+    const deletedIds = previous
+      .filter((product) => !nextIds.has(product.id))
+      .map((product) => product.id)
+
+    void Promise.all([
+      ...changedProducts.map((product) =>
+        syncSingleProduct(product)
+      ),
+      deactivateProducts(deletedIds),
+    ])
       .then(() => reload())
-      .catch((error) => console.error('NukuStock save products:', error))
+      .catch((error) => {
+        console.error('NukuStock save products:', error)
+        alert(
+          `Erreur de sauvegarde Produit : ${
+            error instanceof Error
+              ? error.message
+              : 'erreur inconnue'
+          }`
+        )
+      })
   }
 
   return { items, save, reload }
