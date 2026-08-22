@@ -100,6 +100,8 @@ const navGroups: NavGroup[] = [
     items: [
       { href: '/planning-bar', label: 'Planning', icon: '▦' },
       { href: '/checklist-setup', label: 'Check List & Set Up', icon: '☑' },
+      { href: '/product-sheets', label: 'Fiches produits', icon: 'ℹ' },
+      { href: '/cocktails-guy', label: 'Cocktails de Guy', icon: '◈' },
     ],
   },
 ]
