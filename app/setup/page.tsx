@@ -2,8 +2,8 @@
 
 import { useMemo, useState, type CSSProperties } from 'react'
 import { Page, Card, Badge } from '@/components/ui'
-import { useSetups } from '@/lib/store'
-import { BarSetup, SetupItem } from '@/lib/types'
+import { useProducts, useSetups, useStockMovements } from '@/lib/store'
+import { BarSetup, SetupItem, StockMovement } from '@/lib/types'
 
 const setupLocations = [
   'Bungalow 0',
@@ -66,12 +66,18 @@ const emptyItem = (): SetupItem => ({
 
 export default function SetupPage() {
   const { items, save } = useSetups()
+  const { items: products, save: saveProducts } = useProducts()
+  const { items: stockMovements, save: saveStockMovements } = useStockMovements()
 
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState<BarSetup>(emptySetup)
   const [search, setSearch] = useState('')
   const [locationFilter, setLocationFilter] = useState('Tous')
   const [msg, setMsg] = useState('')
+  const [applyOpen, setApplyOpen] = useState(false)
+  const [applySetup, setApplySetup] = useState<BarSetup | null>(null)
+  const [applyLocations, setApplyLocations] = useState<string[]>([])
+  const [applyMode, setApplyMode] = useState<'replace' | 'add'>('replace')
 
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -250,6 +256,166 @@ export default function SetupPage() {
 
     save(items.filter((item) => item.id !== id))
     setMsg('Set Up supprimé.')
+  }
+
+  const bungalowLocations = setupLocations.filter((location) =>
+    /^Bungalow \d+$/.test(location)
+  )
+
+  const normalizeProductName = (value: string) =>
+    value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim()
+
+  const findSetupProduct = (name: string) => {
+    const target = normalizeProductName(name)
+    return products.find((product) => normalizeProductName(product.name || '') === target)
+  }
+
+  const openApplyStock = (setup: BarSetup) => {
+    const productItems = setup.items.filter(
+      (item) => item.category === 'Produit' && item.name.trim() && item.quantity > 0
+    )
+    if (!productItems.length) {
+      alert('Ajoute au moins un élément de catégorie Produit dans ce Set Up.')
+      return
+    }
+    setApplySetup(setup)
+    setApplyLocations([...bungalowLocations])
+    setApplyMode('replace')
+    setApplyOpen(true)
+  }
+
+  const toggleApplyLocation = (location: string) => {
+    setApplyLocations((current) =>
+      current.includes(location)
+        ? current.filter((item) => item !== location)
+        : [...current, location]
+    )
+  }
+
+  const applySetupToStock = () => {
+    if (!applySetup) return
+    if (!applyLocations.length) {
+      alert('Sélectionne au moins un bungalow.')
+      return
+    }
+
+    const productItems = applySetup.items.filter(
+      (item) => item.category === 'Produit' && item.name.trim() && item.quantity > 0
+    )
+
+    const resolved = productItems.map((setupItem) => ({
+      setupItem,
+      product: findSetupProduct(setupItem.name),
+    }))
+    const missing = resolved.filter((entry) => !entry.product)
+    if (missing.length) {
+      alert(
+        `Produit(s) introuvable(s) dans NukuStock :\n\n${missing
+          .map((entry) => `• ${entry.setupItem.name}`)
+          .join('\n')}\n\nCorrige le nom dans le Set Up pour qu'il corresponde exactement au produit.`
+      )
+      return
+    }
+
+    const now = new Date().toISOString()
+    const reference = `SETUP-${Date.now().toString().slice(-8)}`
+    const nextProducts = products.map((product) => ({
+      ...product,
+      lots: product.lots.map((lot) => ({ ...lot })),
+    }))
+    const movements: StockMovement[] = []
+
+    for (const entry of resolved) {
+      const product = nextProducts.find((item) => item.id === entry.product!.id)
+      if (!product) continue
+      const targetQuantity = Math.max(0, Number(entry.setupItem.quantity) || 0)
+
+      for (const location of applyLocations) {
+        const locationLots = product.lots
+          .map((lot, index) => ({ lot, index }))
+          .filter(({ lot }) => lot.location === location)
+
+        const oldTotal = locationLots.reduce(
+          (sum, { lot }) => sum + Math.max(0, Number(lot.quantity) || 0),
+          0
+        )
+
+        if (applyMode === 'replace') {
+          if (locationLots.length) {
+            const firstIndex = locationLots[0].index
+            product.lots[firstIndex] = {
+              ...product.lots[firstIndex],
+              quantity: targetQuantity,
+            }
+            for (const { index } of locationLots.slice(1)) {
+              product.lots[index] = { ...product.lots[index], quantity: 0 }
+            }
+          } else {
+            product.lots.push({
+              id: crypto.randomUUID(),
+              lotNumber: '',
+              expiry: '',
+              location,
+              quantity: targetQuantity,
+            })
+          }
+        } else {
+          if (locationLots.length) {
+            const firstIndex = locationLots[0].index
+            product.lots[firstIndex] = {
+              ...product.lots[firstIndex],
+              quantity:
+                Math.max(0, Number(product.lots[firstIndex].quantity) || 0) +
+                targetQuantity,
+            }
+          } else {
+            product.lots.push({
+              id: crypto.randomUUID(),
+              lotNumber: '',
+              expiry: '',
+              location,
+              quantity: targetQuantity,
+            })
+          }
+        }
+
+        const newTotal =
+          applyMode === 'replace' ? targetQuantity : oldTotal + targetQuantity
+        const difference = newTotal - oldTotal
+
+        if (difference !== 0) {
+          movements.push({
+            id: crypto.randomUUID(),
+            createdAt: now,
+            type: 'CORRECTION_STOCK' as StockMovement['type'],
+            productId: product.id,
+            productName: product.name,
+            internalRef: product.internalRef,
+            quantity: difference,
+            fromLocation: location,
+            toLocation: location,
+            referenceType: 'product',
+            referenceId: reference,
+            note: `Application Set Up "${applySetup.title || applySetup.location}" — ${applyMode === 'replace' ? 'remplacement' : 'ajout'} — stock ${oldTotal} → ${newTotal}`,
+            regularizationStatus: 'NON_REQUIS',
+          })
+        }
+      }
+    }
+
+    saveProducts(nextProducts)
+    if (movements.length) {
+      saveStockMovements([...movements, ...stockMovements])
+    }
+    setApplyOpen(false)
+    setMsg(
+      `Set Up appliqué à ${applyLocations.length} bungalow${applyLocations.length > 1 ? 's' : ''}.`
+    )
   }
 
   const labelStyle: CSSProperties = {
@@ -464,6 +630,13 @@ export default function SetupPage() {
               }}
             >
               <button
+                className="button small"
+                onClick={() => openApplyStock(setup)}
+              >
+                Appliquer au stock
+              </button>
+
+              <button
                 className="button secondary small"
                 onClick={() => openEdit(setup)}
               >
@@ -490,6 +663,112 @@ export default function SetupPage() {
           </Card>
         )}
       </div>
+
+      {applyOpen && applySetup && (
+        <div className="modalBackdrop">
+          <div className="modal" style={{ maxWidth: 760 }}>
+            <div className="modalHead">
+              <div>
+                <h2 style={{ marginBottom: 4 }}>Appliquer le Set Up au stock</h2>
+                <div className="muted">
+                  {applySetup.title || applySetup.location}
+                </div>
+              </div>
+              <button className="button secondary small" onClick={() => setApplyOpen(false)}>
+                Fermer
+              </button>
+            </div>
+
+            <div style={{ marginTop: 18 }}>
+              <strong>Produits du modèle</strong>
+              <div style={{ marginTop: 8, display: 'grid', gap: 6 }}>
+                {applySetup.items
+                  .filter((item) => item.category === 'Produit' && item.name.trim())
+                  .map((item) => {
+                    const matched = findSetupProduct(item.name)
+                    return (
+                      <div key={item.id} style={{
+                        display: 'flex', justifyContent: 'space-between', gap: 12,
+                        padding: '8px 10px', border: '1px solid #e5e7eb', borderRadius: 9
+                      }}>
+                        <span>{item.name}</span>
+                        <span>
+                          <strong>{item.quantity}</strong>{' '}
+                          {matched ? <span style={{ color: '#067647' }}>✓ trouvé</span> :
+                            <span style={{ color: '#b42318' }}>✗ introuvable</span>}
+                        </span>
+                      </div>
+                    )
+                  })}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                <strong>Bungalows à appliquer</strong>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="button secondary small" type="button"
+                    onClick={() => setApplyLocations([...bungalowLocations])}>
+                    Tout sélectionner
+                  </button>
+                  <button className="button secondary small" type="button"
+                    onClick={() => setApplyLocations([])}>
+                    Tout désélectionner
+                  </button>
+                </div>
+              </div>
+              <div style={{
+                display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))',
+                gap: 8, marginTop: 12
+              }}>
+                {bungalowLocations.map((location) => (
+                  <label key={location} style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: 10, border: '1px solid #e5e7eb', borderRadius: 9, cursor: 'pointer'
+                  }}>
+                    <input type="checkbox" checked={applyLocations.includes(location)}
+                      onChange={() => toggleApplyLocation(location)} />
+                    {location}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 20 }}>
+              <strong>Mode d&apos;application</strong>
+              <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
+                <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                  <input type="radio" checked={applyMode === 'replace'}
+                    onChange={() => setApplyMode('replace')} />
+                  <span><strong>Remplacer le stock actuel</strong><br/>
+                    <span className="muted">Le bungalow prendra exactement les quantités du modèle.</span>
+                  </span>
+                </label>
+                <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                  <input type="radio" checked={applyMode === 'add'}
+                    onChange={() => setApplyMode('add')} />
+                  <span><strong>Ajouter au stock actuel</strong><br/>
+                    <span className="muted">Les quantités du modèle seront ajoutées au stock déjà présent.</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div style={{
+              marginTop: 18, padding: 12, borderRadius: 10,
+              background: 'rgba(59,130,246,.08)', border: '1px solid rgba(59,130,246,.18)'
+            }}>
+              {applyLocations.length} bungalow{applyLocations.length > 1 ? 's' : ''} sélectionné{applyLocations.length > 1 ? 's' : ''}.
+              Seuls les éléments de catégorie <strong>Produit</strong> seront appliqués.
+            </div>
+
+            <div className="actions">
+              <button className="button secondary" onClick={() => setApplyOpen(false)}>Annuler</button>
+              <button className="button" onClick={applySetupToStock}>Appliquer au stock</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {open && (
         <div className="modalBackdrop">
