@@ -102,6 +102,16 @@ type StockRow = {
   expiryPriority: string
 }
 
+type StockGroup = {
+  key: string
+  product: any
+  expiry: string
+  rows: StockRow[]
+  quantity: number
+  value: number
+  lotNumbers: string[]
+}
+
 type MultiEntryLine = {
   id: string
   productId: string
@@ -386,6 +396,8 @@ export default function Stocks() {
   const [multiEntryLocationSearch, setMultiEntryLocationSearch] = useState('')
   const [multiEntryMode, setMultiEntryMode] = useState<'add' | 'replace'>('add')
   const [multiEntryTemplateName, setMultiEntryTemplateName] = useState('')
+  const [expandedStockGroups, setExpandedStockGroups] = useState<string[]>([])
+
   const [multiEntryTemplates, setMultiEntryTemplates] = useState<
     { name: string; lines: { productId: string; quantity: number }[] }[]
   >(() => {
@@ -848,6 +860,51 @@ export default function Stocks() {
       sortDirection,
     ]
   )
+
+  const groupedRows = useMemo<StockGroup[]>(() => {
+    const groups = new Map<string, StockGroup>()
+
+    filteredRows.forEach((row) => {
+      const expiry = row.lot.expiry || ''
+      const key = `${row.product.id}__${expiry}`
+      const existing = groups.get(key)
+
+      if (existing) {
+        existing.rows.push(row)
+        existing.quantity += row.quantity
+        existing.value += row.value
+
+        const lotNumber = String(row.lot.lotNumber || '').trim()
+        if (lotNumber && !existing.lotNumbers.includes(lotNumber)) {
+          existing.lotNumbers.push(lotNumber)
+        }
+
+        return
+      }
+
+      groups.set(key, {
+        key,
+        product: row.product,
+        expiry,
+        rows: [row],
+        quantity: row.quantity,
+        value: row.value,
+        lotNumbers: String(row.lot.lotNumber || '').trim()
+          ? [String(row.lot.lotNumber).trim()]
+          : [],
+      })
+    })
+
+    return [...groups.values()]
+  }, [filteredRows])
+
+  const toggleStockGroup = (key: string) => {
+    setExpandedStockGroups((current) =>
+      current.includes(key)
+        ? current.filter((item) => item !== key)
+        : [...current, key]
+    )
+  }
 
   const filteredProductIds =
     useMemo(
@@ -2727,217 +2784,401 @@ export default function Stocks() {
                   <div className="screenOnly">Action</div>
                 </div>
 
-                {filteredRows.map(({ product, lot, quantity, value }, index) => (
-                  <div
-                    key={`${product.id}-${lot.id}-${index}`}
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: cols,
-                      gap: 12,
-                      padding: '13px 0',
-                      borderTop: '1px solid rgba(255,255,255,.08)',
-                      alignItems: 'center',
-                    }}
-                  >
-                    {stockDisplay.isVisible('reference') && (
-                      <strong style={{ fontSize: 11, letterSpacing: '.03em' }}>
-                        {product.internalRef || '—'}
-                      </strong>
-                    )}
+                {groupedRows.map((group) => {
+                  const { product, quantity, value } = group
+                  const isExpanded = expandedStockGroups.includes(group.key)
+                  const locationCount = new Set(
+                    group.rows
+                      .map((row) => row.lot.location)
+                      .filter(Boolean)
+                  ).size
+                  const firstRow = group.rows[0]
+                  const firstLot = firstRow?.lot
+                  const hasMultipleRows = group.rows.length > 1
 
-                    {stockDisplay.isVisible('photo') && (
-                      <div className="screenOnly">
-                        {getProductPhoto(product) ? (
-                          <div
-                            style={{
-                              width: 64,
-                              height: 64,
-                              borderRadius: 10,
-                              background: '#fff',
-                              border: '1px solid #e5e7eb',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              overflow: 'hidden',
-                              padding: 4,
-                            }}
-                          >
-                            <img
-                              src={getProductPhoto(product)}
-                              alt={product.name || 'Produit'}
-                              loading="lazy"
-                              style={{
-                                width: '100%',
-                                height: '100%',
-                                objectFit: 'contain',
-                                display: 'block',
-                              }}
-                            />
-                          </div>
-                        ) : (
-                          <div
-                            style={{
-                              width: 64,
-                              height: 64,
-                              borderRadius: 10,
-                              border: '1px dashed #cbd5e1',
-                              display: 'grid',
-                              placeItems: 'center',
-                              fontSize: 10,
-                              opacity: 0.5,
-                            }}
-                          >
-                            PHOTO
+                  return (
+                    <div
+                      key={group.key}
+                      style={{
+                        borderTop: '1px solid rgba(255,255,255,.08)',
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: cols,
+                          gap: 12,
+                          padding: '13px 0',
+                          alignItems: 'center',
+                        }}
+                      >
+                        {stockDisplay.isVisible('reference') && (
+                          <strong style={{ fontSize: 11, letterSpacing: '.03em' }}>
+                            {product.internalRef || '—'}
+                          </strong>
+                        )}
+
+                        {stockDisplay.isVisible('photo') && (
+                          <div className="screenOnly">
+                            {getProductPhoto(product) ? (
+                              <div
+                                style={{
+                                  width: 64,
+                                  height: 64,
+                                  borderRadius: 10,
+                                  background: '#fff',
+                                  border: '1px solid #e5e7eb',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  overflow: 'hidden',
+                                  padding: 4,
+                                }}
+                              >
+                                <img
+                                  src={getProductPhoto(product)}
+                                  alt={product.name || 'Produit'}
+                                  loading="lazy"
+                                  style={{
+                                    width: '100%',
+                                    height: '100%',
+                                    objectFit: 'contain',
+                                    display: 'block',
+                                  }}
+                                />
+                              </div>
+                            ) : (
+                              <div
+                                style={{
+                                  width: 64,
+                                  height: 64,
+                                  borderRadius: 10,
+                                  border: '1px dashed #cbd5e1',
+                                  display: 'grid',
+                                  placeItems: 'center',
+                                  fontSize: 10,
+                                  opacity: 0.5,
+                                }}
+                              >
+                                PHOTO
+                              </div>
+                            )}
                           </div>
                         )}
-                      </div>
-                    )}
 
-                    {stockDisplay.isVisible('qrProduct') &&
-                      qrBox(
-                        `NUKUSTOCK|PRODUCT|${product.internalRef || product.id}`,
-                        `QR Produit ${product.internalRef || product.name}`
-                      )}
+                        {stockDisplay.isVisible('qrProduct') &&
+                          qrBox(
+                            `NUKUSTOCK|PRODUCT|${product.internalRef || product.id}`,
+                            `QR Produit ${product.internalRef || product.name}`
+                          )}
 
-                    {stockDisplay.isVisible('product') && (
-                      <div>
-                        <div style={{ fontWeight: 800 }}>{product.name}</div>
-                        <div style={{ marginTop: 3, fontSize: 11, opacity: 0.65 }}>
-                          {[product.packaging].filter(Boolean).join(' · ')}
+                        {stockDisplay.isVisible('product') && (
+                          <div>
+                            <div style={{ fontWeight: 800 }}>{product.name}</div>
+                            <div style={{ marginTop: 3, fontSize: 11, opacity: 0.65 }}>
+                              {[product.packaging].filter(Boolean).join(' · ')}
+                              {hasMultipleRows ? ` · ${locationCount} lieu${locationCount > 1 ? 'x' : ''}` : ''}
+                            </div>
+                          </div>
+                        )}
+
+                        {stockDisplay.isVisible('zone') && (
+                          <div><Badge tone="info">{detectProductZone(product)}</Badge></div>
+                        )}
+
+                        {stockDisplay.isVisible('category') && (
+                          <div>{product.category || '—'}</div>
+                        )}
+
+                        {stockDisplay.isVisible('qrCategory') &&
+                          qrBox(
+                            `NUKUSTOCK|CATEGORY|${product.category || 'Sans catégorie'}`,
+                            `QR Catégorie ${product.category || ''}`
+                          )}
+
+                        {stockDisplay.isVisible('subcategory') && (
+                          <div>{product.subcategory || '—'}</div>
+                        )}
+
+                        {stockDisplay.isVisible('qrSubcategory') &&
+                          qrBox(
+                            `NUKUSTOCK|SUBCATEGORY|${product.subcategory || 'Sans sous-catégorie'}`,
+                            `QR Sous-catégorie ${product.subcategory || ''}`
+                          )}
+
+                        {stockDisplay.isVisible('location') && (
+                          <div>
+                            {hasMultipleRows ? (
+                              <button
+                                className="button secondary small"
+                                type="button"
+                                onClick={() => toggleStockGroup(group.key)}
+                                title="Afficher le détail des lieux"
+                              >
+                                {isExpanded ? '−' : '+'} {locationCount} lieu{locationCount > 1 ? 'x' : ''}
+                              </button>
+                            ) : (
+                              firstLot?.location || 'Non affecté'
+                            )}
+                          </div>
+                        )}
+
+                        {stockDisplay.isVisible('qrLocation') && (
+                          hasMultipleRows ? (
+                            <div className="screenOnly" style={{ fontSize: 11, opacity: .65 }}>
+                              Multi-lieux
+                            </div>
+                          ) : (
+                            qrBox(
+                              `NUKUSTOCK|LOCATION|${firstLot?.location || 'Non affecté'}`,
+                              `QR Lieu ${firstLot?.location || 'Non affecté'}`
+                            )
+                          )
+                        )}
+
+                        {stockDisplay.isVisible('lot') && (
+                          <div>
+                            {group.lotNumbers.length === 0
+                              ? '—'
+                              : group.lotNumbers.length === 1
+                              ? group.lotNumbers[0]
+                              : `${group.lotNumbers.length} lots`}
+                          </div>
+                        )}
+
+                        {stockDisplay.isVisible('expiry') && (
+                          <div>
+                            {group.expiry ? (
+                              <Badge tone={getExpiryTone(group.expiry)}>
+                                {new Date(`${group.expiry}T00:00:00`).toLocaleDateString('fr-FR')}
+                              </Badge>
+                            ) : (
+                              <span style={{ opacity: 0.5, fontSize: 12 }}>Sans DLUO</span>
+                            )}
+                          </div>
+                        )}
+
+                        {stockDisplay.isVisible('quantity') && (
+                          <div>
+                            <Badge
+                              tone={
+                                quantity <= 0
+                                  ? 'danger'
+                                  : quantity < Math.max(0, Number(product.minStock) || 0)
+                                  ? 'warn'
+                                  : 'good'
+                              }
+                            >
+                              {quantity.toLocaleString('fr-FR')} {product.unit}
+                            </Badge>
+                          </div>
+                        )}
+
+                        {stockDisplay.isVisible('price') && (
+                          <div>
+                            {Math.max(0, Number(product.purchasePrice) || 0).toLocaleString('fr-FR')} XPF
+                          </div>
+                        )}
+
+                        {stockDisplay.isVisible('value') && (
+                          <div>{value.toLocaleString('fr-FR')} XPF</div>
+                        )}
+
+                        {stockDisplay.isVisible('unitWeight') && (
+                          <div style={{ fontWeight: 700 }}>
+                            {formatWeightKg(product.netUnitWeightKg)}
+                          </div>
+                        )}
+
+                        {stockDisplay.isVisible('caseWeight') && (
+                          <div style={{ fontWeight: 700 }}>
+                            {formatWeightKg(product.caseWeightKg)}
+                          </div>
+                        )}
+
+                        {stockDisplay.isVisible('totalWeight') && (
+                          <div>
+                            <strong>
+                              {formatWeightKg(
+                                quantity * Number(product.netUnitWeightKg || 0)
+                              )}
+                            </strong>
+                            {quantity > 0 && Number(product.netUnitWeightKg || 0) > 0 && (
+                              <div
+                                style={{
+                                  marginTop: 3,
+                                  fontSize: 10,
+                                  opacity: 0.6,
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                {quantity.toLocaleString('fr-FR')} × {formatWeightKg(product.netUnitWeightKg)}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        <div
+                          className="screenOnly"
+                          style={{
+                            display: 'flex',
+                            gap: 6,
+                            flexWrap: 'wrap',
+                          }}
+                        >
+                          {hasMultipleRows ? (
+                            <button
+                              className="button secondary small"
+                              type="button"
+                              onClick={() => toggleStockGroup(group.key)}
+                            >
+                              {isExpanded ? '−' : '+'} Détails
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                className="button small"
+                                type="button"
+                                disabled={quantity <= 0 || !firstLot?.location}
+                                onClick={() => openTransfer(product, firstLot, quantity)}
+                              >
+                                Transférer
+                              </button>
+                              <button
+                                className="button secondary small"
+                                type="button"
+                                disabled={!firstLot?.id || String(firstLot.id).startsWith('empty-')}
+                                onClick={() => openCorrection(product, firstLot, quantity)}
+                              >
+                                Corriger
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
-                    )}
 
-                    {stockDisplay.isVisible('zone') && (
-                      <div><Badge tone="info">{detectProductZone(product)}</Badge></div>
-                    )}
-
-                    {stockDisplay.isVisible('category') && (
-                      <div>{product.category || '—'}</div>
-                    )}
-
-                    {stockDisplay.isVisible('qrCategory') &&
-                      qrBox(
-                        `NUKUSTOCK|CATEGORY|${product.category || 'Sans catégorie'}`,
-                        `QR Catégorie ${product.category || ''}`
-                      )}
-
-                    {stockDisplay.isVisible('subcategory') && (
-                      <div>{product.subcategory || '—'}</div>
-                    )}
-
-                    {stockDisplay.isVisible('qrSubcategory') &&
-                      qrBox(
-                        `NUKUSTOCK|SUBCATEGORY|${product.subcategory || 'Sans sous-catégorie'}`,
-                        `QR Sous-catégorie ${product.subcategory || ''}`
-                      )}
-
-                    {stockDisplay.isVisible('location') && (
-                      <div>{lot.location || 'Non affecté'}</div>
-                    )}
-
-                    {stockDisplay.isVisible('qrLocation') &&
-                      qrBox(
-                        `NUKUSTOCK|LOCATION|${lot.location || 'Non affecté'}`,
-                        `QR Lieu ${lot.location || 'Non affecté'}`
-                      )}
-
-                    {stockDisplay.isVisible('lot') && (
-                      <div>{lot.lotNumber || '—'}</div>
-                    )}
-
-                    {stockDisplay.isVisible('expiry') && (
-                      <div>
-                        {lot.expiry ? (
-                          <Badge tone={getExpiryTone(lot.expiry)}>
-                            {new Date(`${lot.expiry}T00:00:00`).toLocaleDateString('fr-FR')}
-                          </Badge>
-                        ) : (
-                          <span style={{ opacity: 0.5, fontSize: 12 }}>Sans DLUO</span>
-                        )}
-                      </div>
-                    )}
-
-                    {stockDisplay.isVisible('quantity') && (
-                      <div>
-                        <Badge
-                          tone={
-                            quantity <= 0
-                              ? 'danger'
-                              : quantity < Math.max(0, Number(product.minStock) || 0)
-                              ? 'warn'
-                              : 'good'
-                          }
+                      {hasMultipleRows && isExpanded && (
+                        <div
+                          className="screenOnly"
+                          style={{
+                            margin: '0 0 14px',
+                            padding: 14,
+                            borderRadius: 12,
+                            background: '#f8fafc',
+                            border: '1px solid #e5e7eb',
+                          }}
                         >
-                          {quantity} {product.unit}
-                        </Badge>
-                      </div>
-                    )}
-
-                    {stockDisplay.isVisible('price') && (
-                      <div>
-                        {Math.max(0, Number(product.purchasePrice) || 0).toLocaleString('fr-FR')} XPF
-                      </div>
-                    )}
-
-                    {stockDisplay.isVisible('value') && (
-                      <div>{value.toLocaleString('fr-FR')} XPF</div>
-                    )}
-
-                    {stockDisplay.isVisible('unitWeight') && (
-                      <div style={{ fontWeight: 700 }}>
-                        {formatWeightKg(product.netUnitWeightKg)}
-                      </div>
-                    )}
-
-                    {stockDisplay.isVisible('caseWeight') && (
-                      <div style={{ fontWeight: 700 }}>
-                        {formatWeightKg(product.caseWeightKg)}
-                      </div>
-                    )}
-
-                    {stockDisplay.isVisible('totalWeight') && (
-                      <div>
-                        <strong>
-                          {formatWeightKg(
-                            quantity * Number(product.netUnitWeightKg || 0)
-                          )}
-                        </strong>
-                        {quantity > 0 && Number(product.netUnitWeightKg || 0) > 0 && (
                           <div
                             style={{
-                              marginTop: 3,
-                              fontSize: 10,
-                              opacity: 0.6,
-                              whiteSpace: 'nowrap',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              gap: 10,
+                              marginBottom: 10,
+                              flexWrap: 'wrap',
                             }}
                           >
-                            {quantity} × {formatWeightKg(product.netUnitWeightKg)}
+                            <strong>Détail par lieu</strong>
+                            <span style={{ fontSize: 11, color: '#667085' }}>
+                              Total : {quantity.toLocaleString('fr-FR')} {product.unit || ''}
+                            </span>
                           </div>
-                        )}
-                      </div>
-                    )}
 
-                    <div className="screenOnly" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      <button
-                        className="button small"
-                        type="button"
-                        disabled={quantity <= 0 || !lot.location}
-                        onClick={() => openTransfer(product, lot, quantity)}
-                      >
-                        Transférer
-                      </button>
-                      <button
-                        className="button secondary small"
-                        type="button"
-                        disabled={!lot?.id || String(lot.id).startsWith('empty-')}
-                        onClick={() => openCorrection(product, lot, quantity)}
-                      >
-                        Corriger
-                      </button>
+                          <div style={{ display: 'grid', gap: 8 }}>
+                            {group.rows
+                              .slice()
+                              .sort((a, b) =>
+                                String(a.lot.location || '').localeCompare(
+                                  String(b.lot.location || ''),
+                                  'fr',
+                                  { numeric: true, sensitivity: 'base' }
+                                )
+                              )
+                              .map((row) => (
+                                <div
+                                  key={row.lot.id}
+                                  style={{
+                                    display: 'grid',
+                                    gridTemplateColumns:
+                                      'minmax(160px,1fr) 120px 130px minmax(150px,auto)',
+                                    gap: 10,
+                                    alignItems: 'center',
+                                    padding: '9px 10px',
+                                    borderRadius: 10,
+                                    background: '#fff',
+                                    border: '1px solid #e5e7eb',
+                                  }}
+                                >
+                                  <div>
+                                    <div style={{ fontWeight: 800, fontSize: 12 }}>
+                                      {row.lot.location || 'Non affecté'}
+                                    </div>
+                                    {row.lot.lotNumber ? (
+                                      <div style={{ marginTop: 2, fontSize: 10, color: '#667085' }}>
+                                        Lot : {row.lot.lotNumber}
+                                      </div>
+                                    ) : null}
+                                  </div>
+
+                                  <div>
+                                    <Badge
+                                      tone={
+                                        row.quantity <= 0
+                                          ? 'danger'
+                                          : row.quantity <
+                                            Math.max(0, Number(product.minStock) || 0)
+                                          ? 'warn'
+                                          : 'good'
+                                      }
+                                    >
+                                      {row.quantity.toLocaleString('fr-FR')} {product.unit}
+                                    </Badge>
+                                  </div>
+
+                                  <div style={{ fontSize: 11 }}>
+                                    {row.value.toLocaleString('fr-FR')} XPF
+                                  </div>
+
+                                  <div
+                                    style={{
+                                      display: 'flex',
+                                      gap: 6,
+                                      justifyContent: 'flex-end',
+                                      flexWrap: 'wrap',
+                                    }}
+                                  >
+                                    <button
+                                      className="button small"
+                                      type="button"
+                                      disabled={row.quantity <= 0 || !row.lot.location}
+                                      onClick={() =>
+                                        openTransfer(product, row.lot, row.quantity)
+                                      }
+                                    >
+                                      Transférer
+                                    </button>
+                                    <button
+                                      className="button secondary small"
+                                      type="button"
+                                      disabled={
+                                        !row.lot?.id ||
+                                        String(row.lot.id).startsWith('empty-')
+                                      }
+                                      onClick={() =>
+                                        openCorrection(product, row.lot, row.quantity)
+                                      }
+                                    >
+                                      Corriger
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )
           })()}
