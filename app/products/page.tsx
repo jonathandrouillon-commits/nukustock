@@ -9,6 +9,10 @@ import { Product, Supplier, MasterDataItem } from '@/lib/types'
 import { supabase } from '@/lib/supabase'
 import { QRCodeSVG } from 'qrcode.react'
 import { ColumnVisibility, useColumnVisibility } from '@/components/column-visibility'
+import { ImportExportMenu, type ImportExportSettings } from '@/components/import-export-menu'
+import * as XLSX from 'xlsx'
+import { jsPDF } from 'jspdf'
+import { autoTable } from 'jspdf-autotable'
 
 
 const PRODUCT_REF_COUNTER_KEY = 'nukustock_product_ref_counters_v1'
@@ -111,6 +115,35 @@ const PRODUCT_SCREEN_ESSENTIAL = [
   'locations',
   'price',
   'actions',
+]
+
+const PRODUCT_EXPORT_COLUMNS = [
+  { key: 'reference', label: 'Référence' },
+  { key: 'product', label: 'Produit' },
+  { key: 'category', label: 'Catégorie' },
+  { key: 'subcategory', label: 'Sous-catégorie' },
+  { key: 'supplier', label: 'Fournisseur' },
+  { key: 'type', label: 'Type' },
+  { key: 'stock', label: 'Stock' },
+  { key: 'expiry', label: 'DLUO / DLC' },
+  { key: 'locations', label: 'Lieux' },
+  { key: 'mini', label: 'Stock mini' },
+  { key: 'price', label: 'Prix achat XPF' },
+  { key: 'unitWeight', label: 'Poids unitaire' },
+  { key: 'caseWeight', label: 'Poids conditionnement' },
+  { key: 'totalWeight', label: 'Poids total stock' },
+]
+
+const DEFAULT_PRODUCT_EXPORT_COLUMNS = [
+  'reference',
+  'product',
+  'category',
+  'subcategory',
+  'supplier',
+  'stock',
+  'expiry',
+  'locations',
+  'price',
 ]
 
 function formatWeightKg(value: number | null | undefined) {
@@ -602,11 +635,6 @@ export default function Products() {
 
   const [q, setQ] = useState('')
 
-  const [printOrientation, setPrintOrientation] =
-    useState<'portrait' | 'landscape'>('landscape')
-
-  const [printFontSize, setPrintFontSize] =
-    useState(8)
   const [msg, setMsg] = useState('')
   const [syncingProducts, setSyncingProducts] = useState(false)
   const [supplierModalOpen, setSupplierModalOpen] = useState(false)
@@ -1853,226 +1881,165 @@ export default function Products() {
     flexDirection: 'column',
   }
 
-  const printProductsGrouped = () => {
-    const sortedProducts =
-      [...shown].sort(
-        (a, b) =>
-          String(a.category || '').localeCompare(
-            String(b.category || ''),
-            'fr',
-            {
-              sensitivity: 'base',
-              numeric: true,
-            }
-          ) ||
-          String(a.subcategory || '').localeCompare(
-            String(b.subcategory || ''),
-            'fr',
-            {
-              sensitivity: 'base',
-              numeric: true,
-            }
-          ) ||
-          String(a.name || '').localeCompare(
-            String(b.name || ''),
-            'fr',
-            {
-              sensitivity: 'base',
-              numeric: true,
-            }
-          )
-      )
+  const getProductExportValue = (key: string, product: Product) => {
+    const lots = product.lots || []
+    const totalStock = lots.reduce(
+      (sum: number, lot: any) => sum + Math.max(0, Number(lot.quantity) || 0),
+      0
+    )
+    const locations = [...new Set(lots.map((lot: any) => lot.location).filter(Boolean))].join(', ')
+    const expiries = lots
+      .map((lot: any) => lot.expiry)
+      .filter(Boolean)
+      .sort()
+    const nearestExpiry = expiries[0]
+      ? new Date(`${expiries[0]}T00:00:00`).toLocaleDateString('fr-FR')
+      : 'Sans DLUO'
+    const unitWeight = Math.max(0, Number((product as any).unitWeightKg || (product as any).unitWeight || 0))
+    const caseWeight = Math.max(0, Number((product as any).caseWeightKg || (product as any).caseWeight || 0))
 
+    switch (key) {
+      case 'reference': return product.internalRef || ''
+      case 'product': return product.name || ''
+      case 'category': return product.category || ''
+      case 'subcategory': return product.subcategory || ''
+      case 'supplier': return product.mainSupplier || ''
+      case 'type': return (product as any).productType || (product as any).type || ''
+      case 'stock': return totalStock
+      case 'expiry': return nearestExpiry
+      case 'locations': return locations
+      case 'mini': return Math.max(0, Number((product as any).minStock) || 0)
+      case 'price': return Math.max(0, Number(product.purchasePrice) || 0)
+      case 'unitWeight': return unitWeight ? `${unitWeight} kg` : ''
+      case 'caseWeight': return caseWeight ? `${caseWeight} kg` : ''
+      case 'totalWeight': return unitWeight ? `${(unitWeight * totalStock).toLocaleString('fr-FR')} kg` : ''
+      default: return ''
+    }
+  }
+
+  const getProductsForExport = (scope: 'current' | 'all') =>
+    [...(scope === 'all' ? items : shown)].sort(
+      (a, b) =>
+        String(a.category || '').localeCompare(String(b.category || ''), 'fr', { sensitivity: 'base', numeric: true }) ||
+        String(a.subcategory || '').localeCompare(String(b.subcategory || ''), 'fr', { sensitivity: 'base', numeric: true }) ||
+        String(a.name || '').localeCompare(String(b.name || ''), 'fr', { sensitivity: 'base', numeric: true })
+    )
+
+  const exportProductsExcel = (settings: ImportExportSettings) => {
+    const definitions = PRODUCT_EXPORT_COLUMNS.filter((column) =>
+      settings.selectedColumns.includes(column.key)
+    )
+    const rows = getProductsForExport(settings.scope).map((product) => {
+      const output: Record<string, string | number> = {}
+      definitions.forEach((column) => {
+        output[column.label] = getProductExportValue(column.key, product) as string | number
+      })
+      return output
+    })
+    const worksheet = XLSX.utils.json_to_sheet(rows)
+    worksheet['!cols'] = definitions.map(() => ({ wch: 22 }))
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Produits')
+    XLSX.writeFile(workbook, `NukuStock-Produits-${new Date().toISOString().slice(0, 10)}.xlsx`)
+  }
+
+  const exportProductsPdf = (settings: ImportExportSettings) => {
+    const definitions = PRODUCT_EXPORT_COLUMNS.filter((column) =>
+      settings.selectedColumns.includes(column.key)
+    )
+    const products = getProductsForExport(settings.scope)
+    const doc = new jsPDF({
+      orientation: settings.orientation,
+      unit: 'mm',
+      format: settings.paperSize,
+    })
+    let startY = 12
+    if (settings.showHeader) {
+      doc.setFontSize(17)
+      doc.text('NUKUTEPIPI - NukuStock', 12, startY)
+      startY += 6
+      doc.setFontSize(12)
+      doc.text('Mercuriel produits', 12, startY)
+      startY += 5
+    }
+    if (settings.showDate) {
+      doc.setFontSize(8)
+      doc.text(`Édité le ${new Date().toLocaleDateString('fr-FR')} - ${products.length} référence(s)`, 12, startY)
+      startY += 5
+    }
+    autoTable(doc, {
+      startY: startY + 2,
+      head: [definitions.map((column) => column.label)],
+      body: products.map((product) =>
+        definitions.map((column) => String(getProductExportValue(column.key, product)))
+      ),
+      styles: {
+        fontSize: Math.max(5, settings.fontSize),
+        cellPadding: 1.4,
+        overflow: 'linebreak',
+      },
+      headStyles: { fontStyle: 'bold' },
+      margin: { left: 7, right: 7 },
+    })
+    doc.save(`NukuStock-Produits-${new Date().toISOString().slice(0, 10)}.pdf`)
+  }
+
+  const printProducts = (settings: ImportExportSettings) => {
+    const definitions = PRODUCT_EXPORT_COLUMNS.filter((column) =>
+      settings.selectedColumns.includes(column.key)
+    )
+    const products = getProductsForExport(settings.scope)
     let currentCategory = ''
     let currentSubcategory = ''
     const rows: string[] = []
 
-    for (const product of sortedProducts) {
-      const category =
-        String(
-          product.category ||
-            'Sans catégorie'
-        ).trim()
-
-      const subcategory =
-        String(
-          product.subcategory ||
-            'Sans sous-catégorie'
-        ).trim()
-
+    products.forEach((product) => {
+      const category = String(product.category || 'Sans catégorie').trim()
+      const subcategory = String(product.subcategory || 'Sans sous-catégorie').trim()
       if (category !== currentCategory) {
         currentCategory = category
         currentSubcategory = ''
-
-        rows.push(
-          `<tr class="categoryRow"><td colspan="7">${category.toUpperCase()}</td></tr>`
-        )
+        rows.push(`<tr class="categoryRow"><td colspan="${definitions.length}">${category.toUpperCase()}</td></tr>`)
       }
-
       if (subcategory !== currentSubcategory) {
         currentSubcategory = subcategory
-
-        rows.push(
-          `<tr class="subcategoryRow"><td colspan="7"><span>${subcategory}</span></td></tr>`
-        )
+        rows.push(`<tr class="subcategoryRow"><td colspan="${definitions.length}">${subcategory}</td></tr>`)
       }
+      rows.push(`<tr>${definitions.map((column) => `<td>${String(getProductExportValue(column.key, product))}</td>`).join('')}</tr>`)
+    })
 
-      const totalStock =
-        (product.lots || []).reduce(
-          (sum: number, lot: any) =>
-            sum +
-            Math.max(
-              0,
-              Number(lot.quantity) || 0
-            ),
-          0
-        )
-
-      const locations =
-        [
-          ...new Set(
-            (product.lots || [])
-              .map((lot: any) => lot.location)
-              .filter(Boolean)
-          ),
-        ].join(', ')
-
-      rows.push(
-        `<tr class="productRow">
-          <td>${product.internalRef || ''}</td>
-          <td>${product.name || ''}</td>
-          <td>${product.category || ''}</td>
-          <td>${product.subcategory || ''}</td>
-          <td>${product.mainSupplier || ''}</td>
-          <td>${totalStock}</td>
-          <td>${locations}</td>
-        </tr>`
-      )
-    }
-
-    const printWindow =
-      window.open(
-        '',
-        '_blank',
-        'width=1200,height=900'
-      )
-
+    const printWindow = window.open('', '_blank', 'width=1200,height=900')
     if (!printWindow) {
-      window.alert(
-        "Impossible d'ouvrir la fenêtre d'impression."
-      )
+      window.alert("Impossible d'ouvrir la fenêtre d'impression.")
       return
     }
-
-    printWindow.document.write(`
-      <!doctype html>
-      <html lang="fr">
-        <head>
-          <meta charset="utf-8" />
-          <title>NukuStock - Produits</title>
-          <style>
-            @page {
-              size: A4 ${printOrientation};
-              margin: 10mm;
-            }
-            * { box-sizing: border-box; }
-            body {
-              margin: 0;
-              font-family: Arial, Helvetica, sans-serif;
-              color: #111827;
-              background: #fff;
-              font-size: ${printFontSize}px;
-            }
-            .brand {
-              font-size: ${printFontSize + 10}px;
-              font-weight: 900;
-              margin-bottom: 3px;
-            }
-            .meta {
-              margin-bottom: 8mm;
-              font-size: ${Math.max(7, printFontSize - 1)}px;
-            }
-            table {
-              width: 100%;
-              border-collapse: collapse;
-            }
-            th, td {
-              border: 1px solid #cfd6df;
-              padding: 4px 5px;
-              vertical-align: top;
-            }
-            th {
-              background: #f2f4f7;
-              font-weight: 900;
-              text-align: left;
-            }
-            .categoryRow td {
-              padding: 7px 8px;
-              background: #172033;
-              color: #fff;
-              border-color: #172033;
-              font-size: ${printFontSize + 2}px;
-              font-weight: 900;
-              letter-spacing: .08em;
-            }
-            .subcategoryRow td {
-              padding: 6px 8px;
-              background: #eef2f6;
-              color: #111827;
-              font-size: ${printFontSize + 1}px;
-              font-weight: 900;
-            }
-            .subcategoryRow td span {
-              display: flex;
-              align-items: center;
-              gap: 8px;
-            }
-            .subcategoryRow td span::after {
-              content: "";
-              flex: 1;
-              border-bottom: 1px dotted #98a2b3;
-            }
-            .productRow td {
-              font-size: ${printFontSize}px;
-            }
-            tr {
-              break-inside: avoid;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="brand">NUKUTEPIPI - NukuStock</div>
-          <div class="meta">
-            Liste produits · ${sortedProducts.length} référence(s) ·
-            ${new Date().toLocaleDateString('fr-FR')}
-          </div>
-
-          <table>
-            <thead>
-              <tr>
-                <th>Référence</th>
-                <th>Produit</th>
-                <th>Catégorie</th>
-                <th>Sous-catégorie</th>
-                <th>Fournisseur</th>
-                <th>Stock</th>
-                <th>Lieux</th>
-              </tr>
-            </thead>
-            <tbody>${rows.join('')}</tbody>
-          </table>
-
-          <script>
-            window.onload = () => {
-              window.print()
-              window.onafterprint = () => window.close()
-            }
-          </script>
-        </body>
-      </html>
-    `)
-
+    const zoom = settings.scale === 'fit' ? 1 : Number(settings.scale) / 100
+    printWindow.document.write(`<!doctype html><html lang="fr"><head><meta charset="utf-8"/><title>NukuStock - Produits</title><style>
+      @page { size: ${settings.paperSize.toUpperCase()} ${settings.orientation}; margin: 10mm; }
+      *{box-sizing:border-box} body{margin:0;font-family:Arial,Helvetica,sans-serif;color:#111827;background:#fff;font-size:${settings.fontSize}px;zoom:${zoom}}
+      .brand{font-size:${settings.fontSize + 10}px;font-weight:900;margin-bottom:3px}.meta{margin-bottom:8mm;font-size:${Math.max(7, settings.fontSize - 1)}px}
+      table{width:100%;border-collapse:collapse}th,td{border:1px solid #cfd6df;padding:4px 5px;vertical-align:top}th{background:#f2f4f7;font-weight:900;text-align:left}
+      .categoryRow td{padding:7px 8px;background:#172033;color:#fff;border-color:#172033;font-size:${settings.fontSize + 2}px;font-weight:900;letter-spacing:.08em}
+      .subcategoryRow td{padding:6px 8px;background:#eef2f6;color:#111827;font-size:${settings.fontSize + 1}px;font-weight:900}tr{break-inside:avoid}
+    </style></head><body>
+      ${settings.showHeader ? '<div class="brand">NUKUTEPIPI - NukuStock</div>' : ''}
+      ${settings.showDate ? `<div class="meta">Liste produits · ${products.length} référence(s) · ${new Date().toLocaleDateString('fr-FR')}</div>` : ''}
+      <table><thead><tr>${definitions.map((column) => `<th>${column.label}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>
+      <script>window.onload=()=>{window.print();window.onafterprint=()=>window.close()}</script>
+    </body></html>`)
     printWindow.document.close()
+  }
+
+  const handleProductImportExport = async (settings: ImportExportSettings) => {
+    if (settings.format === 'excel') {
+      exportProductsExcel(settings)
+      return
+    }
+    if (settings.format === 'pdf') {
+      exportProductsPdf(settings)
+      return
+    }
+    printProducts(settings)
   }
 
   const sectionTitleStyle: CSSProperties = {
@@ -2108,65 +2075,16 @@ export default function Products() {
             essential={PRODUCT_SCREEN_ESSENTIAL}
           />
 
-          <label
-            style={{
-              display: 'grid',
-              gap: 3,
-              minWidth: 145,
-              fontSize: 9,
-              fontWeight: 800,
-              color: '#667085',
+          <ImportExportMenu
+            title="Importer / Exporter"
+            columns={PRODUCT_EXPORT_COLUMNS}
+            defaultColumns={DEFAULT_PRODUCT_EXPORT_COLUMNS}
+            allowImportExcel
+            onImportExcel={() => {
+              window.location.href = '/import'
             }}
-          >
-            FORMAT IMPRESSION
-            <select
-              className="input"
-              value={printOrientation}
-              onChange={(event) =>
-                setPrintOrientation(
-                  event.target.value as 'portrait' | 'landscape'
-                )
-              }
-            >
-              <option value="portrait">Portrait</option>
-              <option value="landscape">Paysage</option>
-            </select>
-          </label>
-
-          <label
-            style={{
-              display: 'grid',
-              gap: 3,
-              minWidth: 145,
-              fontSize: 9,
-              fontWeight: 800,
-              color: '#667085',
-            }}
-          >
-            TYPOGRAPHIE
-            <select
-              className="input"
-              value={printFontSize}
-              onChange={(event) =>
-                setPrintFontSize(
-                  Number(event.target.value) || 8
-                )
-              }
-            >
-              <option value={7}>Petite</option>
-              <option value={8}>Normale</option>
-              <option value={10}>Grande</option>
-              <option value={12}>Très grande</option>
-            </select>
-          </label>
-
-          <button
-            className="button secondary"
-            type="button"
-            onClick={printProductsGrouped}
-          >
-            Imprimer produits
-          </button>
+            onExport={handleProductImportExport}
+          />
 
           <button
             className="button secondary"

@@ -9,6 +9,7 @@ import { autoTable } from 'jspdf-autotable'
 import { QRCodeSVG } from 'qrcode.react'
 import QRCode from 'qrcode'
 import { ColumnVisibility, useColumnVisibility } from '@/components/column-visibility'
+import { ImportExportMenu, type ImportExportSettings } from '@/components/import-export-menu'
 import type { StockMovement } from '@/lib/types'
 
 type QuantityFilter =
@@ -1183,8 +1184,8 @@ export default function Stocks() {
         : ' ▼'
       : ''
 
-  const getSortedExportRows = () => {
-    const rows = [...filteredRows]
+  const getSortedExportRows = (scope: 'current' | 'all' = 'current') => {
+    const rows = [...(scope === 'all' ? allRows : filteredRows)]
 
     const compareRow = (
       a: StockRow,
@@ -1310,157 +1311,85 @@ export default function Stocks() {
       })
     )
 
-  const exportExcel = () => {
-    const rows = getExportRows()
-
-    const worksheet =
-      XLSX.utils.json_to_sheet(
-        rows
-      )
-
-    worksheet['!cols'] = [
-      { wch: 20 },
-      { wch: 32 },
-      { wch: 24 },
-      { wch: 20 },
-      { wch: 22 },
-      { wch: 18 },
-      { wch: 24 },
-      { wch: 22 },
-      { wch: 18 },
-      { wch: 16 },
-      { wch: 12 },
-      { wch: 12 },
-      { wch: 18 },
-      { wch: 18 },
-    ]
-
-    const workbook =
-      XLSX.utils.book_new()
-
-    XLSX.utils.book_append_sheet(
-      workbook,
-      worksheet,
-      'Stock disponible'
+  const exportExcel = (settings?: ImportExportSettings) => {
+    const selected = new Set(
+      settings?.selectedColumns?.length
+        ? settings.selectedColumns
+        : STOCK_PRINT_COLUMNS.map((column) => column.key)
     )
+
+    const rows = getSortedExportRows(settings?.scope || 'current').map((row) => {
+      const output: Record<string, string | number> = {}
+
+      STOCK_PRINT_COLUMNS.forEach((column) => {
+        if (!selected.has(column.key)) return
+        if (column.key.startsWith('qr')) return
+        output[column.label] = getStockPrintValue(column.key, row)
+      })
+
+      return output
+    })
+
+    const worksheet = XLSX.utils.json_to_sheet(rows)
+    worksheet['!cols'] = Object.keys(rows[0] || {}).map(() => ({ wch: 22 }))
+
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Stock disponible')
 
     XLSX.writeFile(
       workbook,
-      `NukuStock-Stock-${new Date()
-        .toISOString()
-        .slice(0, 10)}.xlsx`
+      `NukuStock-Stock-${new Date().toISOString().slice(0, 10)}.xlsx`
     )
   }
 
-  const exportPdf = () => {
+  const exportPdf = (settings?: ImportExportSettings) => {
+    const selectedDefinitions = STOCK_PRINT_COLUMNS.filter((column) =>
+      (settings?.selectedColumns?.length
+        ? settings.selectedColumns
+        : DEFAULT_STOCK_PRINT_COLUMNS
+      ).includes(column.key)
+    )
+
     const doc = new jsPDF({
-      orientation: 'landscape',
+      orientation: settings?.orientation || 'landscape',
       unit: 'mm',
-      format: 'a4',
+      format: settings?.paperSize || 'a4',
     })
 
-    doc.setFontSize(17)
-    doc.text(
-      'NUKUTEPIPI - NukuStock',
-      12,
-      13
-    )
+    let startY = 12
 
-    doc.setFontSize(12)
-    doc.text(
-      `État du stock disponible - Zone : ${zoneFilter}`,
-      12,
-      19
-    )
+    if (settings?.showHeader !== false) {
+      doc.setFontSize(17)
+      doc.text('NUKUTEPIPI - NukuStock', 12, startY)
+      startY += 6
+      doc.setFontSize(12)
+      doc.text(`État du stock disponible - Zone : ${zoneFilter}`, 12, startY)
+      startY += 5
+    }
 
-    doc.setFontSize(8)
-    doc.text(
-      `Édité le ${new Date().toLocaleDateString(
-        'fr-FR'
-      )} - ${filteredProductIds.size} référence(s) - ${totalQty.toLocaleString(
-        'fr-FR'
-      )} unité(s)`,
-      12,
-      24
-    )
+    if (settings?.showDate !== false) {
+      doc.setFontSize(8)
+      doc.text(`Édité le ${new Date().toLocaleDateString('fr-FR')}`, 12, startY)
+      startY += 5
+    }
 
     autoTable(doc, {
-      startY: 29,
-
-      head: [
-        [
-          'Référence',
-          'Produit',
-          'Catégorie',
-          'Sous-cat.',
-          'Lieu',
-          'DLUO/DLC',
-          'Disponible',
-          'Prix XPF',
-          'Valeur XPF',
-        ],
-      ],
-
-      body: getSortedExportRows().map(
-        ({
-          product,
-          lot,
-          quantity,
-          value,
-        }) => [
-          product.internalRef ||
-            '',
-          product.name || '',
-          product.category ||
-            '',
-          product.subcategory ||
-            '',
-          lot.location ||
-            'Non affecté',
-          lot.expiry
-            ? new Date(
-                `${lot.expiry}T00:00:00`
-              ).toLocaleDateString(
-                'fr-FR'
-              )
-            : 'Sans DLUO',
-          `${quantity} ${
-            product.unit || ''
-          }`,
-          Math.max(
-            0,
-            Number(
-              product.purchasePrice
-            ) || 0
-          ).toLocaleString(
-            'fr-FR'
-          ),
-          value.toLocaleString(
-            'fr-FR'
-          ),
-        ]
+      startY: startY + 2,
+      head: [selectedDefinitions.map((column) => column.label)],
+      body: getSortedExportRows(settings?.scope || 'current').map((row) =>
+        selectedDefinitions.map((column) => getStockPrintValue(column.key, row))
       ),
-
       styles: {
-        fontSize: 6.5,
+        fontSize: Math.max(5, settings?.fontSize || 8),
         cellPadding: 1.5,
         overflow: 'linebreak',
       },
-
-      headStyles: {
-        fontStyle: 'bold',
-      },
-
-      margin: {
-        left: 7,
-        right: 7,
-      },
+      headStyles: { fontStyle: 'bold' },
+      margin: { left: 7, right: 7 },
     })
 
     doc.save(
-      `NukuStock-Stock-${new Date()
-        .toISOString()
-        .slice(0, 10)}.pdf`
+      `NukuStock-Stock-${new Date().toISOString().slice(0, 10)}.pdf`
     )
   }
 
@@ -1515,8 +1444,12 @@ export default function Stocks() {
     }
   }
 
-  const printStock = async () => {
-    if (stockPrintColumns.length === 0) {
+  const printStock = async (settings?: ImportExportSettings) => {
+    const printColumns = (settings?.selectedColumns?.length
+      ? settings.selectedColumns
+      : stockPrintColumns) as StockPrintColumnKey[]
+
+    if (printColumns.length === 0) {
       window.alert(
         'Sélectionne au moins une colonne à imprimer.'
       )
@@ -1525,7 +1458,7 @@ export default function Stocks() {
 
     const selectedDefinitions =
       STOCK_PRINT_COLUMNS.filter((column) =>
-        stockPrintColumns.includes(column.key)
+        printColumns.includes(column.key)
       )
 
     const headers = selectedDefinitions
@@ -1533,7 +1466,7 @@ export default function Stocks() {
       .join('')
 
     const sortedPrintRows =
-      getSortedExportRows()
+      getSortedExportRows(settings?.scope || 'current')
 
     let currentCategory = ''
     let currentSubcategory = ''
@@ -1619,12 +1552,13 @@ export default function Stocks() {
           <title>NukuStock - Stock disponible</title>
           <style>
             @page {
-              size: A4 ${printOrientation};
+              size: ${(settings?.paperSize || 'a4').toUpperCase()} ${settings?.orientation || printOrientation};
               margin: 10mm;
             }
             * { box-sizing: border-box; }
             body {
               margin: 0;
+              zoom: ${settings?.scale && settings.scale !== 'fit' ? Number(settings.scale) / 100 : 1};
               font-family: Arial, Helvetica, sans-serif;
               color: #111;
               background: #fff;
@@ -1650,7 +1584,7 @@ export default function Stocks() {
               width: 100%;
               border-collapse: collapse;
               table-layout: auto;
-              font-size: ${printFontSize}px;
+              font-size: ${settings?.fontSize || printFontSize}px;
             }
             th, td {
               border: 1px solid #999;
@@ -1673,7 +1607,7 @@ export default function Stocks() {
               background: #172033 !important;
               color: #fff !important;
               border-color: #172033 !important;
-              font-size: ${printFontSize + 2}px !important;
+              font-size: ${(settings?.fontSize || printFontSize) + 2}px !important;
               font-weight: 900 !important;
               letter-spacing: .08em;
             }
@@ -1682,7 +1616,7 @@ export default function Stocks() {
               background: #eef2f6 !important;
               color: #111827 !important;
               border-color: #cfd6df !important;
-              font-size: ${printFontSize + 1}px !important;
+              font-size: ${(settings?.fontSize || printFontSize) + 1}px !important;
               font-weight: 900 !important;
             }
             .subcategoryRow td span {
@@ -1696,21 +1630,15 @@ export default function Stocks() {
               border-bottom: 1px dotted #98a2b3;
             }
             .productRow td {
-              font-size: ${printFontSize}px !important;
+              font-size: ${settings?.fontSize || printFontSize}px !important;
             }
           </style>
         </head>
         <body>
-          <div class="header">
-            <div class="brand">NUKUTEPIPI - NukuStock</div>
-            <div class="title">État du stock disponible</div>
-            <div class="meta">
-              Édité le ${new Date().toLocaleDateString('fr-FR')} -
-              ${filteredProductIds.size} référence(s) -
-              ${totalQty.toLocaleString('fr-FR')} unité(s)
-            </div>
-            <div class="zone">ZONE : ${zoneFilter}</div>
-          </div>
+          ${(settings?.showHeader !== false || settings?.showDate !== false) ? `<div class="header">
+            ${settings?.showHeader !== false ? `<div class="brand">NUKUTEPIPI - NukuStock</div><div class="title">État du stock disponible</div><div class="zone">ZONE : ${zoneFilter}</div>` : ''}
+            ${settings?.showDate !== false ? `<div class="meta">Édité le ${new Date().toLocaleDateString('fr-FR')}</div>` : ''}
+          </div>` : ''}
           <table>
             <thead><tr>${headers}</tr></thead>
             <tbody>${rows}</tbody>
@@ -1727,6 +1655,20 @@ export default function Stocks() {
 
     printWindow.document.close()
     setPrintColumnsOpen(false)
+  }
+
+  const handleImportExport = async (settings: ImportExportSettings) => {
+    if (settings.format === 'excel') {
+      exportExcel(settings)
+      return
+    }
+
+    if (settings.format === 'pdf') {
+      exportPdf(settings)
+      return
+    }
+
+    await printStock(settings)
   }
 
   const statBox: CSSProperties = {
@@ -1779,67 +1721,16 @@ export default function Stocks() {
             + Entrée rapide
           </button>
 
-          <label
-            style={{
-              display: 'grid',
-              gap: 3,
-              minWidth: 260,
-              fontSize: 9,
-              fontWeight: 800,
-              color: '#667085',
+          <ImportExportMenu
+            title="Importer / Exporter"
+            columns={STOCK_PRINT_COLUMNS}
+            defaultColumns={DEFAULT_STOCK_PRINT_COLUMNS}
+            allowImportExcel
+            onImportExcel={() => {
+              window.location.href = '/import'
             }}
-          >
-            TRI EXPORT / IMPRESSION
-            <select
-              className="input"
-              value={exportSortMode}
-              onChange={(event) =>
-                setExportSortMode(
-                  event.target.value as ExportSortMode
-                )
-              }
-              style={{
-                minHeight: 40,
-                padding: '0 10px',
-                fontSize: 11,
-              }}
-            >
-              {EXPORT_SORT_OPTIONS.map((option) => (
-                <option
-                  key={option.value}
-                  value={option.value}
-                >
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <button
-            className="button secondary"
-            type="button"
-            onClick={exportExcel}
-          >
-            Exporter Excel
-          </button>
-
-          <button
-            className="button secondary"
-            type="button"
-            onClick={exportPdf}
-          >
-            Exporter PDF
-          </button>
-
-          <button
-            className="button"
-            type="button"
-            onClick={() =>
-              setPrintColumnsOpen(true)
-            }
-          >
-            Imprimer le stock
-          </button>
+            onExport={handleImportExport}
+          />
         </div>
       }
     >
@@ -2876,7 +2767,7 @@ export default function Stocks() {
               <button
                 className="button"
                 type="button"
-                onClick={printStock}
+               onClick={() => void printStock()}
               >
                 Imprimer
               </button>
