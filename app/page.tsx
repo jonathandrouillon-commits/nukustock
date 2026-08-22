@@ -34,6 +34,8 @@ type DashboardVisibility = Record<
 
 const DASHBOARD_VISIBILITY_KEY =
   'nukustock_dashboard_visibility_v1'
+const DASHBOARD_LOCATION_FILTER_KEY =
+  'nukustock_dashboard_location_filter_v1'
 
 const DEFAULT_DASHBOARD_VISIBILITY:
   DashboardVisibility = {
@@ -257,6 +259,40 @@ export default function Home() {
     setDisplayOpen,
   ] = useState(false)
 
+  const [
+    locationFilterOpen,
+    setLocationFilterOpen,
+  ] = useState(false)
+
+  const [
+    selectedLocations,
+    setSelectedLocations,
+  ] = useState<string[]>([])
+
+  const [
+    locationFilterLoaded,
+    setLocationFilterLoaded,
+  ] = useState(false)
+
+  const allLocations = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          products.flatMap((product) =>
+            product.lots
+              .map((lot) => lot.location)
+              .filter(
+                (location): location is string =>
+                  Boolean(location)
+              )
+          )
+        )
+      ).sort((a, b) =>
+        a.localeCompare(b, 'fr')
+      ),
+    [products]
+  )
+
   useEffect(() => {
     try {
       const raw =
@@ -277,6 +313,90 @@ export default function Home() {
       // Garde les réglages par défaut.
     }
   }, [])
+
+  useEffect(() => {
+    if (!allLocations.length || locationFilterLoaded) {
+      return
+    }
+
+    try {
+      const raw = localStorage.getItem(
+        DASHBOARD_LOCATION_FILTER_KEY
+      )
+
+      if (raw) {
+        const parsed = JSON.parse(raw)
+
+        if (Array.isArray(parsed)) {
+          const valid = parsed.filter(
+            (location): location is string =>
+              typeof location === 'string' &&
+              allLocations.includes(location)
+          )
+
+          setSelectedLocations(valid)
+          setLocationFilterLoaded(true)
+          return
+        }
+      }
+    } catch {
+      // En cas de réglage invalide, on sélectionne tous les lieux.
+    }
+
+    setSelectedLocations(allLocations)
+    setLocationFilterLoaded(true)
+  }, [allLocations, locationFilterLoaded])
+
+  useEffect(() => {
+    if (!locationFilterLoaded) return
+
+    try {
+      localStorage.setItem(
+        DASHBOARD_LOCATION_FILTER_KEY,
+        JSON.stringify(selectedLocations)
+      )
+    } catch {
+      // Le Dashboard reste utilisable sans mémorisation locale.
+    }
+  }, [selectedLocations, locationFilterLoaded])
+
+  const selectedLocationSet = useMemo(
+    () => new Set(selectedLocations),
+    [selectedLocations]
+  )
+
+  const filteredProducts = useMemo(
+    () =>
+      products.map((product) => ({
+        ...product,
+        lots: product.lots.filter((lot) =>
+          selectedLocationSet.has(lot.location)
+        ),
+      })),
+    [products, selectedLocationSet]
+  )
+
+  const productsInSelectedLocations = useMemo(
+    () =>
+      filteredProducts.filter((product) =>
+        product.lots.some(
+          (lot) => Math.max(0, Number(lot.quantity) || 0) > 0
+        )
+      ),
+    [filteredProducts]
+  )
+
+  const allLocationsSelected =
+    allLocations.length > 0 &&
+    selectedLocations.length === allLocations.length
+
+  const toggleLocation = (location: string) => {
+    setSelectedLocations((current) =>
+      current.includes(location)
+        ? current.filter((item) => item !== location)
+        : [...current, location]
+    )
+  }
 
   const setBlockVisible = (
     key: DashboardBlockKey,
@@ -307,7 +427,7 @@ export default function Home() {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
 
-    const totalStockValue = products.reduce((sum, product) => {
+    const totalStockValue = filteredProducts.reduce((sum, product) => {
       const qty = product.lots.reduce(
         (total, lot) => total + Math.max(0, Number(lot.quantity) || 0),
         0
@@ -316,7 +436,7 @@ export default function Home() {
       return sum + qty * Math.max(0, Number(product.purchasePrice) || 0)
     }, 0)
 
-    const totalQty = products.reduce(
+    const totalQty = filteredProducts.reduce(
       (sum, product) =>
         sum +
         product.lots.reduce(
@@ -327,7 +447,7 @@ export default function Home() {
       0
     )
 
-    const lowStock = products.filter((product) => {
+    const lowStock = productsInSelectedLocations.filter((product) => {
       const qty = product.lots.reduce(
         (total, lot) =>
           total + Math.max(0, Number(lot.quantity) || 0),
@@ -340,7 +460,7 @@ export default function Home() {
     let expired = 0
     let under30Days = 0
 
-    products.forEach((product) => {
+    filteredProducts.forEach((product) => {
       product.lots.forEach((lot) => {
         if (!lot.expiry || lot.quantity <= 0) return
 
@@ -375,7 +495,7 @@ export default function Home() {
       pendingOrders,
       pendingRequests,
     }
-  }, [products, orders, requests])
+  }, [filteredProducts, productsInSelectedLocations, orders, requests])
 
   const latestInventory = useMemo(() => {
     return [...inventories].sort(
@@ -561,7 +681,7 @@ export default function Home() {
   const byLocation = useMemo(() => {
     const locations = Array.from(
       new Set(
-        products.flatMap((product) =>
+        filteredProducts.flatMap((product) =>
           product.lots
             .map((lot) => lot.location)
             .filter(Boolean)
@@ -571,7 +691,7 @@ export default function Home() {
 
     return locations
       .map((location) => {
-        const rows = products.flatMap((product) =>
+        const rows = filteredProducts.flatMap((product) =>
           product.lots
             .filter((lot) => lot.location === location)
             .map((lot) => ({ product, lot }))
@@ -609,13 +729,13 @@ export default function Home() {
         (a, b) =>
           b.value - a.value
       )
-  }, [products])
+  }, [filteredProducts])
 
 
   const stockByCategory = useMemo(() => {
     const map = new Map<string, number>()
 
-    products.forEach((product) => {
+    filteredProducts.forEach((product) => {
       const category = product.category || 'Sans catégorie'
       const value = product.lots.reduce(
         (sum, lot) =>
@@ -632,7 +752,7 @@ export default function Home() {
       .filter((item) => item.value > 0)
       .sort((a, b) => b.value - a.value)
       .slice(0, 8)
-  }, [products])
+  }, [filteredProducts])
 
   const expiryChart = useMemo(() => {
     const today = new Date()
@@ -646,7 +766,7 @@ export default function Home() {
       overYear: 0,
     }
 
-    products.forEach((product) => {
+    filteredProducts.forEach((product) => {
       product.lots.forEach((lot) => {
         const qty = Math.max(0, Number(lot.quantity) || 0)
         if (!lot.expiry || qty <= 0) return
@@ -671,7 +791,7 @@ export default function Home() {
       { label: '6–12 mois', value: buckets.sixToTwelve, color: '#84cc16' },
       { label: '+ 1 an', value: buckets.overYear, color: '#16a34a' },
     ]
-  }, [products])
+  }, [filteredProducts])
 
   const movement30Days = useMemo(() => {
     const now = new Date()
@@ -921,7 +1041,7 @@ export default function Home() {
     ).length
 
   const activeLots =
-    products.reduce(
+    filteredProducts.reduce(
       (sum, product) =>
         sum +
         product.lots.length,
@@ -942,122 +1062,231 @@ export default function Home() {
       action={
         <div
           style={{
-            position: 'relative',
+            display: 'flex',
+            gap: 8,
+            flexWrap: 'wrap',
+            justifyContent: 'flex-end',
           }}
         >
-          <button
-            className="button secondary"
-            type="button"
-            onClick={() =>
-              setDisplayOpen(
-                (current) =>
-                  !current
-              )
-            }
-          >
-            Affichage
-          </button>
-
-          {displayOpen && (
-            <div
-              style={{
-                position:
-                  'absolute',
-                top:
-                  'calc(100% + 8px)',
-                right: 0,
-                width: 300,
-                zIndex: 50,
-                padding: 14,
-                border:
-                  '1px solid #e5e7eb',
-                borderRadius: 14,
-                background: '#fff',
-                boxShadow:
-                  '0 18px 50px rgba(16,24,40,.16)',
+          <div style={{ position: 'relative' }}>
+            <button
+              className="button secondary"
+              type="button"
+              onClick={() => {
+                setLocationFilterOpen((current) => !current)
+                setDisplayOpen(false)
               }}
             >
+              Chiffrage · {selectedLocations.length}/{allLocations.length}
+            </button>
+
+            {locationFilterOpen && (
               <div
                 style={{
-                  fontSize: 12,
-                  fontWeight: 900,
-                  marginBottom: 10,
+                  position: 'absolute',
+                  top: 'calc(100% + 8px)',
+                  right: 0,
+                  width: 340,
+                  maxWidth: 'calc(100vw - 32px)',
+                  zIndex: 60,
+                  padding: 14,
+                  border: '1px solid #e5e7eb',
+                  borderRadius: 14,
+                  background: '#fff',
+                  boxShadow: '0 18px 50px rgba(16,24,40,.16)',
                 }}
               >
-                Blocs du Dashboard
-              </div>
-
-              {(
-                Object.keys(
-                  DASHBOARD_BLOCK_LABELS
-                ) as DashboardBlockKey[]
-              ).map((key) => (
-                <label
-                  key={key}
+                <div
                   style={{
-                    display: 'flex',
-                    alignItems:
-                      'center',
-                    gap: 9,
-                    padding:
-                      '7px 0',
-                    cursor:
-                      'pointer',
                     fontSize: 12,
+                    fontWeight: 900,
+                    marginBottom: 4,
                   }}
                 >
-                  <input
-                    type="checkbox"
-                    checked={
-                      dashboardVisibility[
-                        key
-                      ]
-                    }
-                    onChange={(
-                      event
-                    ) =>
-                      setBlockVisible(
-                        key,
-                        event.target
-                          .checked
-                      )
-                    }
-                  />
+                  Lieux inclus dans le chiffrage
+                </div>
 
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: '#667085',
+                    marginBottom: 10,
+                  }}
+                >
+                  Les valeurs, quantités, alertes stock et graphiques utilisent uniquement les lieux cochés.
+                </div>
+
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    gap: 8,
+                    marginBottom: 10,
+                  }}
+                >
+                  <button
+                    className="button secondary small"
+                    type="button"
+                    onClick={() => setSelectedLocations(allLocations)}
+                  >
+                    Tout sélectionner
+                  </button>
+
+                  <button
+                    className="button secondary small"
+                    type="button"
+                    onClick={() => setSelectedLocations([])}
+                  >
+                    Tout désélectionner
+                  </button>
+                </div>
+
+                <div
+                  style={{
+                    maxHeight: 330,
+                    overflowY: 'auto',
+                    paddingRight: 4,
+                    borderTop: '1px solid #f2f4f7',
+                    borderBottom: '1px solid #f2f4f7',
+                  }}
+                >
+                  {allLocations.map((location) => (
+                    <label
+                      key={location}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: 9,
+                        padding: '9px 2px',
+                        cursor: 'pointer',
+                        fontSize: 12,
+                        borderBottom: '1px solid #f8fafc',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedLocationSet.has(location)}
+                        onChange={() => toggleLocation(location)}
+                        style={{ marginTop: 2 }}
+                      />
+                      <span>{location}</span>
+                    </label>
+                  ))}
+
+                  {allLocations.length === 0 && (
+                    <div className="muted" style={{ padding: '12px 0' }}>
+                      Aucun lieu de stockage disponible.
+                    </div>
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    gap: 10,
+                    marginTop: 10,
+                    fontSize: 11,
+                    color: '#667085',
+                  }}
+                >
                   <span>
-                    {
-                      DASHBOARD_BLOCK_LABELS[
-                        key
-                      ]
-                    }
+                    {selectedLocations.length} lieu
+                    {selectedLocations.length > 1 ? 'x' : ''} sélectionné
+                    {selectedLocations.length > 1 ? 's' : ''}
                   </span>
-                </label>
-              ))}
+                  <strong style={{ color: '#101828' }}>
+                    {stats.totalStockValue.toLocaleString('fr-FR')} XPF
+                  </strong>
+                </div>
+              </div>
+            )}
+          </div>
 
-              <button
-                className="button secondary small"
-                type="button"
-                onClick={() => {
-                  setDashboardVisibility(
-                    DEFAULT_DASHBOARD_VISIBILITY
-                  )
+          <div style={{ position: 'relative' }}>
+            <button
+              className="button secondary"
+              type="button"
+              onClick={() => {
+                setDisplayOpen((current) => !current)
+                setLocationFilterOpen(false)
+              }}
+            >
+              Affichage
+            </button>
 
-                  localStorage.setItem(
-                    DASHBOARD_VISIBILITY_KEY,
-                    JSON.stringify(
-                      DEFAULT_DASHBOARD_VISIBILITY
-                    )
-                  )
-                }}
+            {displayOpen && (
+              <div
                 style={{
-                  marginTop: 8,
-                  width: '100%',
+                  position: 'absolute',
+                  top: 'calc(100% + 8px)',
+                  right: 0,
+                  width: 300,
+                  zIndex: 50,
+                  padding: 14,
+                  border: '1px solid #e5e7eb',
+                  borderRadius: 14,
+                  background: '#fff',
+                  boxShadow: '0 18px 50px rgba(16,24,40,.16)',
                 }}
               >
-                Tout afficher
-              </button>
-            </div>
-          )}
+                <div
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 900,
+                    marginBottom: 10,
+                  }}
+                >
+                  Blocs du Dashboard
+                </div>
+
+                {(
+                  Object.keys(
+                    DASHBOARD_BLOCK_LABELS
+                  ) as DashboardBlockKey[]
+                ).map((key) => (
+                  <label
+                    key={key}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 9,
+                      padding: '7px 0',
+                      cursor: 'pointer',
+                      fontSize: 12,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={dashboardVisibility[key]}
+                      onChange={(event) =>
+                        setBlockVisible(key, event.target.checked)
+                      }
+                    />
+                    <span>{DASHBOARD_BLOCK_LABELS[key]}</span>
+                  </label>
+                ))}
+
+                <button
+                  className="button secondary small"
+                  type="button"
+                  onClick={() => {
+                    setDashboardVisibility(DEFAULT_DASHBOARD_VISIBILITY)
+                    localStorage.setItem(
+                      DASHBOARD_VISIBILITY_KEY,
+                      JSON.stringify(DEFAULT_DASHBOARD_VISIBILITY)
+                    )
+                  }}
+                  style={{
+                    marginTop: 8,
+                    width: '100%',
+                  }}
+                >
+                  Tout afficher
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       }
     >
@@ -1123,7 +1352,9 @@ export default function Home() {
                 color: '#98a2b3',
               }}
             >
-              Tous les lieux
+              {allLocationsSelected
+                ? 'Tous les lieux'
+                : `${selectedLocations.length} lieu${selectedLocations.length > 1 ? 'x' : ''} sélectionné${selectedLocations.length > 1 ? 's' : ''}`}
             </div>
           </div>
 
@@ -1368,7 +1599,7 @@ export default function Home() {
               marginTop: 7,
             }}
           >
-            {products.length}
+            {productsInSelectedLocations.length}
           </div>
         </div>
 
