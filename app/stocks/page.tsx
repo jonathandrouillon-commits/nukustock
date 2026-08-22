@@ -364,6 +364,12 @@ export default function Stocks() {
   const [transferFromLocation, setTransferFromLocation] = useState('')
   const [transferToLocation, setTransferToLocation] = useState('')
   const [transferQuantity, setTransferQuantity] = useState(1)
+  const [correctionOpen, setCorrectionOpen] = useState(false)
+  const [correctionProductId, setCorrectionProductId] = useState('')
+  const [correctionLotId, setCorrectionLotId] = useState('')
+  const [correctionQuantity, setCorrectionQuantity] = useState(0)
+  const [correctionReason, setCorrectionReason] = useState('Erreur de saisie')
+  const [correctionNote, setCorrectionNote] = useState('')
 
 
   const toggleStockPrintColumn = (
@@ -1145,6 +1151,61 @@ export default function Stocks() {
     window.alert(
       `Transfert effectué : ${quantity} ${product.unit || ''} de ${product.name} vers ${transferToLocation}.`
     )
+  }
+
+  const openCorrection = (product: any, lot: any, quantity: number) => {
+    if (!lot?.id || String(lot.id).startsWith('empty-')) return
+    setCorrectionProductId(product.id)
+    setCorrectionLotId(lot.id)
+    setCorrectionQuantity(Math.max(0, Number(quantity) || 0))
+    setCorrectionReason('Erreur de saisie')
+    setCorrectionNote('')
+    setCorrectionOpen(true)
+  }
+
+  const saveCorrection = () => {
+    const product = items.find((item) => item.id === correctionProductId)
+    if (!product) return window.alert('Produit introuvable.')
+    const lotIndex = product.lots.findIndex((lot) => lot.id === correctionLotId)
+    if (lotIndex < 0) return window.alert('Ligne de stock introuvable.')
+
+    const newQuantity = Number(correctionQuantity)
+    if (!Number.isFinite(newQuantity) || newQuantity < 0)
+      return window.alert('La nouvelle quantité doit être supérieure ou égale à 0.')
+
+    const sourceLot = product.lots[lotIndex]
+    const oldQuantity = Math.max(0, Number(sourceLot.quantity) || 0)
+    if (newQuantity === oldQuantity) return window.alert('La quantité est identique au stock actuel.')
+
+    const nextLots = product.lots.map((lot) => ({ ...lot }))
+    nextLots[lotIndex] = { ...nextLots[lotIndex], quantity: newQuantity }
+
+    saveProducts(items.map((item) =>
+      item.id === product.id ? { ...item, lots: nextLots } : item
+    ))
+
+    const difference = newQuantity - oldQuantity
+    const movement: StockMovement = {
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      type: 'CORRECTION_STOCK' as StockMovement['type'],
+      productId: product.id,
+      productName: product.name,
+      internalRef: product.internalRef,
+      quantity: difference,
+      fromLocation: sourceLot.location || undefined,
+      toLocation: sourceLot.location || undefined,
+      lotNumber: sourceLot.lotNumber || undefined,
+      expiry: sourceLot.expiry || undefined,
+      referenceType: 'product',
+      referenceId: `COR-${Date.now().toString().slice(-8)}`,
+      note: `Correction manuelle : ${correctionReason}. Stock ${oldQuantity} → ${newQuantity}.${correctionNote.trim() ? ` ${correctionNote.trim()}` : ''}`,
+      specialNote: correctionNote.trim() || undefined,
+      regularizationStatus: 'NON_REQUIS',
+    }
+    saveStockMovements([movement, ...stockMovements])
+    setCorrectionOpen(false)
+    window.alert(`Stock corrigé : ${oldQuantity} → ${newQuantity} ${product.unit || ''}.`)
   }
 
   const resetFilters = () => {
@@ -2515,7 +2576,7 @@ export default function Stocks() {
                       </div>
                     )}
 
-                    <div className="screenOnly">
+                    <div className="screenOnly" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       <button
                         className="button small"
                         type="button"
@@ -2523,6 +2584,14 @@ export default function Stocks() {
                         onClick={() => openTransfer(product, lot, quantity)}
                       >
                         Transférer
+                      </button>
+                      <button
+                        className="button secondary small"
+                        type="button"
+                        disabled={!lot?.id || String(lot.id).startsWith('empty-')}
+                        onClick={() => openCorrection(product, lot, quantity)}
+                      >
+                        Corriger
                       </button>
                     </div>
                   </div>
@@ -2776,6 +2845,55 @@ export default function Stocks() {
         </div>
       )}
 
+
+      {correctionOpen && (() => {
+        const product = items.find((item) => item.id === correctionProductId)
+        const lot = product?.lots.find((item) => item.id === correctionLotId)
+        const currentQuantity = Math.max(0, Number(lot?.quantity) || 0)
+        const difference = Number(correctionQuantity || 0) - currentQuantity
+        return (
+          <div className="screenOnly" style={{ position:'fixed', inset:0, zIndex:1500, background:'rgba(15,23,42,.65)', display:'grid', placeItems:'center', padding:18 }}
+            onMouseDown={(event) => { if (event.currentTarget === event.target) setCorrectionOpen(false) }}>
+            <div style={{ width:'min(600px,100%)', maxHeight:'92vh', overflowY:'auto', background:'#fff', color:'#101828', borderRadius:18, padding:24, boxShadow:'0 25px 80px rgba(0,0,0,.30)' }}>
+              <h2 style={{ margin:0 }}>Correction manuelle du stock</h2>
+              <div style={{ marginTop:6, color:'#667085', fontSize:13 }}>Pour corriger une erreur ou un écart constaté.</div>
+              <div style={{ marginTop:18, padding:14, borderRadius:12, background:'#f8fafc', border:'1px solid #e5e7eb', lineHeight:1.7 }}>
+                <strong>Produit :</strong> {product?.name || '—'}<br/>
+                <strong>Lieu :</strong> {lot?.location || 'Non affecté'}<br/>
+                <strong>Stock actuel :</strong> {currentQuantity} {product?.unit || ''}
+                {lot?.expiry ? <><br/><strong>DLUO / DLC :</strong> {new Date(`${lot.expiry}T00:00:00`).toLocaleDateString('fr-FR')}</> : null}
+                {lot?.lotNumber ? <><br/><strong>Lot :</strong> {lot.lotNumber}</> : null}
+              </div>
+              <div style={{ display:'grid', gap:14, marginTop:18 }}>
+                <label style={{ display:'grid', gap:6, fontSize:12, fontWeight:800 }}>
+                  Nouvelle quantité
+                  <input className="input" type="number" min="0" step="0.01" value={correctionQuantity}
+                    onChange={(e)=>setCorrectionQuantity(Math.max(0,Number(e.target.value)||0))}/>
+                  <span style={{ color:difference===0?'#667085':difference>0?'#067647':'#b42318' }}>
+                    Écart : {difference>0?'+':''}{difference.toLocaleString('fr-FR')} {product?.unit || ''}
+                  </span>
+                </label>
+                <label style={{ display:'grid', gap:6, fontSize:12, fontWeight:800 }}>
+                  Motif
+                  <select className="input" value={correctionReason} onChange={(e)=>setCorrectionReason(e.target.value)}>
+                    <option>Erreur de saisie</option><option>Casse</option><option>Perte</option>
+                    <option>Produit périmé</option><option>Correction inventaire</option><option>Autre</option>
+                  </select>
+                </label>
+                <label style={{ display:'grid', gap:6, fontSize:12, fontWeight:800 }}>
+                  Commentaire (facultatif)
+                  <textarea className="input" style={{ minHeight:90, paddingTop:10 }} value={correctionNote}
+                    onChange={(e)=>setCorrectionNote(e.target.value)} placeholder="Précision sur la correction..."/>
+                </label>
+              </div>
+              <div style={{ display:'flex', justifyContent:'flex-end', gap:10, marginTop:22 }}>
+                <button className="button secondary" type="button" onClick={()=>setCorrectionOpen(false)}>Annuler</button>
+                <button className="button" type="button" onClick={saveCorrection}>Valider la correction</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {transferOpen && (() => {
         const product = items.find((item) => item.id === transferProductId)
