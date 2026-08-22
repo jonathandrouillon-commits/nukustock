@@ -102,6 +102,12 @@ type StockRow = {
   expiryPriority: string
 }
 
+type MultiEntryLine = {
+  id: string
+  productId: string
+  quantity: number
+}
+
 type StockPrintColumnKey =
   | 'qrProduct'
   | 'qrCategory'
@@ -370,6 +376,25 @@ export default function Stocks() {
   const [correctionQuantity, setCorrectionQuantity] = useState(0)
   const [correctionReason, setCorrectionReason] = useState('Erreur de saisie')
   const [correctionNote, setCorrectionNote] = useState('')
+
+  const [multiEntryOpen, setMultiEntryOpen] = useState(false)
+  const [multiEntryLines, setMultiEntryLines] = useState<MultiEntryLine[]>([
+    { id: crypto.randomUUID(), productId: '', quantity: 1 },
+  ])
+  const [multiEntryLocations, setMultiEntryLocations] = useState<string[]>([])
+  const [multiEntryLocationSearch, setMultiEntryLocationSearch] = useState('')
+  const [multiEntryMode, setMultiEntryMode] = useState<'add' | 'replace'>('add')
+  const [multiEntryTemplateName, setMultiEntryTemplateName] = useState('')
+  const [multiEntryTemplates, setMultiEntryTemplates] = useState<
+    { name: string; lines: { productId: string; quantity: number }[] }[]
+  >(() => {
+    if (typeof window === 'undefined') return []
+    try {
+      return JSON.parse(localStorage.getItem('nukustock_multi_entry_templates_v1') || '[]')
+    } catch {
+      return []
+    }
+  })
 
 
   const toggleStockPrintColumn = (
@@ -1208,6 +1233,283 @@ export default function Stocks() {
     window.alert(`Stock corrigé : ${oldQuantity} → ${newQuantity} ${product.unit || ''}.`)
   }
 
+  const resetMultiEntry = () => {
+    setMultiEntryLines([
+      { id: crypto.randomUUID(), productId: '', quantity: 1 },
+    ])
+    setMultiEntryLocations([])
+    setMultiEntryLocationSearch('')
+    setMultiEntryMode('add')
+    setMultiEntryTemplateName('')
+  }
+
+  const addMultiEntryLine = () => {
+    setMultiEntryLines((current) => [
+      ...current,
+      { id: crypto.randomUUID(), productId: '', quantity: 1 },
+    ])
+  }
+
+  const updateMultiEntryLine = (
+    id: string,
+    patch: Partial<MultiEntryLine>
+  ) => {
+    setMultiEntryLines((current) =>
+      current.map((line) =>
+        line.id === id ? { ...line, ...patch } : line
+      )
+    )
+  }
+
+  const removeMultiEntryLine = (id: string) => {
+    setMultiEntryLines((current) =>
+      current.length <= 1
+        ? current
+        : current.filter((line) => line.id !== id)
+    )
+  }
+
+  const toggleMultiEntryLocation = (location: string) => {
+    setMultiEntryLocations((current) =>
+      current.includes(location)
+        ? current.filter((item) => item !== location)
+        : [...current, location]
+    )
+  }
+
+  const saveMultiEntryTemplate = () => {
+    const name = multiEntryTemplateName.trim()
+    if (!name) {
+      window.alert('Donne un nom au modèle.')
+      return
+    }
+
+    const lines = multiEntryLines
+      .filter((line) => line.productId && Number(line.quantity) > 0)
+      .map((line) => ({
+        productId: line.productId,
+        quantity: Math.max(0, Number(line.quantity) || 0),
+      }))
+
+    if (!lines.length) {
+      window.alert('Ajoute au moins un produit au modèle.')
+      return
+    }
+
+    const next = [
+      ...multiEntryTemplates.filter(
+        (template) =>
+          template.name.trim().toLowerCase() !== name.toLowerCase()
+      ),
+      { name, lines },
+    ].sort((a, b) => a.name.localeCompare(b.name, 'fr'))
+
+    setMultiEntryTemplates(next)
+    localStorage.setItem(
+      'nukustock_multi_entry_templates_v1',
+      JSON.stringify(next)
+    )
+    window.alert(`Modèle "${name}" enregistré.`)
+  }
+
+  const loadMultiEntryTemplate = (name: string) => {
+    const template = multiEntryTemplates.find(
+      (item) => item.name === name
+    )
+    if (!template) return
+
+    setMultiEntryTemplateName(template.name)
+    setMultiEntryLines(
+      template.lines.map((line) => ({
+        id: crypto.randomUUID(),
+        productId: line.productId,
+        quantity: line.quantity,
+      }))
+    )
+  }
+
+  const deleteMultiEntryTemplate = () => {
+    const name = multiEntryTemplateName.trim()
+    if (!name) return
+
+    const template = multiEntryTemplates.find(
+      (item) => item.name === name
+    )
+    if (!template) return
+
+    if (!window.confirm(`Supprimer le modèle "${name}" ?`)) return
+
+    const next = multiEntryTemplates.filter(
+      (item) => item.name !== name
+    )
+    setMultiEntryTemplates(next)
+    localStorage.setItem(
+      'nukustock_multi_entry_templates_v1',
+      JSON.stringify(next)
+    )
+    setMultiEntryTemplateName('')
+  }
+
+  const saveMultiEntry = () => {
+    const validLines = multiEntryLines.filter(
+      (line) => line.productId && Number(line.quantity) > 0
+    )
+
+    if (!validLines.length) {
+      window.alert('Ajoute au moins un produit avec une quantité supérieure à 0.')
+      return
+    }
+
+    if (!multiEntryLocations.length) {
+      window.alert('Sélectionne au moins un lieu de stockage.')
+      return
+    }
+
+    const duplicateProductIds = validLines
+      .map((line) => line.productId)
+      .filter(
+        (productId, index, array) =>
+          array.indexOf(productId) !== index
+      )
+
+    if (duplicateProductIds.length) {
+      window.alert(
+        'Un même produit apparaît plusieurs fois. Regroupe-le sur une seule ligne.'
+      )
+      return
+    }
+
+    const nextProducts = items.map((product) => ({
+      ...product,
+      lots: product.lots.map((lot) => ({ ...lot })),
+    }))
+
+    const reference = `MULTI-${Date.now().toString().slice(-8)}`
+    const createdAt = new Date().toISOString()
+    const createdMovements: StockMovement[] = []
+
+    for (const line of validLines) {
+      const product = nextProducts.find(
+        (item) => item.id === line.productId
+      )
+      if (!product) continue
+
+      const requestedQuantity = Math.max(
+        0,
+        Number(line.quantity) || 0
+      )
+
+      for (const location of multiEntryLocations) {
+        const indexes = product.lots
+          .map((lot, index) => ({ lot, index }))
+          .filter(({ lot }) => lot.location === location)
+
+        const oldQuantity = indexes.reduce(
+          (sum, { lot }) =>
+            sum + Math.max(0, Number(lot.quantity) || 0),
+          0
+        )
+
+        let newQuantity = oldQuantity
+
+        if (multiEntryMode === 'add') {
+          if (indexes.length) {
+            const firstIndex = indexes[0].index
+            product.lots[firstIndex] = {
+              ...product.lots[firstIndex],
+              quantity:
+                Math.max(
+                  0,
+                  Number(product.lots[firstIndex].quantity) || 0
+                ) + requestedQuantity,
+            }
+          } else {
+            product.lots.push({
+              id: crypto.randomUUID(),
+              lotNumber: '',
+              expiry: '',
+              location,
+              quantity: requestedQuantity,
+            })
+          }
+
+          newQuantity = oldQuantity + requestedQuantity
+        } else {
+          if (indexes.length) {
+            const firstIndex = indexes[0].index
+            product.lots[firstIndex] = {
+              ...product.lots[firstIndex],
+              quantity: requestedQuantity,
+            }
+
+            indexes.slice(1).forEach(({ index }) => {
+              product.lots[index] = {
+                ...product.lots[index],
+                quantity: 0,
+              }
+            })
+          } else {
+            product.lots.push({
+              id: crypto.randomUUID(),
+              lotNumber: '',
+              expiry: '',
+              location,
+              quantity: requestedQuantity,
+            })
+          }
+
+          newQuantity = requestedQuantity
+        }
+
+        const difference = newQuantity - oldQuantity
+
+        if (difference !== 0) {
+          createdMovements.push({
+            id: crypto.randomUUID(),
+            createdAt,
+            type:
+              multiEntryMode === 'add'
+                ? 'ENTREE_PRODUIT'
+                : ('CORRECTION_STOCK' as StockMovement['type']),
+            productId: product.id,
+            productName: product.name,
+            internalRef: product.internalRef,
+            quantity: difference,
+            toLocation: location,
+            fromLocation:
+              multiEntryMode === 'replace'
+                ? location
+                : undefined,
+            referenceType: 'product',
+            referenceId: reference,
+            note:
+              multiEntryMode === 'add'
+                ? `Ajout rapide multi-produits vers ${location}`
+                : `Remplacement rapide multi-produits ${location} : ${oldQuantity} → ${newQuantity}`,
+            regularizationStatus: 'NON_REQUIS',
+          })
+        }
+      }
+    }
+
+    saveProducts(nextProducts)
+
+    if (createdMovements.length) {
+      saveStockMovements([
+        ...createdMovements,
+        ...stockMovements,
+      ])
+    }
+
+    setMultiEntryOpen(false)
+
+    window.alert(
+      `Opération terminée : ${validLines.length} produit(s) appliqué(s) à ${multiEntryLocations.length} lieu(x).`
+    )
+
+    resetMultiEntry()
+  }
+
   const resetFilters = () => {
     setSearch('')
     setCategoryFilter('Toutes')
@@ -1780,6 +2082,17 @@ export default function Stocks() {
             }}
           >
             + Entrée rapide
+          </button>
+
+          <button
+            className="button"
+            type="button"
+            onClick={() => {
+              resetMultiEntry()
+              setMultiEntryOpen(true)
+            }}
+          >
+            + Ajout rapide multi-produits
           </button>
 
           <ImportExportMenu
@@ -2845,6 +3158,572 @@ export default function Stocks() {
         </div>
       )}
 
+
+      {multiEntryOpen && (
+        <div
+          className="screenOnly"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1600,
+            background: 'rgba(15,23,42,.68)',
+            display: 'grid',
+            placeItems: 'center',
+            padding: 18,
+          }}
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) {
+              setMultiEntryOpen(false)
+            }
+          }}
+        >
+          <div
+            style={{
+              width: 'min(980px,100%)',
+              maxHeight: '94vh',
+              overflowY: 'auto',
+              background: '#fff',
+              color: '#101828',
+              borderRadius: 18,
+              padding: 24,
+              boxShadow: '0 25px 80px rgba(0,0,0,.30)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                gap: 12,
+                flexWrap: 'wrap',
+              }}
+            >
+              <div>
+                <h2 style={{ margin: 0 }}>
+                  Ajout rapide multi-produits
+                </h2>
+                <div
+                  style={{
+                    marginTop: 5,
+                    color: '#667085',
+                    fontSize: 12,
+                  }}
+                >
+                  Prépare une fiche, sélectionne un ou plusieurs lieux, puis ajoute ou remplace le stock en une seule opération.
+                </div>
+              </div>
+
+              <button
+                className="button secondary small"
+                type="button"
+                onClick={() => setMultiEntryOpen(false)}
+              >
+                Fermer
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns:
+                  'repeat(auto-fit,minmax(220px,1fr))',
+                gap: 12,
+                marginTop: 20,
+              }}
+            >
+              <div>
+                <label
+                  style={{
+                    display: 'block',
+                    marginBottom: 6,
+                    fontSize: 12,
+                    fontWeight: 800,
+                  }}
+                >
+                  Modèle enregistré
+                </label>
+                <select
+                  className="input"
+                  style={{ width: '100%' }}
+                  value={
+                    multiEntryTemplates.some(
+                      (template) =>
+                        template.name === multiEntryTemplateName
+                    )
+                      ? multiEntryTemplateName
+                      : ''
+                  }
+                  onChange={(event) => {
+                    if (event.target.value) {
+                      loadMultiEntryTemplate(
+                        event.target.value
+                      )
+                    }
+                  }}
+                >
+                  <option value="">
+                    Choisir un modèle
+                  </option>
+                  {multiEntryTemplates.map((template) => (
+                    <option
+                      key={template.name}
+                      value={template.name}
+                    >
+                      {template.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label
+                  style={{
+                    display: 'block',
+                    marginBottom: 6,
+                    fontSize: 12,
+                    fontWeight: 800,
+                  }}
+                >
+                  Nom du modèle
+                </label>
+                <input
+                  className="input"
+                  style={{ width: '100%' }}
+                  value={multiEntryTemplateName}
+                  onChange={(event) =>
+                    setMultiEntryTemplateName(
+                      event.target.value
+                    )
+                  }
+                  placeholder="Ex. Minibar Bungalow standard"
+                />
+              </div>
+
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 8,
+                  alignItems: 'end',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <button
+                  className="button secondary small"
+                  type="button"
+                  onClick={saveMultiEntryTemplate}
+                >
+                  Enregistrer modèle
+                </button>
+
+                <button
+                  className="button secondary small"
+                  type="button"
+                  disabled={
+                    !multiEntryTemplates.some(
+                      (template) =>
+                        template.name ===
+                        multiEntryTemplateName
+                    )
+                  }
+                  onClick={deleteMultiEntryTemplate}
+                >
+                  Supprimer modèle
+                </button>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 24 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 10,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <h3 style={{ margin: 0 }}>
+                  Produits
+                </h3>
+                <button
+                  className="button secondary small"
+                  type="button"
+                  onClick={addMultiEntryLine}
+                >
+                  + Ajouter produit
+                </button>
+              </div>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gap: 9,
+                  marginTop: 12,
+                }}
+              >
+                {multiEntryLines.map((line) => (
+                  <div
+                    key={line.id}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns:
+                        'minmax(220px,1fr) 120px 90px',
+                      gap: 9,
+                      alignItems: 'end',
+                    }}
+                  >
+                    <div>
+                      <label
+                        style={{
+                          display: 'block',
+                          marginBottom: 5,
+                          fontSize: 11,
+                          fontWeight: 800,
+                        }}
+                      >
+                        Produit
+                      </label>
+                      <select
+                        className="input"
+                        style={{ width: '100%' }}
+                        value={line.productId}
+                        onChange={(event) =>
+                          updateMultiEntryLine(
+                            line.id,
+                            {
+                              productId:
+                                event.target.value,
+                            }
+                          )
+                        }
+                      >
+                        <option value="">
+                          Choisir un produit
+                        </option>
+                        {[...items]
+                          .sort((a, b) =>
+                            a.name.localeCompare(
+                              b.name,
+                              'fr'
+                            )
+                          )
+                          .map((product) => (
+                            <option
+                              key={product.id}
+                              value={product.id}
+                            >
+                              {product.internalRef
+                                ? `${product.internalRef} · `
+                                : ''}
+                              {product.name}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label
+                        style={{
+                          display: 'block',
+                          marginBottom: 5,
+                          fontSize: 11,
+                          fontWeight: 800,
+                        }}
+                      >
+                        Quantité / lieu
+                      </label>
+                      <input
+                        className="input"
+                        style={{ width: '100%' }}
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={line.quantity}
+                        onChange={(event) =>
+                          updateMultiEntryLine(
+                            line.id,
+                            {
+                              quantity: Math.max(
+                                0,
+                                Number(
+                                  event.target.value
+                                ) || 0
+                              ),
+                            }
+                          )
+                        }
+                      />
+                    </div>
+
+                    <button
+                      className="button secondary small"
+                      type="button"
+                      disabled={
+                        multiEntryLines.length <= 1
+                      }
+                      onClick={() =>
+                        removeMultiEntryLine(line.id)
+                      }
+                    >
+                      Retirer
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 24 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  gap: 10,
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                }}
+              >
+                <h3 style={{ margin: 0 }}>
+                  Lieux de destination
+                </h3>
+
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: 8,
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <button
+                    className="button secondary small"
+                    type="button"
+                    onClick={() =>
+                      setMultiEntryLocations([
+                        ...quickEntryLocations,
+                      ])
+                    }
+                  >
+                    Tout sélectionner
+                  </button>
+                  <button
+                    className="button secondary small"
+                    type="button"
+                    onClick={() =>
+                      setMultiEntryLocations([])
+                    }
+                  >
+                    Tout désélectionner
+                  </button>
+                </div>
+              </div>
+
+              <input
+                className="input"
+                style={{
+                  width: '100%',
+                  marginTop: 12,
+                }}
+                value={multiEntryLocationSearch}
+                onChange={(event) =>
+                  setMultiEntryLocationSearch(
+                    event.target.value
+                  )
+                }
+                placeholder="Rechercher un lieu..."
+              />
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns:
+                    'repeat(auto-fit,minmax(170px,1fr))',
+                  gap: 8,
+                  marginTop: 10,
+                }}
+              >
+                {quickEntryLocations
+                  .filter((location) =>
+                    location
+                      .toLowerCase()
+                      .includes(
+                        multiEntryLocationSearch
+                          .trim()
+                          .toLowerCase()
+                      )
+                  )
+                  .map((location) => (
+                    <label
+                      key={location}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: 10,
+                        border:
+                          '1px solid #e5e7eb',
+                        borderRadius: 10,
+                        cursor: 'pointer',
+                        fontSize: 12,
+                        fontWeight: 700,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={multiEntryLocations.includes(
+                          location
+                        )}
+                        onChange={() =>
+                          toggleMultiEntryLocation(
+                            location
+                          )
+                        }
+                      />
+                      {location}
+                    </label>
+                  ))}
+              </div>
+
+              <div
+                style={{
+                  marginTop: 10,
+                  fontSize: 12,
+                  color: '#667085',
+                }}
+              >
+                {multiEntryLocations.length} lieu
+                {multiEntryLocations.length > 1
+                  ? 'x'
+                  : ''}{' '}
+                sélectionné
+                {multiEntryLocations.length > 1
+                  ? 's'
+                  : ''}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 24 }}>
+              <h3 style={{ margin: 0 }}>
+                Mode d&apos;application
+              </h3>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gap: 10,
+                  marginTop: 10,
+                }}
+              >
+                <label
+                  style={{
+                    display: 'flex',
+                    gap: 9,
+                    alignItems: 'flex-start',
+                  }}
+                >
+                  <input
+                    type="radio"
+                    checked={multiEntryMode === 'add'}
+                    onChange={() =>
+                      setMultiEntryMode('add')
+                    }
+                  />
+                  <span>
+                    <strong>
+                      Ajouter au stock actuel
+                    </strong>
+                    <span
+                      style={{
+                        display: 'block',
+                        marginTop: 2,
+                        color: '#667085',
+                        fontSize: 11,
+                      }}
+                    >
+                      Exemple : stock 2 + modèle 2 = stock 4.
+                    </span>
+                  </span>
+                </label>
+
+                <label
+                  style={{
+                    display: 'flex',
+                    gap: 9,
+                    alignItems: 'flex-start',
+                  }}
+                >
+                  <input
+                    type="radio"
+                    checked={
+                      multiEntryMode === 'replace'
+                    }
+                    onChange={() =>
+                      setMultiEntryMode('replace')
+                    }
+                  />
+                  <span>
+                    <strong>
+                      Remplacer le stock actuel
+                    </strong>
+                    <span
+                      style={{
+                        display: 'block',
+                        marginTop: 2,
+                        color: '#667085',
+                        fontSize: 11,
+                      }}
+                    >
+                      Exemple : le modèle indique 2, le stock du lieu devient exactement 2.
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div
+              style={{
+                marginTop: 20,
+                padding: 13,
+                borderRadius: 12,
+                background:
+                  'rgba(59,130,246,.08)',
+                border:
+                  '1px solid rgba(59,130,246,.18)',
+                fontSize: 12,
+                lineHeight: 1.5,
+              }}
+            >
+              Une seule validation applique chaque quantité à chacun des lieux sélectionnés. L&apos;opération est enregistrée dans Mouvements avec une référence MULTI commune.
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: 10,
+                marginTop: 22,
+                flexWrap: 'wrap',
+              }}
+            >
+              <button
+                className="button secondary"
+                type="button"
+                onClick={() =>
+                  setMultiEntryOpen(false)
+                }
+              >
+                Annuler
+              </button>
+
+              <button
+                className="button"
+                type="button"
+                onClick={saveMultiEntry}
+              >
+                Valider l&apos;opération
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {correctionOpen && (() => {
         const product = items.find((item) => item.id === correctionProductId)
