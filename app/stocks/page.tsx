@@ -106,6 +106,7 @@ type MultiEntryLine = {
   id: string
   productId: string
   quantity: number
+  query: string
 }
 
 type StockPrintColumnKey =
@@ -379,7 +380,7 @@ export default function Stocks() {
 
   const [multiEntryOpen, setMultiEntryOpen] = useState(false)
   const [multiEntryLines, setMultiEntryLines] = useState<MultiEntryLine[]>([
-    { id: crypto.randomUUID(), productId: '', quantity: 1 },
+    { id: crypto.randomUUID(), productId: '', quantity: 1, query: '' },
   ])
   const [multiEntryLocations, setMultiEntryLocations] = useState<string[]>([])
   const [multiEntryLocationSearch, setMultiEntryLocationSearch] = useState('')
@@ -1235,7 +1236,7 @@ export default function Stocks() {
 
   const resetMultiEntry = () => {
     setMultiEntryLines([
-      { id: crypto.randomUUID(), productId: '', quantity: 1 },
+      { id: crypto.randomUUID(), productId: '', quantity: 1, query: '' },
     ])
     setMultiEntryLocations([])
     setMultiEntryLocationSearch('')
@@ -1246,7 +1247,7 @@ export default function Stocks() {
   const addMultiEntryLine = () => {
     setMultiEntryLines((current) => [
       ...current,
-      { id: crypto.randomUUID(), productId: '', quantity: 1 },
+      { id: crypto.randomUUID(), productId: '', quantity: 1, query: '' },
     ])
   }
 
@@ -1320,11 +1321,15 @@ export default function Stocks() {
 
     setMultiEntryTemplateName(template.name)
     setMultiEntryLines(
-      template.lines.map((line) => ({
-        id: crypto.randomUUID(),
-        productId: line.productId,
-        quantity: line.quantity,
-      }))
+      template.lines.map((line) => {
+        const product = items.find((item) => item.id === line.productId)
+        return {
+          id: crypto.randomUUID(),
+          productId: line.productId,
+          quantity: line.quantity,
+          query: product?.name || '',
+        }
+      })
     )
   }
 
@@ -1348,6 +1353,30 @@ export default function Stocks() {
       JSON.stringify(next)
     )
     setMultiEntryTemplateName('')
+  }
+
+  const getMultiEntrySuggestions = (line: MultiEntryLine) => {
+    const query = line.query.trim().toLowerCase()
+
+    if (!query) return []
+
+    return items
+      .filter((product) => {
+        const haystack = [
+          product.name,
+          product.internalRef,
+          product.brand,
+          product.category,
+          product.subcategory,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+
+        return haystack.includes(query)
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, 'fr'))
+      .slice(0, 8)
   }
 
   const saveMultiEntry = () => {
@@ -3372,7 +3401,7 @@ export default function Stocks() {
                       alignItems: 'end',
                     }}
                   >
-                    <div>
+                    <div style={{ position: 'relative' }}>
                       <label
                         style={{
                           display: 'block',
@@ -3383,42 +3412,128 @@ export default function Stocks() {
                       >
                         Produit
                       </label>
-                      <select
+
+                      <input
                         className="input"
                         style={{ width: '100%' }}
-                        value={line.productId}
-                        onChange={(event) =>
-                          updateMultiEntryLine(
-                            line.id,
-                            {
-                              productId:
-                                event.target.value,
-                            }
+                        value={line.query}
+                        placeholder="Tape ex. coc, hin, rotui..."
+                        autoComplete="off"
+                        onChange={(event) => {
+                          const value = event.target.value
+                          const selectedProduct = items.find(
+                            (product) => product.id === line.productId
                           )
-                        }
-                      >
-                        <option value="">
-                          Choisir un produit
-                        </option>
-                        {[...items]
-                          .sort((a, b) =>
-                            a.name.localeCompare(
-                              b.name,
-                              'fr'
-                            )
-                          )
-                          .map((product) => (
-                            <option
-                              key={product.id}
-                              value={product.id}
-                            >
-                              {product.internalRef
-                                ? `${product.internalRef} · `
-                                : ''}
-                              {product.name}
-                            </option>
-                          ))}
-                      </select>
+
+                          updateMultiEntryLine(line.id, {
+                            query: value,
+                            productId:
+                              selectedProduct &&
+                              selectedProduct.name === value
+                                ? line.productId
+                                : '',
+                          })
+                        }}
+                      />
+
+                      {line.query.trim() &&
+                        (!line.productId ||
+                          items.find(
+                            (product) => product.id === line.productId
+                          )?.name !== line.query) && (
+                          <div
+                            style={{
+                              position: 'absolute',
+                              left: 0,
+                              right: 0,
+                              top: 'calc(100% + 4px)',
+                              zIndex: 30,
+                              maxHeight: 260,
+                              overflowY: 'auto',
+                              background: '#fff',
+                              border: '1px solid #d0d5dd',
+                              borderRadius: 10,
+                              boxShadow:
+                                '0 14px 35px rgba(16,24,40,.16)',
+                            }}
+                          >
+                            {getMultiEntrySuggestions(line).length ? (
+                              getMultiEntrySuggestions(line).map(
+                                (product) => (
+                                  <button
+                                    key={product.id}
+                                    type="button"
+                                    onMouseDown={(event) => {
+                                      event.preventDefault()
+                                      updateMultiEntryLine(line.id, {
+                                        productId: product.id,
+                                        query: product.name,
+                                      })
+                                    }}
+                                    style={{
+                                      width: '100%',
+                                      border: 0,
+                                      borderBottom:
+                                        '1px solid #f2f4f7',
+                                      background: '#fff',
+                                      padding: '10px 12px',
+                                      textAlign: 'left',
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    <div
+                                      style={{
+                                        fontWeight: 800,
+                                        fontSize: 12,
+                                      }}
+                                    >
+                                      {product.name}
+                                    </div>
+                                    <div
+                                      style={{
+                                        marginTop: 2,
+                                        color: '#667085',
+                                        fontSize: 10,
+                                      }}
+                                    >
+                                      {[
+                                        product.internalRef,
+                                        product.brand,
+                                        product.category,
+                                        product.subcategory,
+                                      ]
+                                        .filter(Boolean)
+                                        .join(' · ')}
+                                    </div>
+                                  </button>
+                                )
+                              )
+                            ) : (
+                              <div
+                                style={{
+                                  padding: 12,
+                                  color: '#667085',
+                                  fontSize: 12,
+                                }}
+                              >
+                                Aucun produit trouvé.
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                      {line.productId && (
+                        <div
+                          style={{
+                            marginTop: 5,
+                            color: '#067647',
+                            fontSize: 10,
+                            fontWeight: 800,
+                          }}
+                        >
+                          Produit sélectionné
+                        </div>
+                      )}
                     </div>
 
                     <div>
